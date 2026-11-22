@@ -115,6 +115,23 @@ for (const file of tsFiles) {
   const src = raw.replace(/[A-Za-z0-9_$.]*\.?t\(\s*(['"])((?:\\.|(?!\1)[^\\\r\n])*)\1/g, '""');
   // Blank out block comments so their prose is not reported.
   const scanned = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+  // Lookup tables hold the English key and translate it where they are used,
+  // e.g. `const SMS_FORMATS = { ip: 'ETSI IP' }` followed by `t(SMS_FORMATS[k])`.
+  // Their values are keys, not untranslated text.
+  const TABLE_KEYS = /\b(SMS_FORMATS|DATA_SUBS|CSBK_NAMES|UNKNOWN_NAMES|UNDELIVERABLE_WORDS|UNDELIVERABLE_TARGETS|FORMAT_LABEL_KEYS|SAP_NAME_KEYS)\b/;
+  // Mark the body of those tables so their entries are skipped.
+  const tableBody = new Set();
+  const tableRe = new RegExp(
+    String.raw`(?:const|let)\s+(${TABLE_KEYS.source})\s*(?::[^=]+)?=\s*\{`,
+    'g'
+  );
+  let tm;
+  while ((tm = tableRe.exec(scanned)) !== null) {
+    const start = tm.index + tm[0].length;
+    const end = scanned.indexOf('};', start);
+    if (end < 0) continue;
+    for (let i = start; i < end; i++) tableBody.add(i);
+  }
   const rel = path.relative(root, file);
   const re = /'([^'\\\n]{4,120})'|"([^"\\\n]{4,120})"/g;
   let m;
@@ -129,6 +146,8 @@ for (const file of tsFiles) {
     if (!/\s/.test(v.trim())) continue;
     // Must look like prose: start with a capital letter and read as a sentence.
     if (!/^[A-Z0-9"'(\[]/.test(v.trim())) continue;
+    // Skip the body of lookup tables: those hold translation keys.
+    if (tableBody.has(m.index)) continue;
     // Ignore matches inside comments and debug logging.
     const lineStart = scanned.lastIndexOf('\n', m.index) + 1;
     const lineText = scanned.slice(lineStart, m.index);

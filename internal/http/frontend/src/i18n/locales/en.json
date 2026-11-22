@@ -1578,5 +1578,7 @@
   "Motorola CPS": "Motorola CPS",
   "The basemap status names no archive": "The basemap status names no archive",
   "The basemap status answered {status}": "The basemap status answered {status}",
-  "Basemap part {part} answered {status}": "Basemap part {part} answered {status}"
+  "Basemap part {part} answered {status}": "Basemap part {part} answered {status}",
+  "IP": "IP",
+  "Proprietary": "Proprietary"
 }

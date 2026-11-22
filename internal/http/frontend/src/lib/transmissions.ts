@@ -96,7 +96,8 @@ export type UndeliverableEntry = {
 const CONTROL_KINDS = ['udt', 'mbc', 'idle', 'usbd'];
 const IDLE_KINDS = ['idle', 'usbd'];
 
-const SAP_NAMES: Record<number, string> = {
+// Keys only; sapName() translates them where they are used.
+const SAP_NAME_KEYS: Record<number, string> = {
   0: 'UDT',
   2: 'TCP/IP',
   3: 'UDP/IP',
@@ -105,6 +106,11 @@ const SAP_NAMES: Record<number, string> = {
   9: 'Proprietary',
   10: 'Short data',
 };
+
+function sapName(sap: number): string {
+  const key = SAP_NAME_KEYS[sap];
+  return key ? t(key) : '';
+}
 
 const SMS_FORMATS: Record<string, string> = {
   ip: 'ETSI IP',
@@ -304,7 +310,7 @@ function hasSize(row: CallRow): boolean {
 function smsLines(row: CallRow): string[] {
   const sap = row.sap ?? null;
   const format = t(SMS_FORMATS[row.data_format || ''] || 'Text');
-  const sub = sap === null ? format : `${format} · SAP ${SAP_NAMES[sap] || 'SAP'} (${sap})`;
+  const sub = sap === null ? format : `${format} · SAP ${sapName(sap) || 'SAP'} (${sap})`;
   const resp = row.confirmed
     ? i18n.global.t('Confirmed, {response}', { response: responseName(row) })
     : t('Unconfirmed');
@@ -318,7 +324,7 @@ function dataLines(row: CallRow): string[] {
   const lines: string[] = [];
   const sap = row.sap ?? null;
   if (sap !== null) {
-    let sub = `SAP ${sap} ${SAP_NAMES[sap] || ''}`.trim();
+    let sub = `SAP ${sap} ${sapName(sap)}`.trim();
     const extra = DATA_SUBS[row.sub_kind || ''];
     if (extra) {
       sub += ` · ${extra}`;

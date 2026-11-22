@@ -1578,5 +1578,7 @@
   "Motorola CPS": "Motorola CPS（摩托罗拉编程软件）",
   "The basemap status names no archive": "底图状态未指定归档。",
   "The basemap status answered {status}": "底图状态返回 {status}。",
-  "Basemap part {part} answered {status}": "底图分片 {part} 返回 {status}。"
+  "Basemap part {part} answered {status}": "底图分片 {part} 返回 {status}。",
+  "IP": "IP（网际协议）",
+  "Proprietary": "厂商私有"
 }
