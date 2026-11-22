@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 env:
-  OP_VERSION: 23.05.6
+  OP_VERSION: 24.10.8
   OP_TARGET: x86/64
   GO_VERSION: '1.27.3'
   NODE_VERSION: '26.13.0'
@@ -138,19 +138,23 @@ jobs:
           cp files/usr/sbin/dmrhub-ota "$TMP/data/usr/sbin/dmrhub-ota"
           (cd "$TMP/data" && tar -czf ../data.tar.gz .)
           (cd "$TMP/control" && tar -czf ../control.tar.gz .)
-          (cd "$TMP" && ar r "$GITHUB_WORKSPACE/artifacts/$IPK_NAME" debian-binary control.tar.gz data.tar.gz)
+          # OpenWrt ipk = gzip-compressed tar, NOT Debian ar archive.
+          mkdir -p "$TMP/pkg"
+          cp "$TMP/debian-binary" "$TMP/control.tar.gz" "$TMP/data.tar.gz" "$TMP/pkg/"
+          (cd "$TMP/pkg" && tar -czf "$GITHUB_WORKSPACE/artifacts/$IPK_NAME" .)
           echo "IPK_NAME=$IPK_NAME" >> "$GITHUB_ENV"
+          file "$GITHUB_WORKSPACE/artifacts/$IPK_NAME"
           ls -lh "$GITHUB_WORKSPACE/artifacts/$IPK_NAME"
 
       # ---- Build full firmware image with ImageBuilder ----
       - name: Download OpenWrt ImageBuilder
         run: |
           set -eu
-          IB="openwrt-imagebuilder-${OP_VERSION}-x86-64.Linux-x86_64.tar.xz"
+          IB="openwrt-imagebuilder-${OP_VERSION}-x86-64.Linux-x86_64.tar.zst"
           URL="https://downloads.openwrt.org/releases/${OP_VERSION}/targets/${OP_TARGET}/${IB}"
           echo "Downloading $URL"
           curl -fsSL --retry 3 "$URL" -o "$IB"
-          tar -xJf "$IB"
+          tar --zstd -xf "$IB"
           echo "$PWD/openwrt-imagebuilder-${OP_VERSION}-x86-64.Linux-x86_64" > /tmp/ib_dir
 
       - name: Build firmware image with DMRHub preinstalled
@@ -185,11 +189,9 @@ jobs:
           echo "==> repositories.conf:"; cat repositories.conf
           # Base set: LuCI web UI (Chinese) + DMRHub + certs
           PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates"
-          echo "==> make image PACKAGES=$PACKAGES"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" || {
-            echo "==> First attempt failed; retrying minimal set"
-            make image PROFILE="generic" PACKAGES="dmrhub luci luci-base luci-i18n-base-zh-cn ca-certificates"
-          }
+          # DMRHub binary is ~80MB; enlarge rootfs partition so it fits.
+          echo "==> make image PACKAGES=$PACKAGES ROOTFS_PARTSIZE=512"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" ROOTFS_PARTSIZE=512
           ls -lh bin/targets/x86/64/*.img.gz
 
       - name: Collect firmware artifacts
@@ -201,7 +203,7 @@ jobs:
             IMG=$(ls "$IB_DIR"/bin/targets/x86/64/*.img.gz 2>/dev/null | head -1 || true)
           fi
           [ -n "$IMG" ] || { echo "No firmware image produced!"; exit 1; }
-          FW_NAME="openwrt-23.05.6-x86-64-dmrhub-${{ steps.ver.outputs.build_tag }}-squashfs-combined.img.gz"
+          FW_NAME="openwrt-${OP_VERSION}-x86-64-dmrhub-${{ steps.ver.outputs.build_tag }}-squashfs-combined.img.gz"
           cp "$IMG" "artifacts/$FW_NAME"
           echo "FW_NAME=$FW_NAME" >> "$GITHUB_ENV"
           cd artifacts
