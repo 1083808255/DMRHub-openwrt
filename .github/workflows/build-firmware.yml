@@ -92,6 +92,13 @@ jobs:
           go generate ./internal/plugins/builtin/...
           ls -lh internal/plugins/builtin/builtin.wasm.zst
 
+      - name: Generate msgp serialization code
+        run: |
+          # Tarball source has no *_gen.go; msgp code is required to compile.
+          go generate ./internal/db/models/...
+          echo "==> generated files:"
+          ls internal/db/models/*_gen.go
+
       # ---- Go backend (amd64 static binary) ----
       - name: Build DMRHub amd64 static binary
         run: |
