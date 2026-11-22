@@ -114,6 +114,7 @@ jobs:
         run: |
           set -eu
           PKG=openwrt/dmrhub
+          mkdir -p "$PKG/files/usr/bin" "$PKG/files/usr/sbin"
           cp artifacts/dmrhub "$PKG/files/usr/bin/dmrhub"
           chmod +x "$PKG/files/etc/init.d/dmrhub" "$PKG/files/etc/uci-defaults/99-dmrhub" "$PKG/files/usr/sbin/dmrhub-ota"
           chmod +x "$PKG/files/usr/bin/dmrhub"
