@@ -8,7 +8,7 @@ GitHub Actions（`.github/workflows/build-firmware.yml`）每次运行产出：
 
 | 文件 | 说明 |
 |---|---|
-| `openwrt-24.10.8-x86-64-dmrhub-*-squashfs-combined.img.gz` | 整机固件，预装 DMRHub，sysupgrade 直接刷 |
+| `openwrt-23.05.6-x86-64-dmrhub-*-squashfs-combined.img.gz` | 整机固件，预装 DMRHub，sysupgrade 直接刷 |
 | `dmrhub_1.3.31-zh1_x86_64.ipk` | DMRHub 应用包，可单独 opkg 更新 |
 | `version.json` | OTA 清单 |
 | `checksums.sha256` | 校验和 |
@@ -21,7 +21,7 @@ GitHub Actions（`.github/workflows/build-firmware.yml`）每次运行产出：
 2. **WASM 插件**：TinyGo 0.43.0，`go generate ./internal/plugins/builtin/...` 生成 `builtin.wasm.zst`
 3. **后端**：Go 1.27.3，`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build`，静态二进制
 4. **ipk**：手工打包 `debian-binary + control.tar.gz + data.tar.gz` 为 ar 归档
-5. **固件**：OpenWrt 24.10.8 x86/64 ImageBuilder，`make image` 集成 ipk + LuCI 中文
+5. **固件**：OpenWrt 23.05.6 x86/64 ImageBuilder，`make image` 集成 ipk + LuCI 中文
 
 ## 汉化如何跟随上游
 
