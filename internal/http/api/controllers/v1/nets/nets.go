@@ -1,0 +1,513 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package nets
+
+import (
+	"encoding/csv"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/netscheduler"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/apimodels"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/middleware"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/utils"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+)
+
+const (
+	msgTryAgainLater      = "Try again later"
+	netsKey               = "nets"
+	msgInvalidID          = "Invalid id"
+	msgNetNotFound        = "Net not found"
+	msgInvalidRequestBody = "Invalid request body"
+	errorKey              = "error"
+	totalKey              = "total"
+)
+
+// GETNets lists nets with optional filtering by talkgroup_id and active status.
+func GETNets(c *gin.Context) {
+	db, ok := utils.GetPaginatedDB(c)
+	if !ok {
+		return
+	}
+	cDb, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+
+	const queryTrue = "true"
+
+	tgIDStr := c.Query("talkgroup_id")
+	activeStr := c.Query("active")
+	showcaseStr := c.Query("showcase")
+
+	var nets []models.Net
+	var count int
+	var err error
+
+	switch {
+	case showcaseStr == queryTrue:
+		nets, err = models.ListShowcaseNets(db)
+		if err != nil {
+			slog.Error("Failed to list showcase nets", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+		count = len(nets)
+	case tgIDStr != "":
+		tgID, parseErr := strconv.ParseUint(tgIDStr, 10, 32)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Invalid talkgroup_id"})
+			return
+		}
+		if activeStr == queryTrue {
+			net, findErr := models.FindActiveNetForTalkgroup(cDb, uint(tgID))
+			if findErr != nil {
+				if errors.Is(findErr, gorm.ErrRecordNotFound) {
+					c.JSON(http.StatusOK, gin.H{netsKey: []any{}, totalKey: 0})
+					return
+				}
+				slog.Error("Failed to find active net", "error", findErr)
+				c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+				return
+			}
+			checkIns := countCheckInsForNet(cDb, &net)
+			c.JSON(http.StatusOK, gin.H{
+				netsKey:  []apimodels.NetResponse{apimodels.NewNetResponseFromNet(&net, checkIns)},
+				totalKey: 1,
+			})
+			return
+		}
+		nets, err = models.FindNetsForTalkgroup(db, uint(tgID))
+		if err != nil {
+			slog.Error("Failed to list nets for talkgroup", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+		count, err = models.CountNetsForTalkgroup(cDb, uint(tgID))
+	case activeStr == queryTrue:
+		nets, err = models.ListActiveNets(db)
+		if err != nil {
+			slog.Error("Failed to list active nets", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+		count, err = models.CountActiveNets(cDb)
+	default:
+		nets, err = models.ListNets(db)
+		if err != nil {
+			slog.Error("Failed to list nets", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+		count, err = models.CountNets(cDb)
+	}
+	if err != nil {
+		slog.Error("Failed to count nets", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	resp := make([]apimodels.NetResponse, 0, len(nets))
+	for i := range nets {
+		checkIns := countCheckInsForNet(cDb, &nets[i])
+		resp = append(resp, apimodels.NewNetResponseFromNet(&nets[i], checkIns))
+	}
+	c.JSON(http.StatusOK, gin.H{netsKey: resp, totalKey: count})
+}
+
+// GETNet returns a single net by ID.
+func GETNet(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidID})
+		return
+	}
+
+	net, err := models.FindNetByID(db, uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{errorKey: msgNetNotFound})
+			return
+		}
+		slog.Error("Failed to find net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	checkIns := countCheckInsForNet(db, &net)
+	c.JSON(http.StatusOK, apimodels.NewNetResponseFromNet(&net, checkIns))
+}
+
+// PATCHNet updates a net (admin-only). Currently supports toggling the showcase flag.
+func PATCHNet(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidID})
+		return
+	}
+
+	var req apimodels.NetPatch
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidRequestBody})
+		return
+	}
+
+	if req.Showcase != nil {
+		if err := models.UpdateNetShowcase(db, uint(id), *req.Showcase); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{errorKey: msgNetNotFound})
+				return
+			}
+			slog.Error("Failed to update net showcase", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+	}
+
+	net, err := models.FindNetByID(db, uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{errorKey: msgNetNotFound})
+			return
+		}
+		slog.Error("Failed to reload net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	checkIns := countCheckInsForNet(db, &net)
+	c.JSON(http.StatusOK, apimodels.NewNetResponseFromNet(&net, checkIns))
+}
+
+// POSTNetStart starts a new ad-hoc net on a talkgroup.
+func POSTNetStart(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	var req apimodels.NetStartPost
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidRequestBody})
+		return
+	}
+
+	// Verify the talkgroup exists.
+	exists, err := models.TalkgroupIDExists(db, req.TalkgroupID)
+	if err != nil {
+		slog.Error("Failed to check talkgroup existence", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{errorKey: "Talkgroup not found"})
+		return
+	}
+	user, ok := utils.GetSessionUser(c, db)
+	if !ok {
+		return
+	}
+	if !middleware.CanRunNets(db, user, req.TalkgroupID) {
+		c.JSON(http.StatusForbidden, gin.H{errorKey: middleware.MsgNotTalkgroupNCO})
+		return
+	}
+
+	// Check that no active net exists for this talkgroup.
+	_, err = models.FindActiveNetForTalkgroup(db, req.TalkgroupID)
+	if err == nil {
+		c.JSON(http.StatusConflict, gin.H{errorKey: "An active net already exists for this talkgroup"})
+		return
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		slog.Error("Failed to check for active net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	session := sessions.Default(c)
+	userID, _ := session.Get("user_id").(uint)
+
+	net := models.Net{
+		TalkgroupID:     req.TalkgroupID,
+		StartedByUserID: &userID,
+		StartTime:       time.Now(),
+		DurationMinutes: req.DurationMinutes,
+		Description:     req.Description,
+		Active:          true,
+	}
+	if err := models.CreateNet(db, &net); err != nil {
+		slog.Error("Failed to create net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	// Reload with associations.
+	net, err = models.FindNetByID(db, net.ID)
+	if err != nil {
+		slog.Error("Failed to reload net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	// Publish net started event.
+	publishNetEvent(c, &net, "started")
+
+	// If a duration is set, schedule auto-close.
+	if req.DurationMinutes != nil && *req.DurationMinutes > 0 {
+		if ns, nsOK := c.MustGet("NetScheduler").(*netscheduler.NetScheduler); nsOK && ns != nil {
+			dur := min(*req.DurationMinutes, uint(math.MaxInt64/int64(time.Minute)))
+			ns.ScheduleAutoClose(net.ID, time.Duration(dur)*time.Minute) //nolint:gosec // bounded by min
+		}
+	}
+
+	c.JSON(http.StatusCreated, apimodels.NewNetResponseFromNet(&net, 0))
+}
+
+// POSTNetStop stops an active net.
+func POSTNetStop(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidID})
+		return
+	}
+
+	if err := models.EndNet(db, uint(id)); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{errorKey: "Active net not found"})
+			return
+		}
+		slog.Error("Failed to end net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	// Cancel auto-close timer if one is running.
+	if ns, nsOK := c.MustGet("NetScheduler").(*netscheduler.NetScheduler); nsOK && ns != nil {
+		ns.CancelAutoClose(uint(id))
+	}
+
+	// Reload for response.
+	net, err := models.FindNetByID(db, uint(id))
+	if err != nil {
+		slog.Error("Failed to reload net after stop", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	// Publish net stopped event.
+	publishNetEvent(c, &net, "stopped")
+	checkIns := countCheckInsForNet(db, &net)
+	c.JSON(http.StatusOK, apimodels.NewNetResponseFromNet(&net, checkIns))
+}
+
+// GETNetCheckIns returns the check-in list for a net.
+func GETNetCheckIns(c *gin.Context) {
+	db, ok := utils.GetPaginatedDB(c)
+	if !ok {
+		return
+	}
+	cDb, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidID})
+		return
+	}
+
+	net, err := models.FindNetByID(cDb, uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{errorKey: msgNetNotFound})
+			return
+		}
+		slog.Error("Failed to find net", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	endTime := time.Now()
+	if net.EndTime != nil {
+		endTime = *net.EndTime
+	}
+
+	calls, err := models.FindTalkgroupCallsInTimeRange(db, net.TalkgroupID, net.StartTime, endTime)
+	if err != nil {
+		slog.Error("Failed to find check-in calls", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	count, err := models.CountTalkgroupCallsInTimeRange(cDb, net.TalkgroupID, net.StartTime, endTime)
+	if err != nil {
+		slog.Error("Failed to count check-in calls", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	resp := make([]apimodels.NetCheckInResponse, 0, len(calls))
+	for i := range calls {
+		resp = append(resp, apimodels.NewNetCheckInResponseFromCall(&calls[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"check_ins": resp, totalKey: count})
+}
+
+// GETNetCheckInsExport exports the check-in list as CSV or JSON.
+func GETNetCheckInsExport(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidID})
+		return
+	}
+
+	net, err := models.FindNetByID(db, uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{errorKey: msgNetNotFound})
+			return
+		}
+		slog.Error("Failed to find net for export", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	endTime := time.Now()
+	if net.EndTime != nil {
+		endTime = *net.EndTime
+	}
+
+	calls, err := models.FindTalkgroupCallsInTimeRange(db, net.TalkgroupID, net.StartTime, endTime)
+	if err != nil {
+		slog.Error("Failed to find check-in calls for export", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	resp := make([]apimodels.NetCheckInResponse, 0, len(calls))
+	for i := range calls {
+		resp = append(resp, apimodels.NewNetCheckInResponseFromCall(&calls[i]))
+	}
+
+	format := c.DefaultQuery("format", "csv")
+	filename := fmt.Sprintf("net_%d_checkins", id)
+
+	switch format {
+	case "json":
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.json", filename))
+		c.JSON(http.StatusOK, resp)
+	case "csv":
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.csv", filename))
+		c.Header("Content-Type", "text/csv")
+		w := csv.NewWriter(c.Writer)
+		_ = w.Write([]string{"Time", "Callsign", "Radio ID", "Repeater ID"})
+		for _, ci := range resp {
+			_ = w.Write([]string{
+				ci.StartTime.Format(time.RFC3339),
+				ci.User.Callsign,
+				strconv.FormatUint(uint64(ci.User.ID), 10),
+				strconv.FormatUint(uint64(ci.RepeaterID), 10),
+			})
+		}
+		w.Flush()
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "Invalid format, must be csv or json"})
+	}
+}
+
+// countCheckInsForNet returns the number of unique users who checked in during a net's time window.
+func countCheckInsForNet(db *gorm.DB, net *models.Net) int {
+	endTime := time.Now()
+	if net.EndTime != nil {
+		endTime = *net.EndTime
+	}
+	count, err := models.CountUniqueUsersInTimeRange(db, net.TalkgroupID, net.StartTime, endTime)
+	if err != nil {
+		slog.Error("Failed to count check-ins for net", "error", err)
+		return 0
+	}
+	return count
+}
+
+// publishNetEvent publishes a net start/stop event to pubsub.
+func publishNetEvent(c *gin.Context, net *models.Net, event string) {
+	ps, ok := c.MustGet("PubSub").(pubsub.PubSub)
+	if !ok {
+		slog.Error("Failed to get PubSub from context")
+		return
+	}
+	evt := apimodels.WSNetEventResponse{
+		NetID:       net.ID,
+		TalkgroupID: net.TalkgroupID,
+		Talkgroup: apimodels.WSCallResponseTalkgroup{
+			ID:          net.Talkgroup.ID,
+			Name:        net.Talkgroup.Name,
+			Description: net.Talkgroup.Description,
+		},
+		Event:     event,
+		Active:    net.Active,
+		StartTime: net.StartTime,
+		EndTime:   net.EndTime,
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		slog.Error("Failed to marshal net event", "error", err)
+		return
+	}
+	if err := ps.Publish("net:events", data); err != nil {
+		slog.Error("Failed to publish net event", "error", err)
+	}
+}

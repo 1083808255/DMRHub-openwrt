@@ -1,0 +1,22 @@
+{
+  "source": "dmrgo internal/appcapture DMRText: the AnyTone text DMR TEST",
+  "transmissions": [
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    }
+  ],
+  "messages": [
+    {
+      "format": "anytone",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": "DMR TEST"
+    }
+  ]
+}

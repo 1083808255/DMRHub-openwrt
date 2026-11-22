@@ -1,0 +1,29 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "local>USA-RedDragon/renovate-configs",
+        "local>USA-RedDragon/renovate-configs:golang"
+    ],
+    "customManagers": [
+        {
+            "customType": "regex",
+            "managerFilePatterns": [
+                "/(^|/)internal\\/testutils\\/consts\\.go$/"
+            ],
+            "matchStrings": [
+                "const RedisTag = \"(?<currentValue>.*?)\""
+            ],
+            "depNameTemplate": "redis",
+            "datasourceTemplate": "docker"
+        }
+    ],
+    "packageRules": [
+        {
+            "description": "The docs build carries assets from the last published docs image, so it must stay on the moving main tag.",
+            "matchPackageNames": [
+                "ghcr.io/usa-reddragon/dmrhub-docs"
+            ],
+            "pinDigests": false
+        }
+    ]
+}

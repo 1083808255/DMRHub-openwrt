@@ -1,0 +1,1028 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package calltracker
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"maps"
+	"slices"
+	"sync/atomic"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/dmrconst"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+const (
+	voiceRecordPrefix = "calltracker:voice:"
+	saveTries         = 3
+	saveHold          = 5 * time.Second
+	touchEvery        = voiceHang / 2
+	partLive          = voiceHang + touchEvery + kvTimeout
+	kvBackoff         = 5 * time.Second
+	kvTrips           = 3
+	saveTimeout       = 5 * time.Second
+	saveBackoffMax    = 30 * time.Second
+)
+
+var (
+	errUnchanged = errors.New("the record stays as it is")
+	errKVDown    = errors.New("the KV store failed a moment ago")
+)
+
+type voiceRecord struct {
+	ID       uint                  `json:"id,omitempty"`
+	Start    time.Time             `json:"start"`
+	Chan     string                `json:"chan"`
+	Saved    bool                  `json:"saved,omitempty"`
+	Gen      uint64                `json:"gen,omitempty"`
+	Saving   uint64                `json:"saving,omitempty"`
+	SavingAt time.Time             `json:"saving_at,omitzero"`
+	Parts    map[string]*voicePart `json:"parts"`
+}
+
+type voicePart struct {
+	Active bool         `json:"active,omitempty"`
+	Seq    uint         `json:"seq"`
+	Last   time.Time    `json:"last"`
+	Term   bool         `json:"term,omitempty"`
+	Held   []voiceDelta `json:"held,omitempty"`
+}
+
+type voiceDelta struct {
+	ID            string    `json:"id"`
+	First         time.Time `json:"first"`
+	Last          time.Time `json:"last"`
+	Packets       uint      `json:"packets,omitempty"`
+	Lost          uint      `json:"lost,omitempty"`
+	Bits          uint      `json:"bits,omitempty"`
+	Errors        int       `json:"errors,omitempty"`
+	Jitter        float32   `json:"jitter,omitempty"`
+	RSSI          float32   `json:"rssi,omitempty"`
+	Data          []byte    `json:"data,omitempty"`
+	FID           *uint8    `json:"fid,omitempty"`
+	SubKind       string    `json:"sub_kind,omitempty"`
+	Codec         string    `json:"codec,omitempty"`
+	Mode          int       `json:"mode,omitempty"`
+	MissedMS      int       `json:"missed_ms,omitempty"`
+	SentAMBE      int       `json:"sent_ambe,omitempty"`
+	SentCodec2    int       `json:"sent_codec2,omitempty"`
+	Busy          bool      `json:"busy,omitempty"`
+	Undeliverable []string  `json:"undeliverable,omitempty"`
+}
+
+type given struct {
+	packets, lost, bits  uint
+	errors               int
+	data                 int
+	missed, ambe, codec2 int
+	from                 time.Time
+}
+
+type claimVerdict int
+
+const (
+	claimNew claimVerdict = iota
+	claimAdopt
+	claimDrop
+)
+
+type finishVerdict int
+
+const (
+	finishDefer finishVerdict = iota
+	finishSave
+	finishDelete
+	finishDirect
+)
+
+func voiceRecordKey(k voiceKey) string {
+	return fmt.Sprintf("%s%016x", voiceRecordPrefix, uint64(k))
+}
+
+func chanName(k chanKey) string {
+	return fmt.Sprintf("%s/%d/%t/%d", k.server, k.repeater, k.slot, k.stream)
+}
+
+func loadRecord(old []byte) *voiceRecord {
+	if old == nil {
+		return nil
+	}
+	var rec voiceRecord
+	if json.Unmarshal(old, &rec) != nil {
+		return nil
+	}
+	if rec.Parts == nil {
+		rec.Parts = map[string]*voicePart{}
+	}
+	maps.DeleteFunc(rec.Parts, func(_ string, p *voicePart) bool { return p == nil })
+	return &rec
+}
+
+func (rec *voiceRecord) anyActive(except string, now time.Time) bool {
+	for id, p := range rec.Parts {
+		if id != except && p.Active && now.Sub(p.Last) < partLive {
+			return true
+		}
+	}
+	return false
+}
+
+func (rec *voiceRecord) latest() *voicePart {
+	var last *voicePart
+	for _, p := range rec.Parts {
+		if last == nil || p.Last.After(last.Last) {
+			last = p
+		}
+	}
+	return last
+}
+
+func (rec *voiceRecord) allHeld() []voiceDelta {
+	var held []voiceDelta
+	for _, p := range rec.Parts {
+		held = append(held, p.Held...)
+	}
+	return held
+}
+
+func (rec *voiceRecord) dropHeld(saved []voiceDelta) {
+	ids := make(map[string]bool, len(saved))
+	for _, d := range saved {
+		ids[d.ID] = true
+	}
+	for _, p := range rec.Parts {
+		p.Held = slices.DeleteFunc(p.Held, func(d voiceDelta) bool { return ids[d.ID] })
+	}
+}
+
+func (rec *voiceRecord) saving(now time.Time) bool {
+	return rec.Saving != 0 && now.Sub(rec.SavingAt) < saveHold
+}
+
+func fresh(ch string, me string, seq uint, at time.Time) *voiceRecord {
+	return &voiceRecord{Chan: ch, Start: at, Parts: map[string]*voicePart{me: {Active: true, Seq: seq, Last: at}}}
+}
+
+func claimRecord(rec *voiceRecord, me, ch string, seq uint, header bool, at time.Time) (*voiceRecord, claimVerdict) {
+	if rec == nil || rec.Chan != ch || header {
+		return fresh(ch, me, seq, at), claimNew
+	}
+	join := func(v claimVerdict) (*voiceRecord, claimVerdict) {
+		rec.Parts[me] = &voicePart{Active: true, Seq: seq, Last: at, Held: partHeld(rec, me)}
+		return rec, v
+	}
+	if rec.ID == 0 {
+		return join(claimNew)
+	}
+	if rec.anyActive("", at) {
+		return join(claimAdopt)
+	}
+	last := rec.latest()
+	if last == nil {
+		return fresh(ch, me, seq, at), claimNew
+	}
+	if heardBefore(last.Seq, seq) {
+		if at.Sub(last.Last) < voiceHang {
+			return rec, claimDrop
+		}
+		return fresh(ch, me, seq, at), claimNew
+	}
+	if last.Term {
+		return fresh(ch, me, seq, at), claimNew
+	}
+	return join(claimAdopt)
+}
+
+func partHeld(rec *voiceRecord, me string) []voiceDelta {
+	if p := rec.Parts[me]; p != nil {
+		return p.Held
+	}
+	return nil
+}
+
+func installRecord(rec *voiceRecord, me, ch string, id uint, start time.Time, seq uint) (*voiceRecord, uint, time.Time) {
+	if rec == nil || rec.Chan != ch {
+		rec = fresh(ch, me, seq, start)
+	}
+	if rec.ID == 0 {
+		rec.ID, rec.Start = id, start
+	}
+	if p := rec.Parts[me]; p == nil || !p.Active {
+		rec.Parts[me] = &voicePart{Active: true, Seq: seq, Last: start, Held: partHeld(rec, me)}
+	}
+	return rec, rec.ID, rec.Start
+}
+
+type finishResult struct {
+	verdict finishVerdict
+	gen     uint64
+	held    []voiceDelta
+}
+
+func finishRecord(rec *voiceRecord, me, ch string, id uint, seq uint, last time.Time, term, keyUp bool, mine voiceDelta, now time.Time) (*voiceRecord, finishResult) {
+	if rec != nil && rec.ID != id {
+		return nil, finishResult{verdict: finishDirect}
+	}
+	if rec == nil {
+		rec = &voiceRecord{ID: id, Chan: ch, Start: mine.First, Saved: true, Parts: map[string]*voicePart{}}
+	}
+	p := rec.Parts[me]
+	if p == nil {
+		p = &voicePart{}
+		rec.Parts[me] = p
+	}
+	p.Active, p.Seq, p.Last, p.Term = false, seq, last, term
+	if keyUp && len(rec.Parts) == 1 && !rec.Saved && len(p.Held) == 0 {
+		return rec, finishResult{verdict: finishDelete}
+	}
+	p.Held = append(p.Held, mine)
+	if rec.anyActive(me, now) || rec.saving(now) {
+		return rec, finishResult{verdict: finishDefer}
+	}
+	rec.Gen++
+	rec.Saving, rec.SavingAt = rec.Gen, now
+	return rec, finishResult{verdict: finishSave, gen: rec.Gen, held: rec.allHeld()}
+}
+
+type savedResult struct {
+	again  bool
+	gen    uint64
+	held   []voiceDelta
+	active bool
+}
+
+func savedRecord(rec *voiceRecord, gen uint64, ok bool, saved []voiceDelta, tries int, now time.Time) (*voiceRecord, savedResult) {
+	if rec == nil || rec.Saving != gen {
+		return nil, savedResult{}
+	}
+	if ok {
+		rec.Saved = true
+		rec.dropHeld(saved)
+	}
+	res := savedResult{active: rec.anyActive("", now)}
+	rec.Saving, rec.SavingAt = 0, time.Time{}
+	if !ok || tries >= saveTries || res.active {
+		return rec, res
+	}
+	held := rec.allHeld()
+	if len(held) == 0 {
+		return rec, res
+	}
+	rec.Gen++
+	rec.Saving, rec.SavingAt = rec.Gen, now
+	res.again, res.gen, res.held = true, rec.Gen, held
+	return rec, res
+}
+
+func (c *CallTracker) updateRecord(ctx context.Context, key voiceKey, fn func(*voiceRecord) *voiceRecord) error {
+	now := c.now()
+	if c.kvFails.Load() >= kvTrips && now < time.Duration(c.kvDown.Load()) {
+		c.metrics.IncrementTrackerShareFailed()
+		return errKVDown
+	}
+	if until, ok := c.keyDown.Load(key); ok && now < until {
+		c.metrics.IncrementTrackerShareFailed()
+		return errKVDown
+	}
+	ctx, cancel := context.WithTimeout(ctx, kvTimeout)
+	defer cancel()
+	err := c.kv.Update(ctx, voiceRecordKey(key), streamIdle, func(old []byte) ([]byte, error) {
+		rec := fn(loadRecord(old))
+		if rec == nil {
+			return nil, errUnchanged
+		}
+		return json.Marshal(rec)
+	})
+	if errors.Is(err, errUnchanged) {
+		err = nil
+	}
+	if err == nil {
+		c.kvFails.Store(0)
+		c.keyDown.Delete(key)
+		return nil
+	}
+	c.keyDown.Store(key, now+kvBackoff)
+	if now-time.Duration(c.kvLast.Swap(int64(now))) > kvBackoff {
+		c.kvFails.Store(0)
+	}
+	if c.kvFails.Add(1) >= kvTrips || ctx.Err() != nil {
+		c.kvFails.Store(kvTrips)
+		c.kvDown.Store(int64(now + kvBackoff))
+	}
+	c.metrics.IncrementTrackerShareFailed()
+	return fmt.Errorf("sharing a voice call: %w", err)
+}
+
+func (s *shard) claimVoice(t *task, ch *channel, key voiceKey, e *row) (*row, bool) {
+	p := &t.p
+	me, name := s.t.replica, chanName(ch.key)
+	var verdict claimVerdict
+	var id uint
+	var start time.Time
+	term := isVoiceTerminator(p)
+	if err := s.t.updateRecord(context.Background(), key, func(rec *voiceRecord) *voiceRecord {
+		next, v := claimRecord(rec, me, name, p.Seq, isVoiceHeader(p), t.at)
+		if v == claimNew && term {
+			verdict = claimDrop
+			return nil
+		}
+		rec, verdict = next, v
+		id, start = rec.ID, rec.Start
+		return rec
+	}); err != nil {
+		slog.Warn("CallTracker: the voice call stays on this replica", "error", err)
+		return nil, false
+	}
+	switch verdict {
+	case claimNew:
+	case claimDrop:
+		return nil, true
+	case claimAdopt:
+		if e != nil && e.call.ID == id && !e.deleted {
+			s.resume(key, e)
+			e.shared, e.deferred = true, false
+			e.given.from = t.at
+			return e, true
+		}
+		r := s.adopt(t, ch, key, id, start)
+		return r, true
+	}
+	r := s.open(t, ch, key, models.CallKindVoice, "", voiceHang)
+	if r == nil {
+		return nil, true
+	}
+	r.call.LastFrameNum = dmrconst.VoiceA
+	s.t.remember(s, r)
+	var got uint
+	var gotStart time.Time
+	if err := s.t.updateRecord(context.Background(), key, func(rec *voiceRecord) *voiceRecord {
+		rec, got, gotStart = installRecord(rec, me, name, r.call.ID, r.call.StartTime, p.Seq)
+		return rec
+	}); err != nil {
+		slog.Warn("CallTracker: the voice call stays on this replica", "error", err)
+		return r, true
+	}
+	r.shared = true
+	r.given.from = t.at
+	if got != r.call.ID {
+		if err := s.t.db.Unscoped().Delete(&models.Call{}, r.call.ID).Error; err != nil {
+			slog.Error("CallTracker: error deleting a row that another replica made first", "error", err)
+		}
+		r.call.ID, r.call.StartTime = got, gotStart
+		s.markActive(got)
+	}
+	return r, true
+}
+
+func (s *shard) adopt(t *task, ch *channel, key voiceKey, id uint, start time.Time) *row {
+	call := s.newCall(t, models.CallKindVoice, "")
+	call.ID, call.StartTime = id, start
+	s.t.resolve(call, t.peer)
+	r := &row{call: call, ch: ch, key: key, last: t.at, hang: voiceHang, shared: true}
+	r.given.from = t.at
+	r.call.LastFrameNum = dmrconst.VoiceA
+	s.rows[key] = r
+	s.note(t, r)
+	s.markActive(id)
+	slog.Debug("CallTracker: transmission moved here", "streamID", call.StreamID, "src", call.SourceID, "dst", call.DestinationID, "id", id)
+	return r
+}
+
+func (s *shard) markActive(id uint) {
+	if err := s.t.db.Model(&models.Call{}).Where("id = ?", id).Update("active", true).Error; err != nil {
+		slog.Error("CallTracker: error marking a call active", "error", err)
+	}
+}
+
+func (r *row) delta() voiceDelta {
+	c := r.call
+	d := voiceDelta{
+		First:         r.given.from,
+		Last:          r.last,
+		Packets:       c.TotalPackets - r.given.packets,
+		Lost:          c.LostSequences - r.given.lost,
+		Bits:          c.TotalBits - r.given.bits,
+		Errors:        c.TotalErrors - r.given.errors,
+		Jitter:        c.Jitter,
+		RSSI:          c.RSSI,
+		FID:           c.FID,
+		SubKind:       c.SubKind,
+		Codec:         c.Codec,
+		Mode:          c.Codec2Mode,
+		MissedMS:      c.MissedMS - r.given.missed,
+		SentAMBE:      c.SentAMBE - r.given.ambe,
+		SentCodec2:    c.SentCodec2 - r.given.codec2,
+		Busy:          c.TranscodeBusy,
+		Undeliverable: slices.Clone(c.Undeliverable),
+	}
+	if r.given.data < len(c.CallData) {
+		d.Data = slices.Clone([]byte(c.CallData[r.given.data:]))
+	}
+	return d
+}
+
+func (r *row) markGiven() {
+	c := r.call
+	r.given = given{packets: c.TotalPackets, lost: c.LostSequences, bits: c.TotalBits, errors: c.TotalErrors, data: len(c.CallData), missed: c.MissedMS, ambe: c.SentAMBE, codec2: c.SentCodec2, from: r.last}
+}
+
+func mergeVoice(tmpl *models.Call, base *models.Call, start time.Time, parts []voiceDelta) models.Call {
+	out := *tmpl
+	out.StartTime = start
+	out.Active = false
+	out.CallData = nil
+	out.TotalPackets, out.LostSequences, out.TotalBits, out.TotalErrors = 0, 0, 0, 0
+	out.MissedMS, out.SentAMBE, out.SentCodec2 = 0, 0, 0
+	out.Undeliverable = nil
+	var jitter, rssi float64
+	last := start
+	if base != nil {
+		out.CallData = slices.Clone(base.CallData)
+		out.TotalPackets, out.LostSequences, out.TotalBits, out.TotalErrors = base.TotalPackets, base.LostSequences, base.TotalBits, base.TotalErrors
+		out.MissedMS, out.SentAMBE, out.SentCodec2 = base.MissedMS, base.SentAMBE, base.SentCodec2
+		out.Undeliverable = slices.Clone(base.Undeliverable)
+		out.Response = base.Response
+		if base.FID != nil {
+			out.FID = base.FID
+		}
+		if base.SubKind != "" {
+			out.SubKind = base.SubKind
+		}
+		if base.Codec != "" {
+			out.Codec, out.Codec2Mode = base.Codec, base.Codec2Mode
+		}
+		out.TranscodeBusy = out.TranscodeBusy || base.TranscodeBusy
+		jitter, rssi = float64(base.Jitter)*float64(base.TotalPackets), float64(base.RSSI)*float64(base.TotalPackets)
+		if end := base.StartTime.Add(base.Duration); end.After(last) {
+			last = end
+		}
+	}
+	slices.SortStableFunc(parts, func(a, b voiceDelta) int { return a.First.Compare(b.First) })
+	for _, d := range parts {
+		if len(out.CallData)+len(d.Data) <= maxCallData {
+			out.CallData = append(out.CallData, d.Data...)
+		}
+		out.TotalPackets += d.Packets
+		out.LostSequences += d.Lost
+		out.TotalBits += d.Bits
+		out.TotalErrors += d.Errors
+		out.MissedMS += d.MissedMS
+		out.SentAMBE += d.SentAMBE
+		out.SentCodec2 += d.SentCodec2
+		out.TranscodeBusy = out.TranscodeBusy || d.Busy
+		jitter += float64(d.Jitter) * float64(d.Packets)
+		rssi += float64(d.RSSI) * float64(d.Packets)
+		if out.FID == nil {
+			out.FID = d.FID
+		}
+		if d.SubKind != "" {
+			out.SubKind = d.SubKind
+		}
+		switch {
+		case out.Codec == "" && d.Codec != "":
+			out.Codec, out.Codec2Mode = d.Codec, d.Mode
+		case out.Codec == d.Codec && out.Codec2Mode == 0:
+			out.Codec2Mode = d.Mode
+		}
+		for _, u := range d.Undeliverable {
+			if !slices.Contains(out.Undeliverable, u) {
+				out.Undeliverable = append(out.Undeliverable, u)
+			}
+		}
+		if d.Last.After(last) {
+			last = d.Last
+		}
+	}
+	out.LastPacketTime = last
+	out.Duration = last.Sub(start)
+	if out.TotalPackets > 0 {
+		out.Loss = float32(out.LostSequences) / float32(out.TotalPackets)
+		out.Jitter = float32(jitter / float64(out.TotalPackets))
+		out.RSSI = float32(rssi / float64(out.TotalPackets))
+	}
+	if out.TotalBits > 0 {
+		out.BER = float32(out.TotalErrors) / float32(out.TotalBits)
+	}
+	return out
+}
+
+func (s *shard) finishShared(r *row, at time.Time) {
+	call := r.call
+	term := !at.IsZero()
+	keyUp := term && call.Duration < keyUp
+	last := r.last
+	if term {
+		last = at
+	}
+	mine := r.delta()
+	mine.Last = last
+	mine.ID = fmt.Sprintf("%s/%d", s.t.replica, s.t.deltas.Add(1))
+	key, _ := r.key.(voiceKey)
+	me, name := s.t.replica, chanName(r.ch.key)
+	now := s.t.clock.Now()
+	var res finishResult
+	if err := s.t.updateRecord(context.Background(), key, func(rec *voiceRecord) *voiceRecord {
+		rec, res = finishRecord(rec, me, name, call.ID, call.LastSeq, last, term, keyUp, mine, now)
+		return rec
+	}); err != nil {
+		slog.Warn("CallTracker: the voice call is added to its row without the other replicas", "error", err)
+		s.keep(context.Background(), r, mine)
+		s.wait(r, now.Add(touchEvery))
+		return
+	}
+	switch res.verdict {
+	case finishDelete:
+		r.deleted = true
+		s.t.db.Unscoped().Delete(call)
+		return
+	case finishDefer:
+		r.pending = append(r.pending, mine)
+		r.markGiven()
+		s.wait(r, now.Add(partLive))
+		slog.Debug("CallTracker: the part of a moved call ended here", "streamID", call.StreamID, "id", call.ID)
+		return
+	case finishDirect:
+		s.keep(context.Background(), r, mine)
+		return
+	case finishSave:
+	}
+	r.pending = append(r.pending, mine)
+	r.markGiven()
+	s.saveLoop(r, key, res.gen, res.held, 1)
+}
+
+func (s *shard) keep(_ context.Context, r *row, d voiceDelta) {
+	r.pending = append(r.pending, d)
+	r.markGiven()
+	s.savePending(r)
+}
+
+func (s *shard) savePending(r *row) {
+	if !s.saveParts(r, slices.Clone(r.pending), func(ok bool) {
+		if !ok {
+			s.wait(r, s.t.clock.Now().Add(touchEvery))
+		}
+	}) {
+		r.resave = true
+	}
+}
+
+func (s *shard) wait(r *row, next time.Time) {
+	if _, ok := s.waiting[r]; !ok {
+		r.waitSince = s.t.clock.Now()
+	}
+	r.deferred = true
+	s.waiting[r] = next
+}
+
+func (s *shard) notePart(ctx context.Context, r *row) {
+	if r.deferred {
+		s.noteDeferred(ctx, r)
+		return
+	}
+	d := r.delta()
+	d.ID = fmt.Sprintf("%s/%d", s.t.replica, s.t.deltas.Add(1))
+	s.keep(ctx, r, d)
+}
+
+func (s *shard) noteDeferred(ctx context.Context, r *row) {
+	key, _ := r.key.(voiceKey)
+	d := r.delta()
+	d.ID = fmt.Sprintf("%s/%d", s.t.replica, s.t.deltas.Add(1))
+	me, id := s.t.replica, r.call.ID
+	placed := false
+	err := s.t.updateRecord(ctx, key, func(rec *voiceRecord) *voiceRecord {
+		placed = false
+		if rec == nil || rec.ID != id {
+			return nil
+		}
+		p := rec.Parts[me]
+		if p == nil {
+			p = &voicePart{Last: d.Last}
+			rec.Parts[me] = p
+		}
+		p.Held = append(p.Held, d)
+		placed = true
+		return rec
+	})
+	if err != nil || !placed {
+		s.keep(ctx, r, d)
+		return
+	}
+	r.pending = append(r.pending, d)
+	r.markGiven()
+	s.wait(r, s.t.clock.Now())
+}
+
+type retryVerdict int
+
+const (
+	retryWait retryVerdict = iota
+	retrySave
+	retryDone
+	retryGone
+)
+
+func retryRecord(rec *voiceRecord, me string, id uint, ended bool, now time.Time) (*voiceRecord, retryVerdict, finishResult) {
+	if rec == nil || rec.ID != id {
+		return nil, retryGone, finishResult{}
+	}
+	if p := rec.Parts[me]; p != nil && ended && p.Active {
+		p.Active = false
+		return rec, retryWait, finishResult{}
+	}
+	held := rec.allHeld()
+	if len(held) == 0 {
+		return nil, retryDone, finishResult{}
+	}
+	if rec.anyActive(me, now) || rec.saving(now) {
+		return nil, retryWait, finishResult{}
+	}
+	rec.Gen++
+	rec.Saving, rec.SavingAt = rec.Gen, now
+	return rec, retrySave, finishResult{verdict: finishSave, gen: rec.Gen, held: held}
+}
+
+func (s *shard) retryWaiting(now time.Time) {
+	for r, next := range s.waiting {
+		if now.Before(next) {
+			continue
+		}
+		if r.deleted {
+			delete(s.waiting, r)
+			continue
+		}
+		if r.saving || now.Before(r.notBefore) {
+			next := now.Add(touchEvery)
+			if r.notBefore.After(next) {
+				next = r.notBefore
+			}
+			s.waiting[r] = next
+			continue
+		}
+		key, _ := r.key.(voiceKey)
+		var verdict retryVerdict
+		var res finishResult
+		me, id := s.t.replica, r.call.ID
+		if err := s.t.updateRecord(context.Background(), key, func(rec *voiceRecord) *voiceRecord {
+			rec, verdict, res = retryRecord(rec, me, id, r.finished, now)
+			return rec
+		}); err != nil {
+			if len(r.pending) > 0 && now.Sub(r.waitSince) >= partLive {
+				s.saveParts(r, slices.Clone(r.pending), nil)
+			}
+			if len(r.pending) == 0 && now.Sub(r.waitSince) >= streamIdle {
+				delete(s.waiting, r)
+				continue
+			}
+			s.waiting[r] = now.Add(touchEvery)
+			continue
+		}
+		switch verdict {
+		case retryWait:
+			s.waiting[r] = now.Add(touchEvery)
+		case retrySave:
+			s.waiting[r] = now.Add(touchEvery)
+			s.saveLoop(r, key, res.gen, res.held, 1)
+		case retryDone, retryGone:
+			if len(r.pending) == 0 {
+				delete(s.waiting, r)
+				continue
+			}
+			s.waiting[r] = now.Add(touchEvery)
+			s.saveParts(r, slices.Clone(r.pending), func(ok bool) {
+				if ok && len(r.pending) == 0 {
+					delete(s.waiting, r)
+				}
+			})
+		}
+	}
+}
+
+func (s *shard) saveLoop(r *row, key voiceKey, gen uint64, parts []voiceDelta, try int) {
+	call := r.call
+	if s.saveParts(r, parts, func(ok bool) {
+		var after savedResult
+		if err := s.t.updateRecord(context.Background(), key, func(rec *voiceRecord) *voiceRecord {
+			rec, after = savedRecord(rec, gen, ok, parts, try, s.t.clock.Now())
+			return rec
+		}); err != nil {
+			slog.Warn("CallTracker: the end of a save of a voice call did not reach the other replicas", "error", err)
+		}
+		if !ok {
+			s.wait(r, s.t.clock.Now().Add(touchEvery))
+		}
+		if after.active {
+			s.markActive(call.ID)
+		}
+		if after.again {
+			s.saveLoop(r, key, after.gen, after.held, try+1)
+		}
+	}) {
+		return
+	}
+	r.resave = true
+	s.wait(r, s.t.clock.Now().Add(touchEvery))
+}
+
+func (s *shard) saveParts(r *row, parts []voiceDelta, done func(ok bool)) bool {
+	if r.saving || r.deleted {
+		return false
+	}
+	if now := s.t.clock.Now(); now.Before(r.notBefore) {
+		s.wait(r, r.notBefore)
+		return false
+	}
+	r.saving = true
+	s.saves++
+	tmpl := *r.call
+	tmpl.CallData = slices.Clone(r.call.CallData)
+	tmpl.Undeliverable = slices.Clone(r.call.Undeliverable)
+	go func() {
+		out, changed, ok, late, gone := s.saveMerged(context.Background(), &tmpl, parts)
+		s.saved <- func(s *shard) {
+			r.saving = false
+			r.backOff(late, s.t.clock.Now())
+			if gone {
+				r.deleted, r.pending, ok = true, nil, true
+			} else {
+				s.savedParts(r, parts, &tmpl, &out, changed, ok)
+			}
+			if r.reactivate {
+				r.reactivate = false
+				s.markActive(r.call.ID)
+			}
+			if done != nil {
+				done(ok)
+			}
+			if r.resave && !r.saving && !r.deleted {
+				r.resave = false
+				if len(r.pending) > 0 {
+					s.savePending(r)
+				}
+			}
+			s.saves--
+			if s.saves == 0 {
+				for _, w := range s.idle {
+					close(w)
+				}
+				s.idle = nil
+			}
+		}
+	}()
+	return true
+}
+
+func (s *shard) savedParts(r *row, parts []voiceDelta, tmpl, out *models.Call, changed, ok bool) {
+	if !ok {
+		if r.unacked == nil {
+			r.unacked = map[string]bool{}
+		}
+		for _, p := range parts {
+			r.unacked[p.ID] = true
+		}
+		return
+	}
+	for _, p := range parts {
+		if r.unacked[p.ID] {
+			changed = true
+			delete(r.unacked, p.ID)
+		}
+	}
+	s.adoptMerged(r, out, tmpl)
+	saved := make(map[string]bool, len(parts))
+	for _, p := range parts {
+		saved[p.ID] = true
+	}
+	r.pending = slices.DeleteFunc(r.pending, func(d voiceDelta) bool { return saved[d.ID] })
+	if !changed {
+		return
+	}
+	s.t.publishCall(s.idx, out)
+	s.t.publishNetCheckIn(s.idx, out)
+	slog.Info("Transmission ended", "kind", out.Kind, "sub", out.SubKind, "streamID", out.StreamID, "src", out.SourceID, "dst", out.DestinationID, "repeater", out.IngressID, "duration", out.Duration, "loss", out.Loss*pct, "ber", out.BER*pct, "rssi", out.RSSI, "jitter", out.Jitter)
+}
+
+func touchRecord(rec *voiceRecord, me, ch string, id uint, start time.Time, seq uint, last time.Time) *voiceRecord {
+	if rec == nil {
+		rec = &voiceRecord{ID: id, Chan: ch, Start: start, Saved: true, Parts: map[string]*voicePart{}}
+	}
+	if rec.ID != id {
+		return nil
+	}
+	p := rec.Parts[me]
+	if p == nil {
+		p = &voicePart{}
+		rec.Parts[me] = p
+	}
+	p.Active, p.Seq, p.Last = true, seq, last
+	return rec
+}
+
+func (s *shard) pruneKeyDown() {
+	now := s.t.now()
+	s.t.keyDown.Range(func(k voiceKey, until time.Duration) bool {
+		if now >= until {
+			s.t.keyDown.Delete(k)
+		}
+		return true
+	})
+}
+
+func (s *shard) touchShared(now time.Time) {
+	if s.idx == 0 {
+		s.pruneKeyDown()
+	}
+	for k, r := range s.rows {
+		key, ok := k.(voiceKey)
+		if !ok || !r.shared || r.finished || now.Sub(r.touched) < touchEvery {
+			continue
+		}
+		r.touched = now
+		me, name, call := s.t.replica, chanName(r.ch.key), r.call
+		if err := s.t.updateRecord(context.Background(), key, func(rec *voiceRecord) *voiceRecord {
+			return touchRecord(rec, me, name, call.ID, call.StartTime, call.LastSeq, r.last)
+		}); err != nil {
+			slog.Warn("CallTracker: the voice call was not refreshed for the other replicas", "error", err)
+		}
+	}
+}
+
+func (s *shard) saveMerged(ctx context.Context, call *models.Call, parts []voiceDelta) (models.Call, bool, bool, bool, bool) {
+	var out models.Call
+	changed := false
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var late atomic.Bool
+	tx := s.t.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		slog.Error("CallTracker: error saving a shared call", "id", call.ID, "error", tx.Error)
+		return out, false, false, false, false
+	}
+	stop := time.AfterFunc(saveTimeout, func() {
+		late.Store(true)
+		cancel()
+	})
+	defer stop.Stop()
+	err := func(tx *gorm.DB) error {
+		var base models.Call
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Omit(clause.Associations).First(&base, call.ID).Error; err != nil {
+			return fmt.Errorf("reading the call: %w", err)
+		}
+		ids := make([]string, 0, len(parts))
+		for _, d := range parts {
+			ids = append(ids, d.ID)
+		}
+		var stored []string
+		if err := tx.Model(&models.CallPart{}).Where("call_id = ? AND part_id IN ?", call.ID, ids).Pluck("part_id", &stored).Error; err != nil {
+			return fmt.Errorf("reading the parts of the call: %w", err)
+		}
+		fresh := slices.DeleteFunc(slices.Clone(parts), func(d voiceDelta) bool { return slices.Contains(stored, d.ID) })
+		out = mergeVoice(call, &base, base.StartTime, fresh)
+		keepRefs(&out, &base)
+		if len(fresh) == 0 {
+			return nil
+		}
+		changed = true
+		if err := tx.Model(&models.Call{}).Where("id = ?", out.ID).
+			Select("*").Omit(endOmits()...).Updates(&out).Error; err != nil {
+			return fmt.Errorf("saving the call: %w", err)
+		}
+		added := make([]models.CallPart, 0, len(fresh))
+		for _, d := range fresh {
+			added = append(added, models.CallPart{CallID: call.ID, PartID: d.ID})
+		}
+		if err := tx.Create(&added).Error; err != nil {
+			return fmt.Errorf("storing the parts of the call: %w", err)
+		}
+		return nil
+	}(tx)
+	if err == nil {
+		err = tx.Commit().Error
+	} else {
+		tx.Rollback()
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		slog.Debug("CallTracker: a delete removed the shared call before its save", "id", call.ID)
+		return out, false, false, false, true
+	}
+	if err != nil {
+		slog.Error("CallTracker: error saving a shared call", "id", call.ID, "error", err)
+		return out, false, false, late.Load(), false
+	}
+	return out, changed, true, false, false
+}
+
+func endOmits() []string {
+	return []string{"id", "created_at", "deleted_at", clause.Associations, "user_id", "repeater_id", "to_talkgroup_id", "to_user_id", "to_repeater_id"}
+}
+
+func keepRefs(out, stored *models.Call) {
+	out.UserID, out.RepeaterID = stored.UserID, stored.RepeaterID
+	out.ToTalkgroupID, out.ToUserID, out.ToRepeaterID = stored.ToTalkgroupID, stored.ToUserID, stored.ToRepeaterID
+	if out.UserID == nil {
+		out.User = models.User{}
+	}
+	if out.RepeaterID == nil {
+		out.Repeater = models.Repeater{}
+	}
+	if out.ToTalkgroupID == nil {
+		out.ToTalkgroup = models.Talkgroup{}
+	}
+	if out.ToUserID == nil {
+		out.ToUser = models.User{}
+	}
+	if out.ToRepeaterID == nil {
+		out.ToRepeater = models.Repeater{}
+	}
+}
+
+func (s *shard) adoptMerged(r *row, out, tmpl *models.Call) {
+	cur, g := *r.call, r.given
+	c := *out
+	c.TotalPackets = shifted(cur.TotalPackets, out.TotalPackets, tmpl.TotalPackets)
+	c.LostSequences = shifted(cur.LostSequences, out.LostSequences, tmpl.LostSequences)
+	c.TotalBits = shifted(cur.TotalBits, out.TotalBits, tmpl.TotalBits)
+	c.TotalErrors = shifted(cur.TotalErrors, out.TotalErrors, tmpl.TotalErrors)
+	c.MissedMS = shifted(cur.MissedMS, out.MissedMS, tmpl.MissedMS)
+	c.SentAMBE = shifted(cur.SentAMBE, out.SentAMBE, tmpl.SentAMBE)
+	c.SentCodec2 = shifted(cur.SentCodec2, out.SentCodec2, tmpl.SentCodec2)
+	c.CallData = slices.Clone(out.CallData)
+	if len(cur.CallData) > len(tmpl.CallData) {
+		c.CallData = append(c.CallData, cur.CallData[len(tmpl.CallData):]...)
+	}
+	c.Undeliverable = slices.Clone(out.Undeliverable)
+	for _, u := range cur.Undeliverable {
+		if !slices.Contains(c.Undeliverable, u) {
+			c.Undeliverable = append(c.Undeliverable, u)
+		}
+	}
+	if cur.LastSeq != tmpl.LastSeq || !cur.LastPacketTime.Equal(tmpl.LastPacketTime) {
+		c.LastSeq, c.LastPacketTime, c.LastFrameNum = cur.LastSeq, cur.LastPacketTime, cur.LastFrameNum
+		c.Jitter, c.RSSI = cur.Jitter, cur.RSSI
+	}
+	if cur.Active != tmpl.Active {
+		c.Active = cur.Active
+	}
+	if cur.Response != tmpl.Response {
+		c.Response = cur.Response
+	}
+	if cur.Codec != tmpl.Codec || cur.Codec2Mode != tmpl.Codec2Mode || cur.TranscodeBusy != tmpl.TranscodeBusy {
+		c.Codec, c.Codec2Mode, c.TranscodeBusy = cur.Codec, cur.Codec2Mode, cur.TranscodeBusy
+	}
+	*r.call = c
+	r.given = given{
+		packets: shifted(g.packets, out.TotalPackets, tmpl.TotalPackets),
+		lost:    shifted(g.lost, out.LostSequences, tmpl.LostSequences),
+		bits:    shifted(g.bits, out.TotalBits, tmpl.TotalBits),
+		errors:  shifted(g.errors, out.TotalErrors, tmpl.TotalErrors),
+		data:    max(g.data+len(out.CallData)-len(tmpl.CallData), 0),
+		missed:  shifted(g.missed, out.MissedMS, tmpl.MissedMS),
+		ambe:    shifted(g.ambe, out.SentAMBE, tmpl.SentAMBE),
+		codec2:  shifted(g.codec2, out.SentCodec2, tmpl.SentCodec2),
+		from:    g.from,
+	}
+}
+
+func shifted[T uint | int](v, out, tmpl T) T {
+	if out >= tmpl {
+		return v + (out - tmpl)
+	}
+	if v > tmpl-out {
+		return v - (tmpl - out)
+	}
+	return 0
+}
+
+func (r *row) backOff(late bool, now time.Time) {
+	if !late {
+		r.pause, r.notBefore = 0, time.Time{}
+		return
+	}
+	r.pause = min(max(2*r.pause, saveTimeout), saveBackoffMax)
+	r.notBefore = now.Add(r.pause)
+}

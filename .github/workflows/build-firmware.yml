@@ -1,0 +1,239 @@
+name: Build DMRHub x86_64 OpenWrt Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'DMRHub upstream tag/ref to build (blank = repo HEAD)'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'fw-*'
+
+concurrency:
+  group: dmrhub-firmware-x86
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  OP_VERSION: 24.10.8
+  OP_TARGET: x86/64
+  GO_VERSION: '1.27.3'
+  NODE_VERSION: '26.13.0'
+  TINYGO_VERSION: '0.43.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          REF="${{ github.event.inputs.upstream_ref }}"
+          if [ -n "$REF" ]; then
+            echo "Building requested ref: $REF"
+          else
+            echo "Building repo HEAD"
+          fi
+          SHORT=$(git rev-parse --short HEAD)
+          BUILD_TAG="x86_64-${SHORT}"
+          echo "build_tag=$BUILD_TAG" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT" >> "$GITHUB_OUTPUT"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd xz-utils curl ca-certificates build-essential
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # ---- Frontend (zh-CN localization compiled into dist/) ----
+      - name: Build frontend with Chinese localization
+        working-directory: internal/http/frontend
+        run: |
+          npm ci
+          echo "==> Running i18n consistency check"
+          npm run i18n:check
+          echo "==> Building Vue frontend"
+          npm run build
+          echo "==> Verifying Chinese strings in dist"
+          grep -rl "认证失败\|用户名\|简体中文" dist/ | head -5 || true
+
+      # ---- TinyGo for builtin WASM plugins ----
+      - name: Install TinyGo
+        run: |
+          TDIR="$RUNNER_TEMP/tinygo"
+          curl -fsSL -o "$TDIR.tar.gz" "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz"
+          mkdir -p "$TDIR"
+          tar -xzf "$TDIR.tar.gz" -C "$TDIR" --strip-components=1
+          echo "$TDIR/bin" >> "$GITHUB_PATH"
+          export PATH="$TDIR/bin:$PATH"
+          tinygo version
+
+      - name: Generate builtin WASM module
+        run: |
+          export PATH="$RUNNER_TEMP/tinygo/bin:$PATH"
+          go generate ./internal/plugins/builtin/...
+          ls -lh internal/plugins/builtin/builtin.wasm.zst
+
+      # ---- Go backend (amd64 static binary) ----
+      - name: Build DMRHub amd64 static binary
+        run: |
+          mkdir -p artifacts
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w -X main.version=${{ steps.ver.outputs.build_tag }} -X main.commit=${{ steps.ver.outputs.short_sha }}" \
+            -o artifacts/dmrhub .
+          file artifacts/dmrhub
+          ls -lh artifacts/dmrhub
+
+      # ---- Build ipk package ----
+      - name: Build ipk package
+        run: |
+          set -eu
+          PKG=openwrt/dmrhub
+          cp artifacts/dmrhub "$PKG/files/usr/bin/dmrhub"
+          chmod +x "$PKG/files/etc/init.d/dmrhub" "$PKG/files/etc/uci-defaults/99-dmrhub" "$PKG/files/usr/sbin/dmrhub-ota"
+          chmod +x "$PKG/files/usr/bin/dmrhub"
+          cd "$PKG"
+          # Build a portable .ipk (ar archive with debian-binary + control.tar.gz + data.tar.gz)
+          IPK_NAME="dmrhub_1.3.31-zh1_x86_64.ipk"
+          TMP=$(mktemp -d)
+          mkdir -p "$TMP/control" "$TMP/data"
+          printf '2.0\n' > "$TMP/debian-binary"
+          cat > "$TMP/control/control" <<EOF
+          Package: dmrhub
+          Version: 1.3.31-zh1
+          Depends: ca-certificates
+          Architecture: x86_64
+          Maintainer: 1083808255
+          Description: DMRHub DMR network server (zh-CN localization build)
+          EOF
+          cp -a files/etc "$TMP/data/"
+          mkdir -p "$TMP/data/usr/bin" "$TMP/data/usr/sbin"
+          cp files/usr/bin/dmrhub "$TMP/data/usr/bin/dmrhub"
+          cp files/usr/sbin/dmrhub-ota "$TMP/data/usr/sbin/dmrhub-ota"
+          (cd "$TMP/data" && tar -czf ../data.tar.gz .)
+          (cd "$TMP/control" && tar -czf ../control.tar.gz .)
+          (cd "$TMP" && ar r "$GITHUB_WORKSPACE/artifacts/$IPK_NAME" debian-binary control.tar.gz data.tar.gz)
+          echo "IPK_NAME=$IPK_NAME" >> "$GITHUB_ENV"
+          ls -lh "$GITHUB_WORKSPACE/artifacts/$IPK_NAME"
+
+      # ---- Build full firmware image with ImageBuilder ----
+      - name: Download OpenWrt ImageBuilder
+        run: |
+          set -eu
+          IB="openwrt-imagebuilder-${OP_VERSION}-x86-64.Linux-x86_64.tar.zst"
+          URL="https://downloads.openwrt.org/releases/${OP_VERSION}/targets/${OP_TARGET}/${IB}"
+          echo "Downloading $URL"
+          curl -fsSL --retry 3 "$URL" -o "$IB"
+          tar --zstd -xf "$IB"
+          echo "$PWD/openwrt-imagebuilder-${OP_VERSION}-x86-64.Linux-x86_64" > /tmp/ib_dir
+
+      - name: Build firmware image with DMRHub preinstalled
+        run: |
+          set -eu
+          IB_DIR=$(cat /tmp/ib_dir)
+          cd "$IB_DIR"
+          # ImageBuilder ships ipkg-make-index.sh; build a local feed for our ipk.
+          mkdir -p local_packages
+          cp "$GITHUB_WORKSPACE/artifacts/${IPK_NAME}" local_packages/
+          IDX=$(find . -name ipkg-make-index.sh | head -1)
+          echo "Using index script: $IDX"
+          (cd local_packages && sh "../${IDX#./}" . > Packages)
+          gzip -kf local_packages/Packages
+          echo "src custom file:$(pwd)/local_packages" >> repositories.conf
+          echo "==> repositories.conf:"; cat repositories.conf
+          echo "==> local Packages:"; cat local_packages/Packages
+          # Base set: LuCI web UI (Chinese) + DMRHub + certs
+          PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates"
+          echo "==> make image PACKAGES=$PACKAGES"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" || {
+            echo "==> First attempt failed; retrying minimal set"
+            make image PROFILE="generic" PACKAGES="dmrhub luci luci-base luci-i18n-base-zh-cn ca-certificates"
+          }
+          ls -lh bin/targets/x86/64/*.img.gz
+
+      - name: Collect firmware artifacts
+        run: |
+          set -eu
+          IB_DIR=$(cat /tmp/ib_dir)
+          IMG=$(ls "$IB_DIR"/bin/targets/x86/64/*squashfs-combined.img.gz 2>/dev/null | head -1 || true)
+          if [ -z "$IMG" ]; then
+            IMG=$(ls "$IB_DIR"/bin/targets/x86/64/*.img.gz 2>/dev/null | head -1 || true)
+          fi
+          [ -n "$IMG" ] || { echo "No firmware image produced!"; exit 1; }
+          FW_NAME="openwrt-24.10.8-x86-64-dmrhub-${{ steps.ver.outputs.build_tag }}-squashfs-combined.img.gz"
+          cp "$IMG" "artifacts/$FW_NAME"
+          echo "FW_NAME=$FW_NAME" >> "$GITHUB_ENV"
+          cd artifacts
+          sha256sum * > checksums.sha256
+          ls -lh
+
+      - name: Generate version.json for OTA
+        run: |
+          set -eu
+          cd artifacts
+          APP_SHA=$(sha256sum "${IPK_NAME}" | awk '{print $1}')
+          FW_SHA=$(sha256sum "${FW_NAME}" | awk '{print $1}')
+          cat > version.json <<EOF
+          {
+            "version": "1.3.31-zh1-${{ steps.ver.outputs.short_sha }}",
+            "build_tag": "${{ steps.ver.outputs.build_tag }}",
+            "upstream": "USA-RedDragon/DMRHub",
+            "localization": "zh-CN",
+            "openwrt": "${OP_VERSION}",
+            "target": "${OP_TARGET}",
+            "app_file": "${IPK_NAME}",
+            "app_sha256": "$APP_SHA",
+            "firmware_file": "${FW_NAME}",
+            "firmware_sha256": "$FW_SHA",
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat version.json
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fw-${{ steps.ver.outputs.build_tag }}-${{ github.run_number }}
+          name: "DMRHub x86_64 OpenWrt Firmware ${{ steps.ver.outputs.build_tag }}"
+          body: |
+            ## DMRHub x86_64 OpenWrt 固件（汉化版）
+
+            - OpenWrt 基线：**${{ env.OP_VERSION }}** (${{ env.OP_TARGET }})
+            - DMRHub：汉化版，简体中文界面，940 条中英词条
+            - 源码提交：`${{ steps.ver.outputs.short_sha }}`
+
+            ### 文件
+            - `${{ env.FW_NAME }}` — 整机固件（squashfs-combined，预装 DMRHub），sysupgrade 直接刷
+            - `${{ env.IPK_NAME }}` — DMRHub 应用包（可单独 opkg 更新）
+            - `version.json` — OTA 清单
+            - `checksums.sha256` — 校验和
+
+            ### 使用
+            ```
+            sysupgrade -k <firmware.img.gz>    # -k 保留配置
+            ```
+            首次启动后配置在 `/opt/dmrhub/config.yaml`，Web 管理端口 3005。
+          files: |
+            artifacts/*.img.gz
+            artifacts/*.ipk
+            artifacts/version.json
+            artifacts/checksums.sha256
+          generate_release_notes: false

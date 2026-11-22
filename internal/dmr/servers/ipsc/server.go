@@ -1,0 +1,1014 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package ipsc
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"net"
+	"net/netip"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/clock"
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/connlog"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/hub"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/lookup"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/undeliverable"
+	"github.com/USA-RedDragon/DMRHub/internal/ipfilter"
+	"github.com/USA-RedDragon/DMRHub/internal/metrics"
+	ipscwire "github.com/USA-RedDragon/dmrgo/v2/transport/ipsc"
+	ipscauth "github.com/USA-RedDragon/dmrgo/v2/transport/ipsc/ipscauth"
+	ipscsession "github.com/USA-RedDragon/dmrgo/v2/transport/ipsc/ipscsession"
+	"gorm.io/gorm"
+)
+
+// IPSCServer is the IPSC master of DMRHub. One ipscsession.Master serves every
+// repeater, each with its own key.
+type IPSCServer struct {
+	clock      clock.Clock
+	cfg        *config.Config
+	db         *gorm.DB
+	hub        *hub.Hub
+	udp        *net.UDPConn
+	translator *IPSCTranslator
+	hubHandle  *hub.ServerHandle
+
+	// writer writes the packets of the server, or udp when it is nil.
+	writer packetWriter
+
+	localID uint32
+	mu      sync.Mutex
+	m       *ipscsession.Master
+	out     []ipscsession.Output
+	peers   map[uint32]*peerState
+	epoch   time.Time
+
+	keyFor  func(peerID uint32) (key [20]byte, useAuth bool, err error)
+	keys    *lookup.Cache[uint32, peerAuthKey]
+	loads   servers.Tracked
+	rekeys  atomic.Uint64
+	unwatch func()
+	// unwatchKeys stops the calls of rekey.
+	unwatchKeys   func()
+	unwatchResets func()
+
+	burstHandler func(packetType byte, data []byte, addr *net.UDPAddr, at time.Time)
+	bursts       []burst
+
+	egressMu sync.Mutex
+	egress   map[uint32]*peerTranslator
+
+	pacer *pacer
+
+	// peerJobs activates and deactivates the peers in the hub off the
+	// listener and s.mu.
+	peerJobs servers.RepeaterQueue
+	// joining holds, by address, the peers whose registration reply waits
+	// for their activation in the hub.
+	joining map[ipscsession.Addr]joiningPeer
+
+	timesMu      sync.Mutex
+	times        map[uint]repeaterTimes
+	writingTimes bool
+	timesClosed  bool
+	timesWG      sync.WaitGroup
+
+	refusals ipfilter.RefusalLog
+
+	// heard is when the packet that the server handles came.
+	heard time.Time
+	// stamped reports that the kernel stamps the packets of udp with the
+	// time they came.
+	stamped bool
+
+	movingMu   sync.Mutex
+	moving     map[uint32]*moving
+	left       map[uint32]struct{}
+	deciding   map[uint32][]heldIngress
+	stopClaims func()
+	// stopIPLists stops the calls of dropRefused.
+	stopIPLists func()
+
+	wg       sync.WaitGroup
+	done     chan struct{}
+	stopped  atomic.Bool
+	stopOnce sync.Once
+}
+
+// packetWriter is what the server writes its packets to.
+type packetWriter interface {
+	WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
+}
+
+func (s *IPSCServer) writeTo(p []byte, to *net.UDPAddr) error {
+	var w packetWriter = s.udp
+	if s.writer != nil {
+		w = s.writer
+	}
+	if _, err := w.WriteToUDP(p, to); err != nil {
+		return fmt.Errorf("writing to %v: %w", to, err)
+	}
+	return nil
+}
+
+type burst struct {
+	op   byte
+	data []byte
+	addr *net.UDPAddr
+	at   time.Time
+}
+
+// peerState is what DMRHub keeps for a registered peer.
+type peerState struct {
+	lastDBWrite time.Time
+	lastClaim   time.Time
+}
+
+// claimRenew is how often a peer that sends keeps the claim of this
+// replica on it alive.
+const claimRenew = time.Minute
+
+var (
+	ErrPacketIgnored  = errors.New("packet ignored")
+	ErrInvalidAuthKey = errors.New("invalid IPSC auth key")
+	ErrUnknownPeer    = errors.New("unknown IPSC peer")
+	errNoSession      = errors.New("no IPSC session")
+)
+
+const (
+	tickInterval            = time.Second
+	dbWriteDebounceInterval = 30 * time.Second
+	staleStreamAge          = 30 * time.Second
+)
+
+func NewIPSCServer(cfg *config.Config, hub *hub.Hub, db *gorm.DB) *IPSCServer {
+	c := hub.Clock()
+	s := &IPSCServer{
+		clock:      c,
+		cfg:        cfg,
+		db:         db,
+		hub:        hub,
+		localID:    cfg.DMR.IPSC.NetworkID,
+		peers:      map[uint32]*peerState{},
+		epoch:      c.Now(),
+		done:       make(chan struct{}),
+		translator: newTranslator(c, cfg.DMR.IPSC.NetworkID),
+		egress:     map[uint32]*peerTranslator{},
+	}
+	s.pacer = newPacer(c, func(k slotKey, frame []byte) { s.sendPacketToPeers(frame, k.peer) }, func(pkt models.Packet) {
+		if s.hub != nil {
+			s.hub.ReportUndeliverable(pkt, models.RepeaterTypeIPSC, undeliverable.ReasonSlotBusy)
+		}
+	})
+	s.pacer.callHold = cfg.DMR.IPSC.CallHangHold
+	s.pacer.dataHold = cfg.DMR.IPSC.DataHangHold
+	keep, perSlot := handoverHistory(cfg)
+	s.pacer.history = func() (time.Duration, int, bool) {
+		return keep, perSlot, s.hub != nil && s.hub.Leaving()
+	}
+	s.pacer.end = func(k slotKey, last queuedFrame) []byte {
+		return s.egressTranslator(k.peer).endCall(last.pkt, last.frame)
+	}
+	m, err := ipscsession.NewMaster(&ipscsession.MasterConfig{
+		ID:         s.localID,
+		MaxPeers:   ipscsession.MaxPeersLimit,
+		AdoptKnown: true,
+	})
+	if err != nil {
+		slog.Error("error creating IPSC session", "error", err)
+	} else {
+		s.m = m
+		s.out = make([]ipscsession.Output, 0, m.MaxOutputs())
+	}
+	s.keys = lookup.New(s.clock, "ipsc keys", lookup.TTL, s.loadPeerAuthKey)
+	s.keys.GoWith(s.loads.Go)
+	s.keyFor = s.lookupPeerAuthKey
+	return s
+}
+
+type peerAuthKey struct {
+	key     [20]byte
+	useAuth bool
+	err     error
+}
+
+func (s *IPSCServer) lookupPeerAuthKey(peerID uint32) ([20]byte, bool, error) {
+	k, err := s.keys.Get(peerID)
+	if err != nil {
+		return [20]byte{}, false, fmt.Errorf("looking up the key of peer %d: %w", peerID, err)
+	}
+	return k.key, k.useAuth, k.err
+}
+
+func (s *IPSCServer) loadPeerAuthKey(peerID uint32) (peerAuthKey, error) {
+	if s.db == nil {
+		return peerAuthKey{err: fmt.Errorf("no database configured: %w", ErrUnknownPeer)}, nil
+	}
+	var repeater models.Repeater
+	err := s.db.Where("id = ? AND type = ?", peerID, models.RepeaterTypeIPSC).First(&repeater).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return peerAuthKey{err: fmt.Errorf("repeater %d not found: %w", peerID, err)}, nil
+	}
+	if err != nil {
+		return peerAuthKey{}, fmt.Errorf("repeater %d not found: %w", peerID, err)
+	}
+	if repeater.Password == "" {
+		return peerAuthKey{}, nil
+	}
+	key, err := ipscauth.ParseKey(repeater.Password)
+	if err != nil {
+		return peerAuthKey{err: fmt.Errorf("repeater %d has an auth key that is not hex: %w: %w", peerID, ErrInvalidAuthKey, err)}, nil
+	}
+	return peerAuthKey{key: key, useAuth: true}, nil
+}
+
+// Listen opens the socket of the server. Start calls it when it was not
+// called before.
+func (s *IPSCServer) Listen() error {
+	if s.udp != nil {
+		return nil
+	}
+	udp, _, err := servers.ListenUDP(s.cfg.DMR.IPSC.Bind, s.cfg.DMR.IPSC.Port)
+	if err != nil {
+		return fmt.Errorf("error starting UDP listener: %w", err)
+	}
+	s.udp = udp
+	s.stamped = servers.StampArrivals(udp)
+	return nil
+}
+
+func (s *IPSCServer) Start(ctx context.Context) error {
+	if err := s.Listen(); err != nil {
+		return err
+	}
+
+	s.hubHandle = s.hub.RegisterServer(hub.ServerConfig{
+		Name: models.RepeaterTypeIPSC,
+		Role: hub.RoleRepeater,
+	})
+	s.unwatch = s.hub.OnRepeaterChange(func(id uint) { s.keys.Reload(uint32(id)) }) //nolint:gosec // repeater IDs fit in 32 bits
+	s.unwatchKeys = s.hub.OnRepeaterSecretChange(s.rekey)
+	s.unwatchResets = s.hub.OnRepeaterReset(s.reset)
+	s.stopClaims = s.hub.OnClaimedElsewhere(s.handOverPeer)
+	s.stopIPLists = s.hub.OnIPListsChange(s.dropRefused)
+
+	s.SetBurstHandler(s.peerBursts(ctx))
+
+	s.wg.Add(3)
+	go s.handler(ctx)
+	go s.consumeHubPackets()
+	go s.ticker(ctx)
+
+	slog.Info("IPSC Server listening", "address", s.cfg.DMR.IPSC.Bind, "port", s.cfg.DMR.IPSC.Port)
+
+	return nil
+}
+
+// Addr returns the server's listening address. This is useful in tests where
+// the server is started on an ephemeral port (port 0).
+func (s *IPSCServer) Addr() net.Addr {
+	return s.udp.LocalAddr()
+}
+
+// Stop stops the server. Unless ctx asks for a graceful handoff, it first
+// asks every registered peer to deregister, as DMRlink does, so that the
+// peers register again.
+func (s *IPSCServer) Stop(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		slog.Info("Stopping IPSC server")
+
+		s.stopped.Store(true)
+		close(s.done)
+
+		if s.hub != nil {
+			s.hub.UnregisterServer(models.RepeaterTypeIPSC)
+		}
+		if s.unwatch != nil {
+			s.unwatch()
+		}
+		if s.unwatchResets != nil {
+			s.unwatchResets()
+		}
+		if s.unwatchKeys != nil {
+			s.unwatchKeys()
+		}
+		if s.stopClaims != nil {
+			s.stopClaims()
+		}
+		if s.stopIPLists != nil {
+			s.stopIPLists()
+		}
+		s.pacer.drain(pacerDrainTimeout)
+
+		if !servers.IsGracefulHandoff(ctx) {
+			s.closeSessions(ctx)
+		}
+
+		if s.udp != nil {
+			if err := s.udp.Close(); err != nil {
+				slog.Error("error closing UDP listener", "error", err)
+			}
+		}
+	})
+	s.wg.Wait()
+	s.loads.Wait()
+	s.peerJobs.Wait()
+	s.closeTimes()
+	return nil
+}
+
+// rekey drops the registered peer id at once, after its auth key changed,
+// so that neither side takes a packet signed with the old key. The peer
+// must register again with the new key.
+func (s *IPSCServer) rekey(id uint) {
+	if id > math.MaxUint32 || s.m == nil {
+		return
+	}
+	s.keys.Reload(uint32(id))
+	s.rekeys.Add(1)
+	s.drop(uint32(id), connlog.PasswordRotated, "Dropping an IPSC peer whose auth key changed")
+}
+
+func (s *IPSCServer) reset(id uint) {
+	if id > math.MaxUint32 || s.m == nil {
+		return
+	}
+	s.drop(uint32(id), "", "Dropping an IPSC peer that a sysop reset")
+}
+
+func (s *IPSCServer) drop(peer uint32, kind, why string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped.Load() {
+		return
+	}
+	out, ok := s.m.Drop(peer, s.out[:0])
+	if !ok {
+		return
+	}
+	slog.Info(why, "peerID", peer, "reason", ipscsession.ReasonDropped)
+	if kind != "" {
+		s.notePeer(peer, kind, "")
+	}
+	s.apply(context.Background(), out)
+}
+
+// dropRefused drops at once, after a change of the IP lists, the
+// registered peers whose address the IP list of the repeaters now refuses.
+func (s *IPSCServer) dropRefused() {
+	l := s.ipList()
+	if !l.Active() || s.m == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped.Load() {
+		return
+	}
+	var refused []uint32
+	for i := range s.m.Peers() {
+		if info := s.m.PeerAt(i); !l.Allows(netip.AddrFrom4(info.Addr.IP)) {
+			refused = append(refused, info.ID)
+		}
+	}
+	for _, id := range refused {
+		out, ok := s.m.Drop(id, s.out[:0])
+		if !ok {
+			continue
+		}
+		slog.Info("Dropping an IPSC peer whose address the IP list now refuses", "peerID", id, "reason", ipscsession.ReasonDropped)
+		s.notePeer(id, connlog.IPBlocked, "")
+		s.apply(context.Background(), out)
+	}
+}
+
+func (s *IPSCServer) closeSessions(ctx context.Context) {
+	if s.m == nil || s.udp == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.apply(ctx, s.m.Close(s.now(), s.out[:0]))
+}
+
+func (s *IPSCServer) now() time.Duration {
+	return s.clock.Since(s.epoch)
+}
+
+func (s *IPSCServer) ticker(ctx context.Context) {
+	defer s.wg.Done()
+	t := s.clock.NewTicker(tickInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-t.C():
+			s.tick(ctx, s.now())
+		}
+	}
+}
+
+func (s *IPSCServer) tick(ctx context.Context, now time.Duration) {
+	if s.stopped.Load() || s.m == nil {
+		return
+	}
+	s.mu.Lock()
+	if at, ok := s.m.Deadline(); ok && now >= at {
+		s.apply(ctx, s.m.Tick(now, s.out[:0]))
+	}
+	bursts := s.takeBursts()
+	s.mu.Unlock()
+	s.runBursts(bursts)
+	s.cleanupStaleStreams()
+}
+
+func (s *IPSCServer) handler(ctx context.Context) {
+	defer s.wg.Done()
+	buf := make([]byte, ipscsession.MaxPacket)
+	oob := make([]byte, servers.RxOOBLen)
+	for {
+		n, addr, at, err := servers.ReadStamped(s.udp, s.clock, s.stamped, buf, oob)
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			slog.Warn("error reading from UDP", "error", err)
+			continue
+		}
+		if a := ipfilter.AddrOf(addr); !s.ipList().Allows(a) {
+			metrics.NewMetrics().IncrementIngressDropped(metrics.DropReasonIPList)
+			s.refusals.Refused("ipsc", a)
+			continue
+		}
+		data := make([]byte, n)
+		copy(data, buf[:n])
+
+		if err := s.handlePacketAt(ctx, data, addr, at); err != nil && !errors.Is(err, ErrPacketIgnored) {
+			slog.Warn("error handling IPSC packet", "peer", addr, "error", err, "length", len(data))
+		}
+	}
+}
+
+func (s *IPSCServer) handlePacket(ctx context.Context, data []byte, addr *net.UDPAddr) error {
+	return s.handlePacketAt(ctx, data, addr, s.clock.Now())
+}
+
+// handlePacketAt handles the packet data from addr, which came at heard.
+func (s *IPSCServer) handlePacketAt(ctx context.Context, data []byte, addr *net.UDPAddr, heard time.Time) error {
+	if s.stopped.Load() {
+		return ErrPacketIgnored
+	}
+	if s.m == nil {
+		return errNoSession
+	}
+	raw, err := ipscwire.DecodeRaw(data)
+	if err != nil {
+		return fmt.Errorf("packet too short for peer ID: %w", err)
+	}
+	if addr == nil {
+		return fmt.Errorf("no peer address: %w", ErrPacketIgnored)
+	}
+	from, ok := ipscsession.AddrOf(addr.IP, addr.Port)
+	if !ok {
+		return fmt.Errorf("peer address %v is not IPv4: %w", addr, ErrPacketIgnored)
+	}
+	key, useAuth, err := s.lockWithKey(raw.ID)
+	if err != nil {
+		return fmt.Errorf("peer %d: %w", raw.ID, err)
+	}
+	var kp *[20]byte
+	if useAuth {
+		kp = &key
+	}
+
+	s.heard = heard
+	now := s.now()
+	out := s.m.Packet(now, from, data, kp, s.out[:0])
+	if kp == nil && unregistered(out) && raw.Opcode != ipscwire.OpDeregisterRequest {
+		slog.Info("adopting keyless peer", "peerID", raw.ID, "peer", addr, "packetType", byte(raw.Opcode))
+		s.apply(ctx, s.m.Adopt(now, from, raw.ID, kp, s.out[:0]))
+		out = s.m.Packet(now, from, data, kp, s.out[:0])
+	}
+	ignored := len(out) == 0 || out[0].Kind == ipscsession.OutputDropped
+	if ignored && len(out) > 0 && out[0].Reason == ipscsession.ReasonAuth {
+		s.note(raw.ID, connlog.WrongPassword, from, "")
+	}
+	s.apply(ctx, out)
+	if p, ok := s.peers[raw.ID]; ok {
+		s.updateRepeaterDBTimes(p, uint(raw.ID), false)
+		if s.hub != nil && s.clock.Since(p.lastClaim) >= claimRenew {
+			p.lastClaim = s.clock.Now()
+			id := uint(raw.ID)
+			s.peerJobs.Do(id, func() { s.hub.RenewOwnership(ctx, id) })
+		}
+	}
+	bursts := s.takeBursts()
+	s.mu.Unlock()
+	for i := range bursts {
+		bursts[i].at = heard
+	}
+	s.runBursts(bursts)
+	if ignored {
+		return ErrPacketIgnored
+	}
+	return nil
+}
+
+func (s *IPSCServer) lockWithKey(id uint32) ([20]byte, bool, error) {
+	for {
+		rekeys := s.rekeys.Load()
+		key, useAuth, err := s.keyFor(id)
+		if err != nil {
+			return key, useAuth, err
+		}
+		s.mu.Lock()
+		if s.rekeys.Load() == rekeys {
+			return key, useAuth, nil
+		}
+		s.mu.Unlock()
+	}
+}
+
+func unregistered(out []ipscsession.Output) bool {
+	return len(out) == 1 && out[0].Kind == ipscsession.OutputDropped && out[0].Reason == ipscsession.ReasonUnregistered
+}
+
+// apply carries out the outputs of the Master. The caller holds s.mu.
+func (s *IPSCServer) apply(ctx context.Context, out []ipscsession.Output) {
+	for i := 0; i < len(out); i++ {
+		o := out[i]
+		switch o.Kind {
+		case ipscsession.OutputSend:
+			if s.hub != nil && i+1 < len(out) && out[i+1].Kind == ipscsession.OutputUp && out[i+1].Addr == o.Addr {
+				i++
+				s.up(ctx, out[i], o.Packet)
+				continue
+			}
+			if j, ok := s.joining[o.Addr]; ok && !s.stopped.Load() {
+				p, to := append([]byte(nil), o.Packet...), o.Addr
+				if s.peerJobs.Do(uint(j.id), func() { s.sendJoined(j, to, p, false) }) {
+					continue
+				}
+			}
+			s.write(o.Addr, o.Packet)
+		case ipscsession.OutputUp:
+			s.up(ctx, o, nil)
+		case ipscsession.OutputDown:
+			slog.Info("IPSC peer down", "peerID", o.ID, "reason", o.Reason)
+			if _, here := s.peers[o.ID]; here {
+				s.noteDown(o)
+			}
+			delete(s.peers, o.ID)
+			if s.hub != nil {
+				id := uint(o.ID)
+				s.peerJobs.Always(id, func() { s.hub.DeactivateRepeater(ctx, id) })
+			}
+		case ipscsession.OutputDropped:
+			slog.Debug("IPSC packet dropped", "peerID", o.ID, "peer", toUDPAddr(o.Addr), "reason", o.Reason)
+		case ipscsession.OutputData:
+			op := ipscwire.Opcode(o.Packet[0])
+			if !isUserPacket(op) || s.burstHandler == nil {
+				continue
+			}
+			s.bursts = append(s.bursts, burst{op: byte(op), data: append([]byte(nil), o.Packet...), addr: toUDPAddr(o.Addr)})
+		case ipscsession.OutputPeers:
+		}
+	}
+}
+
+func (s *IPSCServer) note(id uint32, kind string, addr ipscsession.Addr, detail string) {
+	if s.hub == nil {
+		return
+	}
+	address := ""
+	if a := toUDPAddr(addr); a != nil && a.IP != nil && !a.IP.IsUnspecified() {
+		address = a.IP.String()
+	}
+	s.hub.NoteRepeaterEvent(uint(id), kind, address, detail)
+}
+
+func (s *IPSCServer) notePeer(id uint32, kind, detail string) {
+	info, ok := s.m.Peer(id)
+	if !ok {
+		return
+	}
+	s.note(id, kind, info.Addr, detail)
+}
+
+func (s *IPSCServer) noteDown(o ipscsession.Output) {
+	switch o.Reason { //nolint:exhaustive
+	case ipscsession.ReasonTimeout:
+		s.note(o.ID, connlog.Timeout, o.Addr, "")
+	case ipscsession.ReasonClosed:
+		s.note(o.ID, connlog.Closed, o.Addr, "")
+	}
+}
+
+// joiningPeer is a peer that registered, whose registration reply waits
+// until the hub has it active.
+type joiningPeer struct {
+	id uint32
+	p  *peerState
+}
+
+// up takes the peer of o, which is up, and activates it in the hub. A peer
+// that registers gets reply, its registration reply, only once the hub
+// has it active, since the peer expects every call from then on, and so
+// do the packets that the server sends to its address until then. When
+// the queue of the peer does not move, the server drops the peer without
+// a reply, and the peer registers again. The caller holds s.mu.
+func (s *IPSCServer) up(ctx context.Context, o ipscsession.Output, reply []byte) {
+	slog.Info("IPSC peer registered", "peerID", o.ID)
+	p := &peerState{lastClaim: s.clock.Now()}
+	s.peers[o.ID] = p
+	s.updateRepeaterDBTimes(p, uint(o.ID), true)
+	s.movingMu.Lock()
+	delete(s.left, o.ID)
+	if s.hub != nil {
+		if s.deciding == nil {
+			s.deciding = map[uint32][]heldIngress{}
+		}
+		s.deciding[o.ID] = nil
+	}
+	s.movingMu.Unlock()
+	if s.hub == nil {
+		return
+	}
+	id, peer, to := uint(o.ID), o.ID, o.Addr
+	since := s.heard
+	if since.IsZero() {
+		since = s.clock.Now()
+	}
+	j := joiningPeer{id: peer, p: p}
+	if reply != nil {
+		reply = append([]byte(nil), reply...)
+		if s.joining == nil {
+			s.joining = map[ipscsession.Addr]joiningPeer{}
+		}
+		s.joining[to] = j
+	}
+	queued := s.peerJobs.Must(id, func() {
+		if s.hub.OwnerLeaving(ctx, id) {
+			s.awaitHandover(ctx, peer, since)
+		} else {
+			s.note(peer, connlog.Connected, to, "")
+		}
+		s.decided(peer, true)
+		s.hub.ActivateRepeaterSince(ctx, id, since)
+		if reply != nil {
+			s.sendJoined(j, to, reply, true)
+		}
+	})
+	if queued {
+		return
+	}
+	if reply != nil {
+		delete(s.joining, to)
+	}
+	s.decided(peer, false)
+	if out, ok := s.m.Drop(peer, nil); ok {
+		s.apply(ctx, out)
+	}
+}
+
+// sendJoined sends p to the peer j at to, which the hub has active now,
+// when j is still registered at to. last ends the wait of j.
+func (s *IPSCServer) sendJoined(j joiningPeer, to ipscsession.Addr, p []byte, last bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if last && s.joining[to] == j {
+		delete(s.joining, to)
+	}
+	if s.stopped.Load() || s.peers[j.id] != j.p {
+		return
+	}
+	if info, ok := s.m.Peer(j.id); !ok || info.Addr != to {
+		return
+	}
+	s.write(to, p)
+}
+
+// write sends p to to, when the IP list of the repeaters allows to.
+func (s *IPSCServer) write(to ipscsession.Addr, p []byte) {
+	if !s.ipList().Allows(netip.AddrFrom4(to.IP)) {
+		return
+	}
+	if err := s.writeTo(p, toUDPAddr(to)); err != nil {
+		slog.Warn("error sending IPSC packet", "error", err)
+	}
+}
+
+func (s *IPSCServer) takeBursts() []burst {
+	b := s.bursts
+	s.bursts = nil
+	return b
+}
+
+func (s *IPSCServer) runBursts(bursts []burst) {
+	for _, b := range bursts {
+		at := b.at
+		if at.IsZero() {
+			at = s.clock.Now()
+		}
+		s.burstHandler(b.op, b.data, b.addr, at)
+	}
+}
+
+func isUserPacket(op ipscwire.Opcode) bool {
+	switch op { //nolint:exhaustive
+	case ipscwire.OpGroupVoice, ipscwire.OpPrivateVoice, ipscwire.OpGroupData, ipscwire.OpPrivateData:
+		return true
+	}
+	return false
+}
+
+// peerBursts returns the burst handler that routes the bursts of the peers
+// with ctx.
+func (s *IPSCServer) peerBursts(ctx context.Context) func(byte, []byte, *net.UDPAddr, time.Time) {
+	return func(packetType byte, data []byte, _ *net.UDPAddr, at time.Time) {
+		s.fromPeer(ctx, packetType, data, at)
+	}
+}
+
+// fromPeer routes the user packet data of the type packetType, which a
+// peer sent and which came at at, and starts the call hang that its calls
+// give the peer.
+func (s *IPSCServer) fromPeer(ctx context.Context, packetType byte, data []byte, at time.Time) {
+	s.movingMu.Lock()
+	defer s.movingMu.Unlock()
+	if s.holdIngress(ctx, packetType, data, at) {
+		return
+	}
+	s.routeIngress(ctx, packetType, data, at)
+}
+
+func (s *IPSCServer) routeIngress(ctx context.Context, packetType byte, data []byte, at time.Time) {
+	for _, pkt := range s.translator.TranslateToMMDVM(packetType, data) {
+		if s.pacer != nil && pkt.Repeater <= math.MaxUint32 {
+			s.pacer.heard(slotKey{peer: uint32(pkt.Repeater), slot: pkt.Slot}, pkt)
+		}
+		if s.hub != nil {
+			s.hub.RoutePacketAt(ctx, pkt, models.RepeaterTypeIPSC, at)
+		}
+	}
+}
+
+// SetBurstHandler sets the handler of the user packets of the peers. at is
+// when the packet came.
+func (s *IPSCServer) SetBurstHandler(handler func(packetType byte, data []byte, addr *net.UDPAddr, at time.Time)) {
+	s.burstHandler = handler
+}
+
+type repeaterTimes struct {
+	ping, connected time.Time
+}
+
+// updateRepeaterDBTimes queues the LastPing of the repeater, and on connect
+// its Connected time, at most once per dbWriteDebounceInterval otherwise,
+// for the database, so that a slow store never holds up the packets of
+// every peer. The caller holds s.mu.
+func (s *IPSCServer) updateRepeaterDBTimes(p *peerState, repeaterID uint, isConnect bool) {
+	if s.db == nil {
+		return
+	}
+	now := s.clock.Now()
+	if !isConnect && !p.lastDBWrite.IsZero() && now.Sub(p.lastDBWrite) < dbWriteDebounceInterval {
+		return
+	}
+	p.lastDBWrite = now
+	s.timesMu.Lock()
+	defer s.timesMu.Unlock()
+	if s.timesClosed {
+		return
+	}
+	if s.times == nil {
+		s.times = map[uint]repeaterTimes{}
+	}
+	t := s.times[repeaterID]
+	t.ping = now
+	if isConnect {
+		t.connected = now
+	}
+	s.times[repeaterID] = t
+	if s.writingTimes {
+		return
+	}
+	s.writingTimes = true
+	s.timesWG.Add(1)
+	go s.writeTimes()
+}
+
+func (s *IPSCServer) writeTimes() {
+	defer s.timesWG.Done()
+	for {
+		s.timesMu.Lock()
+		times := s.times
+		s.times = nil
+		if len(times) == 0 {
+			s.writingTimes = false
+			s.timesMu.Unlock()
+			return
+		}
+		s.timesMu.Unlock()
+		for id, t := range times {
+			cols := map[string]any{"last_ping": t.ping}
+			if !t.connected.IsZero() {
+				cols["connected"] = t.connected
+			}
+			if err := s.db.Model(&models.Repeater{}).Where("id = ?", id).UpdateColumns(cols).Error; err != nil {
+				slog.Error("IPSC: error saving repeater times", "repeaterID", id, "error", err)
+			}
+		}
+	}
+}
+
+// closeTimes stops taking repeater times and waits for the queued ones.
+func (s *IPSCServer) closeTimes() {
+	s.timesMu.Lock()
+	s.timesClosed = true
+	s.timesMu.Unlock()
+	s.timesWG.Wait()
+}
+
+func (s *IPSCServer) ipList() *ipfilter.List {
+	if s.hub == nil {
+		return nil
+	}
+	return s.hub.IPSCIPs()
+}
+
+func toUDPAddr(a ipscsession.Addr) *net.UDPAddr {
+	return &net.UDPAddr{IP: net.IPv4(a.IP[0], a.IP[1], a.IP[2], a.IP[3]), Port: int(a.Port)}
+}
+
+func (s *IPSCServer) consumeHubPackets() {
+	defer s.wg.Done()
+	for rp := range s.hubHandle.Packets {
+		if rp.Barrier != nil {
+			close(rp.Barrier)
+			continue
+		}
+		s.route(rp)
+	}
+}
+
+// sendTo sends pkt to the IPSC peer whose ID is repeaterID. Each peer has
+// its own translator, so one stream sent to two peers keeps two states.
+func (s *IPSCServer) sendTo(repeaterID uint32, pkt models.Packet) {
+	s.sendToDue(repeaterID, pkt, time.Time{})
+}
+
+// sendToDue is sendTo for a packet that was due at due on the grid of the
+// replica that handed it over.
+func (s *IPSCServer) sendToDue(repeaterID uint32, pkt models.Packet, due time.Time) {
+	k := slotKey{peer: repeaterID, slot: pkt.Slot}
+	t := s.egressTranslator(repeaterID)
+	var before streamSnapshot
+	if pkt.StreamID <= math.MaxUint32 {
+		before = t.snapshot(uint32(pkt.StreamID))
+	}
+	frames := t.TranslateToIPSC(pkt)
+	if len(frames) == 0 {
+		return
+	}
+	var state *packetState
+	if pkt.StreamID <= math.MaxUint32 {
+		state = &packetState{before: before, after: t.snapshot(uint32(pkt.StreamID))}
+	}
+	for i, frame := range frames {
+		var last *packetState
+		if i == len(frames)-1 {
+			last = state
+		}
+		s.pacer.enqueue(k, pkt.StreamID, frame, frameEndsCall(frame), pkt, last, due)
+	}
+}
+
+func frameEndsCall(frame []byte) bool {
+	u, err := ipscwire.DecodeUser(frame)
+	return err == nil && u.Info.End()
+}
+
+// peerTranslator is the translator of one IPSC peer, with the time it
+// was last handed out.
+type peerTranslator struct {
+	t    *IPSCTranslator
+	used time.Time
+}
+
+func (s *IPSCServer) egressTranslator(repeaterID uint32) *IPSCTranslator {
+	s.egressMu.Lock()
+	defer s.egressMu.Unlock()
+	e, ok := s.egress[repeaterID]
+	if !ok {
+		if s.egress == nil {
+			s.egress = map[uint32]*peerTranslator{}
+		}
+		t := newTranslator(s.clock, s.localID)
+		if s.hub != nil {
+			t.onUndeliverable = func(pkt models.Packet, reason string) {
+				s.hub.ReportUndeliverable(pkt, models.RepeaterTypeIPSC, reason)
+			}
+		}
+		e = &peerTranslator{t: t}
+		s.egress[repeaterID] = e
+	}
+	e.used = s.clock.Now()
+	return e.t
+}
+
+func (s *IPSCServer) cleanupStaleStreams() {
+	if s.translator != nil {
+		s.translator.CleanupStaleStreams(staleStreamAge)
+	}
+	s.egressMu.Lock()
+	defer s.egressMu.Unlock()
+	for id, e := range s.egress {
+		e.t.CleanupStaleStreams(staleStreamAge)
+		if forward, reverse := e.t.StreamCount(); forward == 0 && reverse == 0 && s.clock.Since(e.used) > staleStreamAge {
+			delete(s.egress, id)
+		}
+	}
+}
+
+type destination struct {
+	id     uint32
+	to     *net.UDPAddr
+	packet []byte
+}
+
+func (s *IPSCServer) sendPacketInternal(data []byte) {
+	s.sendPacketToPeers(data, 0)
+}
+
+// sendPacketToPeers sends data to the registered peer only, or to every
+// registered peer when only is 0.
+func (s *IPSCServer) sendPacketToPeers(data []byte, only uint32) {
+	if s.stopped.Load() || s.m == nil {
+		return
+	}
+	s.mu.Lock()
+	dests := make([]destination, 0, len(s.peers))
+	for id := range s.peers {
+		if only != 0 && id != only {
+			continue
+		}
+		info, ok := s.m.Peer(id)
+		if !ok {
+			continue
+		}
+		packet, err := s.m.SignFor(info.ID, append(make([]byte, 0, len(data)+ipscauth.TrailerLen), data...))
+		if err != nil {
+			slog.Warn("failed signing IPSC user packet", "peerID", info.ID, "error", err)
+			continue
+		}
+		if !s.ipList().Allows(netip.AddrFrom4(info.Addr.IP)) {
+			continue
+		}
+		dests = append(dests, destination{id: info.ID, to: toUDPAddr(info.Addr), packet: packet})
+	}
+	s.mu.Unlock()
+	for _, d := range dests {
+		slog.Debug("IPSC burst sending", "peerID", d.id, "peer", d.to, "length", len(d.packet))
+		if err := s.writeTo(d.packet, d.to); err != nil {
+			slog.Warn("failed sending IPSC user packet", "error", err)
+		}
+	}
+}
+
+// HoldLookupWaits makes the reads of the server of the keys of its peers
+// wait for their loads until end is called, instead of for at most
+// lookup.Wait. A test that runs on a slow machine calls it, so that a slow
+// database drops no packet.
+func (s *IPSCServer) HoldLookupWaits() (end func()) {
+	ch := make(chan struct{})
+	s.keys.HoldWaits(ch)
+	var once sync.Once
+	return func() { once.Do(func() { close(ch) }) }
+}

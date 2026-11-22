@@ -1,0 +1,575 @@
+# The screenshots of the docs. hack/screenshots.sh makes each one, in this
+# order, into doc/Screenshots. Each shot:
+#   name   file name in doc/Screenshots
+#   phase  setup (the setup wizard) or main (the demo network)
+#   as     the user that is logged in: guest, n0call (the super admin),
+#          n1call, n2call or n3call
+#   needs  states of the demo network that the shot needs, made once, in
+#          order (see hooks.go)
+#   route  the page to open; none stays on the page of the shot before.
+#          {plugin:<kind>:<name>} in it is the ID of that plugin, such as
+#          {plugin:builtin:Parrot}
+#   wait   a text that the page must show
+#   steps  what to do before the capture; after: what to do after it
+#          fill <label or #id> = <text>, pick <label or #id> = <option>,
+#          toggle <label or #id>, click <button text>, clicktest <data-test>,
+#          presstest <data-test> (a mouse press, for tabs),
+#          clickcss <selector>, wait <text>, scroll <card title>, blur,
+#          file <selector> = <file in the work directory>, goto <route>,
+#          run <state>
+#   clip   card <title>, dialog or css <selector>; none takes the window
+#   frozen hold the clock still for the shot, for programs that ping on
+#          their own schedule
+#   pause  wait this long before the page opens, so that the plugins inside
+#          DMRHub send a heartbeat on the clock of the shot
+# The clock of DMRHub and of the browser starts at start, and moves on by
+# a fixed time for each shot, call and position, so the same UI gives the
+# same PNG files.
+start: 2026-10-13T18:30:00-05:00
+timezone: America/Chicago
+basemap:
+  key: basemap/omt-20260828.pmtiles
+  part_bytes: 500000000
+shots:
+  - name: setup-wizard-database.png
+    phase: setup
+    keep: true
+    route: /setup
+    wait: Test the connection
+    steps: ["fill #setup-database-database = DMRHub-demo.db", "click Test the connection", "wait Connected.", blur]
+    clip: card Database
+    after: ["click Save and continue", "wait Fix the marked settings"]
+  - name: setup-wizard-general.png
+    phase: setup
+    keep: true
+    steps: ["clicktest menu-general", "wait Network name", "fill #setup-network-name = DMRHub Demo", blur]
+  - name: setup-wizard-http.png
+    phase: setup
+    keep: true
+    steps: ["clicktest menu-http", "wait robots.txt"]
+    after: ["run configure"]
+  - name: setup-admin-user.png
+    phase: setup
+    keep: true
+    route: /setup/user
+    wait: Create User
+    steps: ["fill #dmr_id = 3000001", "fill #username = n0call", "fill #callsign = N0CALL", "fill #password = demo-admin-password", "fill #confirmPassword = demo-admin-password", blur]
+    after: ["click Create User"]
+
+  - name: register.png
+    phase: main
+    as: guest
+    route: /register
+    wait: Register
+    steps: ["fill #dmr_id = 3000006", "fill #username = n5call", "fill #callsign = N5CALL", "fill #password = demo-user-password", "fill #confirmPassword = demo-user-password", blur]
+  - name: setup-new-talkgroup.png
+    phase: main
+    as: n0call
+    route: /admin/talkgroups/new
+    wait: Talkgroup ID
+    steps: ["fill #id = 1", "fill #name = Local", "fill #description = Calls that stay on the local area", blur]
+    after: ["click Save", "wait Local"]
+  - name: admin-new-talkgroup.png
+    phase: main
+    as: n0call
+    route: /admin/talkgroups/new
+    wait: Talkgroup ID
+    steps: ["fill #id = 91", "fill #name = Chat", "fill #description = Open talkgroup for ragchew", blur]
+    after: ["click Save", "wait Chat"]
+  - name: setup-new-repeater.png
+    phase: main
+    as: n0call
+    route: /repeaters/new
+    wait: DMR Radio ID
+    steps: ["fill #radioID = 300000101", blur]
+    after: ["click Save"]
+  - name: connect-hotspot.png
+    phase: main
+    as: n0call
+    wait: Waiting for the first login
+    after: ["run hotspot-login"]
+  - name: setup-plugins.png
+    phase: main
+    as: n0call
+    pause: 16s
+    route: /admin/plugins
+    wait: Parrot
+  - name: setup-repeaters.png
+    phase: main
+    as: n0call
+    needs: [seed, call-local]
+    route: /repeaters
+    wait: "300000101"
+  - name: setup-lastheard.png
+    phase: main
+    as: n0call
+    route: /lastheard
+    wait: Local
+  - name: setup-repeater-calls.png
+    phase: main
+    as: n0call
+    needs: [call-parrot]
+    route: /repeaters/300000101
+    wait: "9990"
+    clip: card Last Heard
+  - name: lastheard-parrot.png
+    phase: main
+    as: n0call
+    route: /lastheard
+    wait: "9990"
+  - name: repeater-details.png
+    phase: main
+    as: n0call
+    route: /repeaters/300000101
+    wait: Online
+  - name: voice-codec.png
+    phase: main
+    as: n0call
+    route: /repeaters/300000101
+    wait: Voice codec
+    clip: card Voice codec
+  - name: nets.png
+    phase: main
+    as: n1call
+    needs: [net, net-checkins]
+    route: /nets
+    wait: Weekly Demo Net
+  - name: scheduled-net-form.png
+    phase: main
+    as: n1call
+    route: /nets/scheduled/new
+    wait: Talkgroup
+    steps: ["fill #name = Thursday Night Net", "fill #description = Weekly net for the Dallas area", blur]
+  - name: lastheard.png
+    phase: main
+    as: n0call
+    needs: [traffic, texts]
+    route: /lastheard
+    wait: N3CALL
+  - name: messages-inbox.png
+    phase: main
+    as: n0call
+    route: /messages
+    wait: see you on the net
+  - name: admin-messages.png
+    phase: main
+    as: n0call
+    route: /admin/messages
+    wait: N2CALL
+  - name: settings.png
+    phase: main
+    as: n0call
+    route: /settings
+    wait: SMS Storage
+  - name: settings-sms-storage.png
+    phase: main
+    as: n0call
+    route: /settings
+    wait: SMS Storage
+    clip: card SMS Storage
+  - name: oauth-consent.png
+    phase: main
+    as: n0call
+    route: /oauth/authorize?client_id=http%3A%2F%2Flocalhost%3A8080&code_challenge=GdmGSxfPo_kyG3zHGwdmVpxCf9hgm2J8na5PZXhtDBM&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback&response_type=code&scope=talkgroups%3Aread+lastheard%3Aread&state=demo
+    wait: localhost:8080
+    after: ["click Allow", "run allow-app"]
+  - name: settings-apps-card.png
+    phase: main
+    as: n0call
+    route: /settings
+    wait: localhost:8080
+    clip: card Apps
+  - name: browser-radio-login.png
+    phase: main
+    as: n0call
+    route: "radio:/"
+    wait: Hear a talkgroup
+    steps: ["click Talk", "wait I understand", "click I understand", "fill Hub = http://127.0.0.1:3955", blur]
+    after: ["click Log in with DMRHub", "wait Allow", "click Allow", "wait Welcome"]
+  - name: browser-radio-hotspots.png
+    phase: main
+    as: n0call
+    wait: Welcome
+    steps: ["click Register a new hotspot", "fill #reg-suffix = 07", "fill #reg-name = Laptop radio", "dclick Register", "wait Connect now", "key Escape", "wait READY"]
+  - name: positions-map.png
+    phase: main
+    as: n0call
+    needs: [positions]
+    route: /positions
+    wait: "3000001"
+  - name: radio-positions-settings.png
+    phase: main
+    as: n0call
+    route: /positions/3000001
+    wait: "3000001"
+  - name: admin-users.png
+    phase: main
+    as: n0call
+    route: /admin/users
+    wait: N3CALL
+  - name: admin-user-approvals.png
+    phase: main
+    as: n0call
+    route: /admin/users/approval
+    wait: N4CALL
+  - name: admin-repeaters.png
+    phase: main
+    as: n0call
+    route: /admin/repeaters
+    wait: "990001"
+  - name: admin-talkgroups.png
+    phase: main
+    as: n0call
+    route: /admin/talkgroups
+    wait: Demo Net
+  - name: admin-new-peer.png
+    phase: main
+    as: n0call
+    route: /admin/peers/new
+    wait: Peer
+    steps: ["pick #owner = 3000001", "fill #id = 3000900", "fill #ip = 192.0.2.10", "fill #port = 62035", "toggle #ingress", "toggle #egress", blur]
+    after: ["click Save", "sleep 2s", "goto /admin/peers", "wait 3000900"]
+  - name: peer-rules.png
+    phase: main
+    as: n0call
+    needs: [peer]
+    route: /admin/peers/3000900
+    wait: Rules
+    clip: card Rules
+  - name: admin-setup.png
+    phase: main
+    as: n0call
+    route: /admin/setup
+    wait: Network name
+  - name: admin-plugins-list.png
+    phase: main
+    as: n0call
+    pause: 16s
+    route: /admin/plugins
+    wait: Parrot
+  - name: admin-nets.png
+    phase: main
+    as: n0call
+    needs: [ended-net]
+    route: /admin/nets
+    wait: Weekly Demo Net
+  - name: admin-menu.png
+    phase: main
+    as: n0call
+    route: /lastheard
+    wait: Admin
+    steps: ["click Admin"]
+  - name: admin-require-password-change.png
+    phase: main
+    as: n0call
+    route: /admin/users
+    wait: N1CALL
+    steps: ["click Require password change", "wait Generate a random password", "clicktest require-generate", "wait Their current password stops working", blur]
+    clip: dialog
+  - name: repeaters-edit.png
+    phase: main
+    as: n0call
+    route: /repeaters
+    wait: "990001"
+    steps: ["click Edit"]
+  - name: repeater-rules.png
+    phase: main
+    as: n0call
+    needs: [rules]
+    route: /repeaters/300000101
+    wait: Rules
+    clip: card Rules
+  - name: settings-email.png
+    phase: main
+    as: n0call
+    needs: [email]
+    route: /settings
+    wait: n0call@example.com
+    clip: card Email
+  - name: admin-setup-ipsc.png
+    phase: main
+    as: n0call
+    route: /admin/setup#ipsc
+    wait: Network ID
+  - name: admin-setup-positions.png
+    phase: main
+    as: n0call
+    route: /admin/setup#positions
+    wait: APRS-IS callsign
+    steps: ["fill APRS-IS callsign = N0CALL-10", blur]
+  - name: admin-setup-transcoding.png
+    phase: main
+    as: n0call
+    route: /admin/setup#transcoding
+    wait: AMBE servers convert calls
+  - name: setup-plugins-card.png
+    phase: main
+    as: n0call
+    route: /admin/setup#plugins
+    wait: Run plugins inside DMRHub
+  - name: admin-plugin-upload.png
+    phase: main
+    as: n0call
+    route: /admin/plugins/upload
+    wait: Plugin file
+    steps: ["file #up-file = parrot.wasm", "wait IDs", "fill #up-ids = 9991", blur]
+    after: ["clicktest upload-go", "wait is running."]
+  - name: admin-plugin-inside.png
+    phase: main
+    as: n0call
+    route: "/admin/plugins/{plugin:uploaded:Parrot}"
+    wait: Upload a new version
+  - name: admin-plugin-status.png
+    phase: main
+    as: n0call
+    route: "/admin/plugins/{plugin:builtin:Status}"
+    wait: Built in
+  - name: admin-plugin-aprs.png
+    phase: main
+    as: n0call
+    route: "/admin/plugins/{plugin:builtin:APRS messages}"
+    wait: APRS messages
+    steps: ["fill #pp-ids = 4700", "toggle #pp-on", blur]
+    after: ["clicktest inside-save", "wait Saved."]
+  - name: settings-plugin-aprs.png
+    phase: main
+    as: n0call
+    needs: [aprs-switch]
+    route: /settings
+    wait: Your APRS address
+    clip: card APRS messages
+  - name: admin-plugin-token.png
+    phase: main
+    as: n0call
+    route: /admin/plugins/new
+    wait: Name
+    steps: ["fill #plugin-name = Net check-in", "fill #from-0 = 9995", "fill #to-0 = 9995", "click Save", "wait Copy the token", blur]
+    clip: dialog
+  - name: admin-plugin-mailbox.png
+    phase: main
+    as: n0call
+    route: "/admin/plugins/{plugin:builtin:Mailbox}"
+    wait: Radio and talkgroup IDs, and ranges
+    steps: ["fill #pp-ids = 4321", "toggle #pp-on", "clicktest inside-save", "wait Saved.", blur]
+  - name: external-repeater-dmrgateway.png
+    phase: main
+    as: n0call
+    needs: [dmrgateway]
+    frozen: true
+    route: /repeaters/300000102
+    wait: Package ID
+    steps: ["scroll Software"]
+  - name: admin-unassigned-repeaters.png
+    phase: main
+    as: n0call
+    needs: [unassigned]
+    route: /admin/repeaters/unassigned
+    wait: "990361"
+  - name: settings-token-full.png
+    phase: main
+    as: n0call
+    needs: [tokens]
+    route: /settings
+    wait: Backup job
+    steps: ["click New token", "fill #token-name = Nightly backup", "toggle Full account access", "pick #token-expires = In 1 year", blur]
+    clip: card API tokens
+  - name: settings-token-new.png
+    phase: main
+    as: n0call
+    route: /settings
+    wait: Backup job
+    steps: ["click New token", "fill #token-name = Net logger", "toggle See the talkgroups of this network", "toggle See last heard for your radio IDs and your hotspots", blur]
+    clip: card API tokens
+    after: ["click Make token", "wait Copy the token now"]
+  - name: settings-tokens-card.png
+    phase: main
+    as: n0call
+    wait: Copy the token now
+    clip: card API tokens
+  - name: repeater-cosysops.png
+    phase: main
+    as: n0call
+    needs: [cosysops]
+    route: /repeaters/300000101
+    wait: Cancel invite
+    clip: card Co-sysops
+  - name: repeaters-cosysop-invite.png
+    phase: main
+    as: n2call
+    needs: [cosysops]
+    route: /repeaters
+    wait: Co-sysop invites
+    clip: card Co-sysop invites
+  - name: repeaters-cosysop.png
+    phase: main
+    as: n1call
+    needs: [cosysops]
+    route: /repeaters
+    wait: Co-sysop
+  - name: repeater-connection-log.png
+    phase: main
+    as: n0call
+    needs: [wrong-login]
+    route: /repeaters/300000101
+    wait: "Login refused: wrong password."
+    clip: card Connection log
+  - name: repeater-reset.png
+    phase: main
+    as: n0call
+    route: /repeaters/300000101
+    wait: Reset connection
+    steps: ["click Reset connection", "wait The hotspot logs in again by itself."]
+    clip: dialog
+  - name: repeater-on-air.png
+    phase: main
+    as: n1call
+    frozen: true
+    route: /repeaters/300000201
+    wait: Connection log
+    steps: ["run open-call", "wait Drop call"]
+    clip: card On the air
+    after: ["run end-call"]
+  - name: repeater-offline-alert.png
+    phase: main
+    as: n1call
+    needs: [seed, offline-alert]
+    route: /repeaters/300000201
+    wait: Emails go to
+    clip: card Offline alert
+  - name: storefwd-settings.png
+    phase: main
+    as: n0call
+    needs: [seed, texts, held]
+    route: /settings
+    wait: the net moved to 8 pm
+    clip: card Store and forward
+  - name: storefwd-outbox.png
+    phase: main
+    as: n2call
+    needs: [seed, texts, held]
+    route: /messages
+    wait: Private messages sent to your radio IDs
+    steps: ["presstest tab-outbox", "wait Held: radio format not known yet"]
+  - name: storefwd-setup.png
+    phase: main
+    as: n0call
+    route: /admin/setup#messages
+    wait: Hold messages for (days)
+  - name: local-groups-list.png
+    phase: main
+    as: n0call
+    needs: [seed, local-groups]
+    route: /repeaters?view=local
+    wait: Plano Hotspots
+  - name: local-group.png
+    phase: main
+    as: n0call
+    route: /localgroups/1
+    wait: Waiting for the owner
+  - name: local-group-ask.png
+    phase: main
+    as: n2call
+    route: /repeaters/300000301
+    wait: asks to add this repeater
+  - name: local-group-subscriptions.png
+    phase: main
+    as: n1call
+    route: /repeaters/300000201
+    wait: Dallas Local
+    clip: card Talkgroup Subscriptions
+  - name: local-group-lastheard.png
+    phase: main
+    as: n0call
+    needs: [local-call]
+    route: /lastheard
+    wait: Dallas Local
+  - name: admin-setup-local-talkgroups.png
+    phase: main
+    as: n0call
+    route: /admin/setup#routing
+    wait: Local talkgroups
+    clip: card Talkgroups
+  - name: settings-plugin-switch.png
+    phase: main
+    as: n0call
+    needs: [plugin-switch]
+    route: /settings
+    wait: Net check-in list
+    clip: card Net check-in list
+  - name: settings-plugin-mailbox.png
+    phase: main
+    as: n1call
+    needs: [seed]
+    pause: 16s
+    route: /settings
+    wait: Mailbox email notice
+    steps: ["clickcss [data-test$=\"-email\"] [data-slot=switch]", "wait To read your messages", blur]
+    clip: card Mailbox email notice
+  - name: settings-on-air-code-setup.png
+    phase: main
+    as: n3call
+    needs: [seed]
+    route: /settings
+    wait: On-air code
+    steps: ["click Set up", "wait Scan the code", "run on-air-example", "fill #on-air-code = 482913", blur]
+    clip: card On-air code
+  - name: settings-on-air-code-on.png
+    phase: main
+    as: n3call
+    needs: [seed, on-air-code]
+    route: /settings
+    wait: "300000401, TS2"
+    clip: card On-air code
+  - name: settings-on-air-code-off.png
+    phase: main
+    as: n3call
+    route: /settings
+    wait: "300000401, TS2"
+    steps: ["click Turn off", "fill #on-air-off-code = 482913", blur]
+    clip: card On-air code
+  - name: admin-users-on-air-code.png
+    phase: main
+    as: n0call
+    route: /admin/users
+    wait: Turn off on-air code
+  - name: admin-setup-prompts.png
+    phase: main
+    as: n0call
+    needs: [seed, spoken-prompts]
+    route: /admin/setup#routing
+    wait: Tell the radio why its call was refused
+    clip: css [data-test=prompt-list]
+  - name: settings-prompt-voice.png
+    phase: main
+    as: n1call
+    needs: [seed, spoken-prompts]
+    route: /settings
+    wait: Network default
+    clip: card Spoken prompts
+  - name: setup-listen.png
+    phase: main
+    needs: [seed]
+    as: n0call
+    route: /admin/setup#accounts
+    wait: Listen-only monitor
+    clip: card Listen-only monitor
+  - name: talkgroup-listen.png
+    phase: main
+    needs: [seed]
+    as: n0call
+    route: /talkgroups/3100
+    wait: Let visitors listen
+    clip: card Listen-only monitor
+  - name: browser-radio-listen-or-talk.png
+    phase: main
+    needs: [seed]
+    as: guest
+    route: "visitor:/settings/connection"
+    wait: Host
+    steps: ["fill Host = http://127.0.0.1:3955", blur, "goto visitor:/", "wait Hear a talkgroup"]
+  - name: browser-radio-listen.png
+    phase: main
+    needs: [seed]
+    as: guest
+    wait: Hear a talkgroup
+    steps: ["click Listen", "wait LISTENING", "pick [data-test=listen-talkgroup] = 3100", "wait TG 3100", "run listen-calls", "wait N0CALL"]

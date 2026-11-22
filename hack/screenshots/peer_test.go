@@ -1,0 +1,186 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package main
+
+import (
+	"net"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/dmrgo/v2/transport/dmrd"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func fakeMaster(t *testing.T, answer dmrd.Command) *peer {
+	t.Helper()
+	m, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = m.Close() })
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, from, err := m.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if dmrd.Classify(buf[:n], dmrd.DialectMMDVM) != dmrd.CommandRPTPING {
+				continue
+			}
+			b, err := (&dmrd.Control{Command: answer, ID: 300000401}).AppendBinary(nil, dmrd.DialectMMDVM)
+			if err == nil {
+				_, _ = m.WriteToUDP(b, from)
+			}
+		}
+	}()
+	addr, ok := m.LocalAddr().(*net.UDPAddr)
+	require.True(t, ok)
+	conn, err := net.DialUDP("udp", nil, addr)
+	require.NoError(t, err)
+	p := newPeer(300000401, conn)
+	t.Cleanup(p.close)
+	return p
+}
+
+// TestAPingWaitsForThePong pings a hub that answers with MSTPONG: the
+// ping returns once the hub answered it, so that the demo clock moves on
+// only after the hub took the ping.
+func TestAPingWaitsForThePong(t *testing.T) {
+	t.Parallel()
+	assert.NoError(t, fakeMaster(t, dmrd.CommandMSTPONG).ping())
+}
+
+// TestAPingThatTheHubRefusesFails pings a hub that ended the session of
+// the repeater and answers with MSTNAK. The ping must fail at once, so that
+// the shot names the repeater whose session ended instead of waiting for
+// a ping that DMRHub never saves.
+func TestAPingThatTheHubRefusesFails(t *testing.T) {
+	t.Parallel()
+	assert.ErrorContains(t, fakeMaster(t, dmrd.CommandMSTNAK).ping(), "refused")
+}
+
+// TestSteppedPlayWaitsForDMRHubBeforeEachStep plays the bursts of a short
+// call with a clock step before each. Before each step after the first, and at the
+// end, the hub must have answered a ping sent after the burst before:
+// the hub reads the packets of a repeater in order, so the burst then has
+// the time of its own step, however late the hub handles it.
+func TestSteppedPlayWaitsForDMRHubBeforeEachStep(t *testing.T) {
+	t.Parallel()
+	m, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = m.Close() })
+	var mu sync.Mutex
+	var heard []string
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, from, err := m.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			c := dmrd.Classify(buf[:n], dmrd.DialectMMDVM)
+			mu.Lock()
+			heard = append(heard, c.String())
+			mu.Unlock()
+			if c != dmrd.CommandRPTPING {
+				continue
+			}
+			b, err := (&dmrd.Control{Command: dmrd.CommandMSTPONG, ID: 300000401}).AppendBinary(nil, dmrd.DialectMMDVM)
+			if err == nil {
+				_, _ = m.WriteToUDP(b, from)
+			}
+		}
+	}()
+	addr, ok := m.LocalAddr().(*net.UDPAddr)
+	require.True(t, ok)
+	conn, err := net.DialUDP("udp", nil, addr)
+	require.NoError(t, err)
+	p := newPeer(300000401, conn)
+	t.Cleanup(p.close)
+	bursts, err := voiceCall(true, 8, 3000004, 1)
+	require.NoError(t, err)
+	var steps []string
+	require.NoError(t, p.play(transmission{src: 3000004, dst: 8, group: true, slot2: true, bursts: bursts}, 1, func(k int) error {
+		mu.Lock()
+		steps = append(steps, strings.Join(heard, " "))
+		mu.Unlock()
+		return nil
+	}))
+	mu.Lock()
+	defer mu.Unlock()
+	pair := []string{dmrd.CommandDMRD.String(), dmrd.CommandRPTPING.String()}
+	want := make([]string, 0, len(bursts))
+	sent := make([]string, 0, len(pair)*len(bursts))
+	for range bursts {
+		want = append(want, strings.Join(sent, " "))
+		sent = append(sent, pair...)
+	}
+	assert.Equal(t, want, steps)
+	assert.Equal(t, sent, heard)
+}
+
+// TestWrongLoginEndsWithAPingOfTheHotspot runs the wrong logins against a
+// hub that refuses them. The hook must then ping the hotspot that is
+// logged in, so that the demo clock moves on only after the hub handled
+// the last refusal.
+func TestWrongLoginEndsWithAPingOfTheHotspot(t *testing.T) {
+	t.Parallel()
+	m, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = m.Close() })
+	var mu sync.Mutex
+	var heard []string
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, from, err := m.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			c := dmrd.Classify(buf[:n], dmrd.DialectMMDVM)
+			mu.Lock()
+			heard = append(heard, c.String())
+			mu.Unlock()
+			answer := dmrd.CommandMSTNAK
+			if c == dmrd.CommandRPTPING {
+				answer = dmrd.CommandMSTPONG
+			}
+			b, err := (&dmrd.Control{Command: answer, ID: 300000101}).AppendBinary(nil, dmrd.DialectMMDVM)
+			if err == nil {
+				_, _ = m.WriteToUDP(b, from)
+			}
+		}
+	}()
+	addr, ok := m.LocalAddr().(*net.UDPAddr)
+	require.True(t, ok)
+	conn, err := net.DialUDP("udp", nil, addr)
+	require.NoError(t, err)
+	r := newRunner(options{}, nil, nil, "http://hub", time.Time{})
+	r.mmdvm = addr.String()
+	r.peers[300000101] = newPeer(300000101, conn)
+	t.Cleanup(r.peers[300000101].close)
+	require.NoError(t, wrongLogin(t.Context(), r))
+	mu.Lock()
+	defer mu.Unlock()
+	login, ping := dmrd.CommandRPTL.String(), dmrd.CommandRPTPING.String()
+	assert.Equal(t, []string{login, login, login, ping}, heard)
+}

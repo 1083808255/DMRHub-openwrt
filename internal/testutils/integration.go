@@ -1,0 +1,608 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package testutils
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"slices"
+	"strconv"
+	"sync"
+	"testing"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/calltracker"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/hub"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/ipsc"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/mmdvm"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/openbridge"
+	"github.com/USA-RedDragon/DMRHub/internal/kv"
+	"github.com/USA-RedDragon/DMRHub/internal/messages"
+	"github.com/USA-RedDragon/DMRHub/internal/plugins"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/USA-RedDragon/DMRHub/internal/storeforward"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils/memdb"
+	"github.com/USA-RedDragon/configulator/v2"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+// IntegrationStack is a full DMRHub test environment with real MMDVM and IPSC
+// servers on ephemeral UDP ports, backed by a SQLite file and in-memory
+// pubsub and KV.
+type IntegrationStack struct {
+	// Current holds the config of the stack, which the services that read
+	// a config.Source take. Change it with ChangeConfig.
+	Current          *config.Current
+	DB               *gorm.DB
+	Hub              *hub.Hub
+	PubSub           pubsub.PubSub
+	KV               kv.KV
+	CallTracker      *calltracker.CallTracker
+	MessageStore     *messages.Store
+	StoreForward     *storeforward.Service
+	MMDVMServer      *mmdvm.Server
+	IPSCServer       *ipsc.IPSCServer
+	OpenBridgeServer *openbridge.Server
+	MMDVMAddr        string // host:port of the MMDVM server
+	IPSCAddr         string // host:port of the IPSC server
+	OpenBridgeAddr   string // host:port of the OpenBridge server
+	// WebTransportAddr is the host:port of the WebTransport listener of
+	// the MMDVM server, empty when it is off.
+	WebTransportAddr string
+
+	plugins    *Plugins
+	hubOptions []hub.Option
+	bounded    bool
+
+	replicasMu sync.Mutex
+	replicas   []*hub.Hub
+}
+
+type lookupHolder interface {
+	HoldLookupWaits() (end func())
+}
+
+func holdWaits(t *testing.T, h *hub.Hub, bounded bool, servers ...lookupHolder) {
+	if bounded {
+		return
+	}
+	t.Cleanup(h.HoldLookupWaits())
+	t.Cleanup(h.HoldStreamClaimWaits())
+	t.Cleanup(h.HoldLastSeenWaits())
+	for _, s := range servers {
+		t.Cleanup(s.HoldLookupWaits())
+	}
+}
+
+func boundedWaits(backends []Backend) bool {
+	for _, be := range backends {
+		if be.BoundedWaits {
+			return true
+		}
+	}
+	return false
+}
+
+// SetupIntegrationStack creates and starts a full integration test environment.
+// The hub is NOT started yet — call SeedAndStart() after seeding your DB data.
+// Its hubs wait for each database lookup, stream claim and last-heard read
+// until the answer comes, so that a slow machine drops no burst; pass
+// BoundedWaits to keep the bounds of production.
+func SetupIntegrationStack(t *testing.T, backends ...Backend) *IntegrationStack {
+	t.Helper()
+
+	defConfig, err := configulator.New(config.ConfigSchema()).Default()
+	require.NoError(t, err)
+
+	memdb.Use(t, &defConfig)
+
+	// Apply backend overrides (e.g. Postgres+Redis instead of SQLite+memory).
+	for _, be := range backends {
+		be.Setup(t, &defConfig)
+	}
+	useMigratedCopy(t, &defConfig)
+
+	const localhost = "127.0.0.1"
+
+	// Ephemeral ports
+	defConfig.DMR.MMDVM.Bind = localhost
+	defConfig.DMR.MMDVM.Port = 0
+
+	defConfig.DMR.IPSC.Enabled = true
+	defConfig.DMR.IPSC.Bind = localhost
+	defConfig.DMR.IPSC.Port = 0
+	defConfig.DMR.IPSC.NetworkID = 999999
+
+	defConfig.DMR.OpenBridge.Enabled = true
+	defConfig.DMR.OpenBridge.Bind = localhost
+	defConfig.DMR.OpenBridge.Port = 0
+
+	database, err := db.MakeDB(&defConfig)
+	require.NoError(t, err)
+
+	ps, err := pubsub.MakePubSub(context.Background(), &defConfig)
+	require.NoError(t, err)
+
+	var kvOpts []kv.Option
+	if !boundedWaits(backends) {
+		kvOpts = append(kvOpts, kv.WithoutCallBound())
+	}
+	kvStore, err := kv.MakeKV(context.Background(), &defConfig, kvOpts...)
+	require.NoError(t, err)
+
+	for _, be := range backends {
+		if be.WrapKV != nil {
+			kvStore = be.WrapKV(kvStore)
+		}
+		if be.WrapPubSub != nil {
+			ps = be.WrapPubSub(ps)
+		}
+	}
+
+	current := config.NewCurrent(&defConfig)
+	ct := calltracker.NewCallTracker(database, ps, kvStore)
+	store := messages.NewStore(database, kvStore)
+	pusher := messages.NewPusher(database, ps)
+	sf := storeforward.New(database, current, "test", storeforward.WithFlush(func() {
+		ct.Flush()
+		store.Flush()
+	}))
+	store.SetNotify(func(m *models.Message) {
+		pusher.Push(m)
+		sf.Stored(m)
+		plugins.PublishText(ps, m)
+	})
+	ct.SetDataObserver(store)
+
+	var hubOpts []hub.Option
+	for _, be := range backends {
+		hubOpts = append(hubOpts, be.HubOptions...)
+	}
+	h := hub.NewHub(database, kvStore, ps, ct, hubOpts...)
+	h.SetStoreForward(sf)
+	sf.SetSender(h)
+	sf.Start()
+
+	// Create servers
+	mmdvmServer, err := mmdvm.MakeServer(&defConfig, h, database, ps, kvStore, "test", "test")
+	require.NoError(t, err)
+
+	ipscServer := ipsc.NewIPSCServer(&defConfig, h, database)
+
+	obServer, err := openbridge.MakeServer(&defConfig, h, database, ps, kvStore)
+	require.NoError(t, err)
+
+	stack := &IntegrationStack{
+		Current:          current,
+		DB:               database,
+		Hub:              h,
+		PubSub:           ps,
+		KV:               kvStore,
+		CallTracker:      ct,
+		MessageStore:     store,
+		StoreForward:     sf,
+		MMDVMServer:      &mmdvmServer,
+		hubOptions:       hubOpts,
+		IPSCServer:       ipscServer,
+		OpenBridgeServer: &obServer,
+	}
+
+	t.Cleanup(func() {
+		_ = obServer.Stop(context.Background())
+		_ = ipscServer.Stop(context.Background())
+		_ = stack.MMDVMServer.Stop(context.Background())
+		h.Stop(context.Background())
+		ct.Stop()
+		store.Stop()
+		sf.Stop()
+		sqlDB, _ := database.DB()
+		_ = sqlDB.Close()
+		_ = ps.Close()
+		_ = kvStore.Close()
+	})
+	stack.bounded = boundedWaits(backends)
+	holdWaits(t, h, stack.bounded, ipscServer, &obServer)
+
+	return stack
+}
+
+// Replica is a second running copy of the app made by SpawnSecondReplica,
+// with its own Hub, call tracker and MMDVM, IPSC and OpenBridge servers.
+type Replica struct {
+	Hub              *hub.Hub
+	CallTracker      *calltracker.CallTracker
+	MMDVMServer      *mmdvm.Server
+	IPSCServer       *ipsc.IPSCServer
+	OpenBridgeServer *openbridge.Server
+	MMDVMAddr        string
+	IPSCAddr         string
+	OpenBridgeAddr   string
+	WebTransportAddr string
+}
+
+// Config returns a copy of the config that the stack runs with now.
+func (s *IntegrationStack) Config() config.Config {
+	return *s.Current.Get()
+}
+
+// ChangeConfig makes a copy of the config of the stack, changes the copy
+// with change and stores it in Current, as Setup does. The services that
+// read Current take the new config; the servers keep the one that they
+// were made with.
+func (s *IntegrationStack) ChangeConfig(change func(*config.Config)) {
+	next := s.Config()
+	change(&next)
+	s.Current.Set(&next)
+}
+
+// SpawnSecondReplica creates a second Hub with MMDVM, IPSC and OpenBridge
+// servers that share the same DB, pubsub, KV and hub options as the
+// original stack, simulating two replicas of the app. The servers listen on
+// new ports and are started; repeater subscriptions are activated when
+// repeaters connect. From then on the seed helpers of the stack return
+// once the replica took the change.
+func (s *IntegrationStack) SpawnSecondReplica(t *testing.T) Replica {
+	t.Helper()
+	r, _ := s.spawnReplica(t, false)
+	return r
+}
+
+// SpawnRegisteredReplica starts a second replica, as SpawnSecondReplica
+// does, and gives its hub a replica ID with Register before its servers
+// start. It returns the replica and its registry.
+func (s *IntegrationStack) SpawnRegisteredReplica(t *testing.T) (*Replica, *servers.InstanceRegistry) {
+	t.Helper()
+	r, reg := s.spawnReplica(t, true)
+	return &r, reg
+}
+
+func (s *IntegrationStack) spawnReplica(t *testing.T, register bool) (Replica, *servers.InstanceRegistry) {
+	t.Helper()
+
+	ct2 := calltracker.NewCallTracker(s.DB, s.PubSub, s.KV)
+	store2 := messages.NewStore(s.DB, s.KV)
+	store2.SetNotify(messages.NewPusher(s.DB, s.PubSub).Push)
+	ct2.SetDataObserver(store2)
+	hub2 := hub.NewHub(s.DB, s.KV, s.PubSub, ct2, s.hubOptions...)
+	var reg *servers.InstanceRegistry
+	if register {
+		reg = Register(t, hub2, s.KV)
+	}
+
+	cfg2 := s.Config()
+	cfg2.DMR.MMDVM.Port = 0
+	cfg2.DMR.MMDVM.WebTransport.Port = 0
+	cfg2.DMR.IPSC.Port = 0
+	cfg2.DMR.OpenBridge.Port = 0
+
+	mmdvm2, err := mmdvm.MakeServer(&cfg2, hub2, s.DB, s.PubSub, s.KV, "test", "test")
+	require.NoError(t, err)
+	require.NoError(t, mmdvm2.Start(context.Background()))
+
+	ipsc2 := ipsc.NewIPSCServer(&cfg2, hub2, s.DB)
+	require.NoError(t, ipsc2.Start(context.Background()))
+
+	ob2, err := openbridge.MakeServer(&cfg2, hub2, s.DB, s.PubSub, s.KV)
+	require.NoError(t, err)
+	require.NoError(t, ob2.Start(context.Background()))
+
+	t.Cleanup(func() {
+		_ = ob2.Stop(context.Background())
+		_ = ipsc2.Stop(context.Background())
+		_ = mmdvm2.Stop(context.Background())
+		hub2.Stop(context.Background())
+		ct2.Stop()
+		store2.Stop()
+	})
+	holdWaits(t, hub2, s.bounded, ipsc2, &ob2)
+	s.replicasMu.Lock()
+	s.replicas = append(s.replicas, hub2)
+	s.replicasMu.Unlock()
+
+	return Replica{
+		Hub:              hub2,
+		CallTracker:      ct2,
+		MMDVMServer:      &mmdvm2,
+		IPSCServer:       ipsc2,
+		OpenBridgeServer: &ob2,
+		MMDVMAddr:        mmdvm2.Server.LocalAddr().String(),
+		IPSCAddr:         ipsc2.Addr().String(),
+		OpenBridgeAddr:   ob2.Server.LocalAddr().String(),
+		WebTransportAddr: addrOf(mmdvm2.WebTransportAddr()),
+	}, reg
+}
+
+// Replica returns the first replica of the stack, the one that
+// SetupIntegrationStack made, as a Replica.
+func (s *IntegrationStack) Replica() *Replica {
+	return &Replica{
+		Hub:              s.Hub,
+		CallTracker:      s.CallTracker,
+		MMDVMServer:      s.MMDVMServer,
+		IPSCServer:       s.IPSCServer,
+		OpenBridgeServer: s.OpenBridgeServer,
+		MMDVMAddr:        s.MMDVMAddr,
+		IPSCAddr:         s.IPSCAddr,
+		OpenBridgeAddr:   s.OpenBridgeAddr,
+		WebTransportAddr: s.WebTransportAddr,
+	}
+}
+
+func addrOf(a net.Addr) string {
+	if a == nil {
+		return ""
+	}
+	return a.String()
+}
+
+// SpawnFullReplica starts a second replica, as SpawnSecondReplica does, and
+// returns it.
+func (s *IntegrationStack) SpawnFullReplica(t *testing.T) *Replica {
+	t.Helper()
+	r := s.SpawnSecondReplica(t)
+	return &r
+}
+
+// RestartMode is how RestartMMDVM stops the MMDVM server.
+type RestartMode int
+
+const (
+	// RestartClose stops the server as a lone instance does: it sends MSTCL
+	// to its repeaters, which log in again.
+	RestartClose RestartMode = iota
+	// RestartHandoff stops the server as when another replica is alive: it
+	// sends nothing, and the new server resumes the sessions from the KV
+	// records.
+	RestartHandoff
+	// RestartLost stops the server without MSTCL and drops the KV records
+	// of the repeaters, as after a crash, so the new server answers their
+	// pings with MSTNAK.
+	RestartLost
+)
+
+// RestartMMDVM stops the MMDVM server as mode says and starts a new one on
+// the same address, as a restart of the hub does. The stack stops the new
+// server at the end of the test.
+func (s *IntegrationStack) RestartMMDVM(t *testing.T, mode RestartMode) {
+	t.Helper()
+	ctx := servers.WithGracefulHandoff(context.Background(), mode != RestartClose)
+	require.NoError(t, s.MMDVMServer.Stop(ctx))
+	if mode == RestartLost {
+		kv := servers.MakeKVClient(s.KV)
+		ids, err := kv.ListRepeaters(ctx)
+		require.NoError(t, err)
+		for _, id := range ids {
+			kv.DeleteRepeater(ctx, id)
+		}
+	}
+
+	_, port, err := net.SplitHostPort(s.MMDVMAddr)
+	require.NoError(t, err)
+	cfg := s.Config()
+	cfg.DMR.MMDVM.Port, err = strconv.Atoi(port)
+	require.NoError(t, err)
+	m, err := mmdvm.MakeServer(&cfg, s.Hub, s.DB, s.PubSub, s.KV, "test", "test")
+	require.NoError(t, err)
+	require.NoError(t, m.Start(context.Background()))
+	s.MMDVMServer = &m
+}
+
+// Change notices that the seed helpers wait for on the replicas.
+const (
+	userNotices      = "hub:users:changed"
+	talkgroupNotices = "hub:talkgroups:changed"
+	repeaterNotices  = "hub:repeaters:changed"
+	peerNotices      = "hub:peers:changed"
+	// noticeMarker is the ID of no user, talkgroup, repeater or peer.
+	noticeMarker = 4000000001
+)
+
+// awaitReplicas announces noticeMarker on topic and waits until each
+// replica that the stack spawned took it. A replica takes the notices of a
+// topic one at a time in order, so it then took every notice of topic that
+// came before, and the watchers that on adds ran for them.
+func (s *IntegrationStack) awaitReplicas(t *testing.T, topic string, on func(*hub.Hub, func(uint)) func()) {
+	t.Helper()
+	s.replicasMu.Lock()
+	hubs := slices.Clone(s.replicas)
+	s.replicasMu.Unlock()
+	if len(hubs) == 0 {
+		return
+	}
+	taken := make(chan struct{}, len(hubs))
+	for _, h := range hubs {
+		stop := on(h, func(id uint) {
+			if id != noticeMarker {
+				return
+			}
+			select {
+			case taken <- struct{}{}:
+			default:
+			}
+		})
+		defer stop()
+	}
+	require.NoError(t, s.PubSub.Publish(topic, []byte("testutils:"+strconv.Itoa(noticeMarker))))
+	got := Collect(taken, DeliveryWait, func(got []struct{}) bool { return len(got) == len(hubs) })
+	require.Len(t, got, len(hubs), "the replicas did not take the notices of %s", topic)
+}
+
+// StartServers starts the Hub and the MMDVM, IPSC, and OpenBridge servers.
+// Repeater subscriptions are activated lazily when repeaters connect
+// via the protocol handshake.
+func (s *IntegrationStack) StartServers(t *testing.T) {
+	t.Helper()
+
+	// Start servers — they register with the hub and begin listening
+	err := s.MMDVMServer.Start(context.Background())
+	require.NoError(t, err)
+
+	err = s.IPSCServer.Start(context.Background())
+	require.NoError(t, err)
+
+	err = s.OpenBridgeServer.Start(context.Background())
+	require.NoError(t, err)
+
+	s.MMDVMAddr = s.MMDVMServer.Server.LocalAddr().String()
+	s.IPSCAddr = s.IPSCServer.Addr().String()
+	s.OpenBridgeAddr = s.OpenBridgeServer.Server.LocalAddr().String()
+	s.WebTransportAddr = addrOf(s.MMDVMServer.WebTransportAddr())
+}
+
+// SeedUser creates a User in the DB and tells the hub, as the API does.
+func (s *IntegrationStack) SeedUser(t *testing.T, id uint, callsign string) {
+	t.Helper()
+	err := s.DB.Create(&models.User{
+		ID:       id,
+		Callsign: callsign,
+		Username: callsign,
+		Approved: true,
+	}).Error
+	require.NoError(t, err)
+	s.Hub.UserChanged(id)
+	s.awaitReplicas(t, userNotices, (*hub.Hub).OnUserChange)
+}
+
+// SeedTalkgroup creates a Talkgroup in the DB and tells the hub, as the
+// API does.
+func (s *IntegrationStack) SeedTalkgroup(t *testing.T, id uint, name string) {
+	t.Helper()
+	err := s.DB.Create(&models.Talkgroup{
+		ID:   id,
+		Name: name,
+	}).Error
+	require.NoError(t, err)
+	s.Hub.TalkgroupChanged(id)
+	s.awaitReplicas(t, talkgroupNotices, (*hub.Hub).OnTalkgroupChange)
+}
+
+// SeedMMDVMRepeater creates an MMDVM repeater in the DB and tells the
+// hub, as the API does.
+func (s *IntegrationStack) SeedMMDVMRepeater(t *testing.T, id uint, ownerID uint, password string) {
+	t.Helper()
+	err := s.DB.Create(&models.Repeater{
+		RepeaterConfiguration: models.RepeaterConfiguration{
+			Callsign: fmt.Sprintf("T%04dST", id%10000),
+			ID:       id,
+		},
+		OwnerID:  ownerID,
+		Type:     models.RepeaterTypeMMDVM,
+		Password: password,
+	}).Error
+	require.NoError(t, err)
+	s.Hub.ReloadRepeater(context.Background(), id)
+	s.awaitReplicas(t, repeaterNotices, (*hub.Hub).OnRepeaterChange)
+}
+
+// SeedIPSCRepeater creates an IPSC repeater in the DB and tells the
+// hub, as the API does.
+func (s *IntegrationStack) SeedIPSCRepeater(t *testing.T, id uint, ownerID uint, password string) {
+	t.Helper()
+	err := s.DB.Create(&models.Repeater{
+		RepeaterConfiguration: models.RepeaterConfiguration{
+			Callsign: fmt.Sprintf("I%04dST", id%10000),
+			ID:       id,
+		},
+		OwnerID:  ownerID,
+		Type:     models.RepeaterTypeIPSC,
+		Password: password,
+	}).Error
+	require.NoError(t, err)
+	s.Hub.ReloadRepeater(context.Background(), id)
+	s.awaitReplicas(t, repeaterNotices, (*hub.Hub).OnRepeaterChange)
+}
+
+// AssignTS1StaticTG adds a talkgroup to a repeater's TS1 static list and
+// tells the hub, as the API does.
+func (s *IntegrationStack) AssignTS1StaticTG(t *testing.T, repeaterID, tgID uint) {
+	t.Helper()
+	var rpt models.Repeater
+	require.NoError(t, s.DB.First(&rpt, repeaterID).Error)
+	require.NoError(t, s.DB.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: tgID}))
+	s.Hub.ReloadRepeater(context.Background(), repeaterID)
+	s.awaitReplicas(t, repeaterNotices, (*hub.Hub).OnRepeaterChange)
+}
+
+// AssignTS2StaticTG adds a talkgroup to a repeater's TS2 static list and
+// tells the hub, as the API does.
+func (s *IntegrationStack) AssignTS2StaticTG(t *testing.T, repeaterID, tgID uint) {
+	t.Helper()
+	var rpt models.Repeater
+	require.NoError(t, s.DB.First(&rpt, repeaterID).Error)
+	require.NoError(t, s.DB.Model(&rpt).Association("TS2StaticTalkgroups").Append(&models.Talkgroup{ID: tgID}))
+	s.Hub.ReloadRepeater(context.Background(), repeaterID)
+	s.awaitReplicas(t, repeaterNotices, (*hub.Hub).OnRepeaterChange)
+}
+
+// SeedPeer creates an OpenBridge peer in the DB and tells the hub, as the
+// API does.
+func (s *IntegrationStack) SeedPeer(t *testing.T, id uint, ownerID uint, password string, ip string, port int, ingress bool, egress bool) {
+	t.Helper()
+	err := s.DB.Create(&models.Peer{
+		ID:       id,
+		OwnerID:  ownerID,
+		Password: password,
+		IP:       ip,
+		Port:     port,
+		Ingress:  ingress,
+		Egress:   egress,
+	}).Error
+	require.NoError(t, err)
+	s.Hub.PeerChanged(id)
+	s.awaitReplicas(t, peerNotices, (*hub.Hub).OnPeerChange)
+}
+
+// SetPeerPrivateCalls sets the private call switches of a peer in the DB
+// and tells the hub, as the API does.
+func (s *IntegrationStack) SetPeerPrivateCalls(t *testing.T, id uint, ingress bool, egress bool) {
+	t.Helper()
+	err := s.DB.Model(&models.Peer{ID: id}).Updates(map[string]any{"ingress_private": ingress, "egress_private": egress}).Error
+	require.NoError(t, err)
+	s.Hub.PeerChanged(id)
+	s.awaitReplicas(t, peerNotices, (*hub.Hub).OnPeerChange)
+}
+
+// SeedPeerRule creates a peer rule in the DB and tells the hub, as the API
+// does.
+func (s *IntegrationStack) SeedPeerRule(t *testing.T, peerID uint, direction bool, subjectIDMin uint, subjectIDMax uint) {
+	t.Helper()
+	s.SeedPeerRuleMatch(t, peerID, direction, models.DefaultPeerRuleMatch(direction), subjectIDMin, subjectIDMax)
+}
+
+// SeedPeerRuleMatch is SeedPeerRule for a rule that checks the ID that
+// match names.
+func (s *IntegrationStack) SeedPeerRuleMatch(t *testing.T, peerID uint, direction bool, match models.PeerRuleMatch, subjectIDMin uint, subjectIDMax uint) {
+	t.Helper()
+	err := s.DB.Create(&models.PeerRule{
+		PeerID:       peerID,
+		Direction:    direction,
+		Match:        match,
+		SubjectIDMin: subjectIDMin,
+		SubjectIDMax: subjectIDMax,
+	}).Error
+	require.NoError(t, err)
+	s.Hub.PeerChanged(peerID)
+	s.awaitReplicas(t, peerNotices, (*hub.Hub).OnPeerChange)
+}

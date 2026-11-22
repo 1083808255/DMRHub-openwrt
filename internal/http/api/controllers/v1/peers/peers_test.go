@@ -1,0 +1,969 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package peers_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/apimodels"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const testTimeout = 1 * time.Minute
+
+func TestGETPeersRequiresAdmin(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestGETPeersAsAdmin(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGETMyPeersRequiresLogin(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers/my", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestGETMyPeersAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers/my", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestPOSTPeerRequiresAdmin(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/peers", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestPOSTPeerUnauthenticatedSingleResponse is a regression test ensuring
+// that an unauthenticated POST to /api/v1/peers returns exactly one JSON
+// response. Previously, missing `return` statements after error responses in
+// the auth checks caused the handler to write multiple JSON responses and
+// continue execution with a zero-value user ID.
+func TestPOSTPeerUnauthenticatedSingleResponse(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	// Send a valid-looking JSON body so that if the handler falls through
+	// past the auth check, it would attempt to process the request.
+	body := map[string]interface{}{
+		"id":      999999,
+		"egress":  true,
+		"ingress": true,
+	}
+	jsonBytes, err := json.Marshal(body)
+	assert.NoError(t, err)
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/peers", bytes.NewBuffer(jsonBytes))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// Verify the response body is valid JSON (a single object, not multiple
+	// concatenated objects which would happen with double-writes).
+	var resp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err, "Response body should be a single valid JSON object, got: %s", w.Body.String())
+	assert.Contains(t, resp, "error")
+}
+
+func TestPOSTPeer(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	// Look up admin user ID
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      100001,
+		OwnerID: adminUser.ID,
+		IP:      "192.168.1.100",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	resp, w := testutils.CreatePeer(t, router, adminJar, peer)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Peer created", resp.Message)
+	assert.NotEmpty(t, resp.Password)
+	assert.Empty(t, resp.Error)
+
+	// Verify the peer via GET
+	peerResp, w := testutils.GetPeer(t, router, peer.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, peer.ID, peerResp.ID)
+	assert.True(t, peerResp.Ingress)
+	assert.True(t, peerResp.Egress)
+	assert.Equal(t, "192.168.1.100", peerResp.IP)
+	assert.Equal(t, 62035, peerResp.Port)
+	assert.Equal(t, adminUser.ID, peerResp.Owner.ID)
+}
+
+func TestDELETEPeer(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	// Look up admin user ID
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      100002,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.1",
+		Port:    62035,
+		Ingress: true,
+		Egress:  false,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Delete the peer
+	delResp, w := testutils.DeletePeer(t, router, peer.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Peer deleted", delResp.Message)
+
+	// Verify it's gone
+	_, w = testutils.GetPeer(t, router, peer.ID, adminJar)
+	assert.NotEqual(t, http.StatusOK, w.Code)
+}
+
+func TestDELETEPeerWithRules(t *testing.T) {
+	t.Parallel()
+	for _, be := range []testutils.Backend{testutils.SQLiteMemoryBackend(), testutils.PostgresRedisBackend(), testutils.MySQLBackend(), testutils.MariaDBBackend()} {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			router, tdb, err := testutils.CreateTestDBRouterWithOptions(func(c *config.Config) { be.Migrated().Setup(t, c) })
+			require.NoError(t, err)
+			defer tdb.CloseDB()
+
+			_, _, adminJar := testutils.LoginAdmin(t, router)
+			var adminUser models.User
+			require.NoError(t, tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error)
+
+			peer := apimodels.PeerPost{ID: 100009, OwnerID: adminUser.ID, IP: "10.0.0.9", Port: 62035, Ingress: true, Egress: true}
+			_, w := testutils.CreatePeer(t, router, adminJar, peer)
+			require.Equal(t, http.StatusOK, w.Code)
+			for _, dir := range []bool{true, false} {
+				_, w = testutils.CreatePeerRule(t, router, peer.ID, adminJar, apimodels.PeerRulePost{Direction: dir, SubjectIDMin: 1, SubjectIDMax: 100})
+				require.Equal(t, http.StatusOK, w.Code)
+			}
+
+			delResp, w := testutils.DeletePeer(t, router, peer.ID, adminJar)
+			require.Equal(t, http.StatusOK, w.Code, delResp.Error)
+			assert.Equal(t, "Peer deleted", delResp.Message)
+
+			_, w = testutils.GetPeer(t, router, peer.ID, adminJar)
+			assert.NotEqual(t, http.StatusOK, w.Code)
+			var rules int64
+			require.NoError(t, tdb.DB().Unscoped().Model(&models.PeerRule{}).Where("peer_id = ?", peer.ID).Count(&rules).Error)
+			assert.Zero(t, rules)
+		})
+	}
+}
+
+func TestPOSTPeerDuplicate(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	// Look up admin user ID
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      100003,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.2",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	resp, w := testutils.CreatePeer(t, router, adminJar, peer)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Peer created", resp.Message)
+
+	// Try to create same peer ID again
+	resp2, w := testutils.CreatePeer(t, router, adminJar, peer)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "Peer ID already exists", resp2.Error)
+}
+
+func TestPATCHPeer(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      200001,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.1",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Patch IP and port
+	newIP := "172.16.0.1"
+	newPort := 50000
+	patchResp, w := testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{
+		IP:   &newIP,
+		Port: &newPort,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "172.16.0.1", patchResp.IP)
+	assert.Equal(t, 50000, patchResp.Port)
+	assert.True(t, patchResp.Ingress)
+	assert.True(t, patchResp.Egress)
+
+	// Patch ingress/egress
+	ingressFalse := false
+	egressFalse := false
+	patchResp, w = testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{
+		Ingress: &ingressFalse,
+		Egress:  &egressFalse,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, patchResp.Ingress)
+	assert.False(t, patchResp.Egress)
+	assert.Equal(t, "172.16.0.1", patchResp.IP) // unchanged
+}
+
+func TestPATCHPeerInvalidIP(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      200002,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.2",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	badIP := "not-an-ip"
+	_, w = testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{
+		IP: &badIP,
+	})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPATCHPeerInvalidPort(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      200003,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.3",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	badPort := 99999
+	_, w = testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{
+		Port: &badPort,
+	})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPATCHPeerNoFields(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      200004,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.4",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	_, w = testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPATCHPeerNotFound(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	newIP := "1.2.3.4"
+	_, w := testutils.PatchPeer(t, router, 999999, adminJar, apimodels.PeerPatch{
+		IP: &newIP,
+	})
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGETPeerRules(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      300001,
+		OwnerID: adminUser.ID,
+		IP:      "10.1.0.1",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Get rules (should be empty initially)
+	rulesResp, w := testutils.GetPeerRules(t, router, peer.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, rulesResp.Rules)
+
+	// Create a rule
+	rule := apimodels.PeerRulePost{
+		Direction:    true,
+		SubjectIDMin: 1,
+		SubjectIDMax: 100,
+	}
+	createResp, w := testutils.CreatePeerRule(t, router, peer.ID, adminJar, rule)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Peer rule created", createResp.Message)
+	assert.NotZero(t, createResp.Rule.ID)
+
+	// Verify rule appears in GET
+	rulesResp, w = testutils.GetPeerRules(t, router, peer.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Len(t, rulesResp.Rules, 1)
+	assert.Equal(t, uint(1), rulesResp.Rules[0].SubjectIDMin)
+	assert.Equal(t, uint(100), rulesResp.Rules[0].SubjectIDMax)
+}
+
+func TestPOSTPeerRuleInvalidRange(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      300002,
+		OwnerID: adminUser.ID,
+		IP:      "10.1.0.2",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// SubjectIDMin > SubjectIDMax should fail
+	badRule := apimodels.PeerRulePost{
+		Direction:    true,
+		SubjectIDMin: 100,
+		SubjectIDMax: 1,
+	}
+	_, w = testutils.CreatePeerRule(t, router, peer.ID, adminJar, badRule)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDELETEPeerRule(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      300003,
+		OwnerID: adminUser.ID,
+		IP:      "10.1.0.3",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Create a rule
+	rule := apimodels.PeerRulePost{
+		Direction:    false,
+		SubjectIDMin: 50,
+		SubjectIDMax: 50,
+	}
+	createResp, w := testutils.CreatePeerRule(t, router, peer.ID, adminJar, rule)
+	require.Equal(t, http.StatusOK, w.Code)
+	ruleID := createResp.Rule.ID
+
+	// Delete it
+	delResp, w := testutils.DeletePeerRule(t, router, peer.ID, ruleID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Peer rule deleted", delResp.Message)
+
+	// Verify it's gone
+	rulesResp, w := testutils.GetPeerRules(t, router, peer.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, rulesResp.Rules)
+}
+
+func TestDELETEPeerRuleWrongPeer(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	// Create two peers
+	peer1 := apimodels.PeerPost{
+		ID:      300004,
+		OwnerID: adminUser.ID,
+		IP:      "10.1.0.4",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+	peer2 := apimodels.PeerPost{
+		ID:      300005,
+		OwnerID: adminUser.ID,
+		IP:      "10.1.0.5",
+		Port:    62036,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	_, w := testutils.CreatePeer(t, router, adminJar, peer1)
+	require.Equal(t, http.StatusOK, w.Code)
+	_, w = testutils.CreatePeer(t, router, adminJar, peer2)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Create a rule on peer1
+	rule := apimodels.PeerRulePost{
+		Direction:    true,
+		SubjectIDMin: 1,
+		SubjectIDMax: 10,
+	}
+	createResp, w := testutils.CreatePeerRule(t, router, peer1.ID, adminJar, rule)
+	require.Equal(t, http.StatusOK, w.Code)
+	ruleID := createResp.Rule.ID
+
+	// Try to delete via peer2 — should fail
+	delResp, w := testutils.DeletePeerRule(t, router, peer2.ID, ruleID, adminJar)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "Rule does not belong to this peer", delResp.Error)
+}
+
+func TestGETPeerRulesNotFound(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	rulesResp, w := testutils.GetPeerRules(t, router, 999999, adminJar)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "Peer not found", rulesResp.Error)
+}
+
+func TestPOSTPeerInvalidIP(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      400001,
+		OwnerID: adminUser.ID,
+		IP:      "not-valid",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	resp, w := testutils.CreatePeer(t, router, adminJar, peer)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "Invalid IP address", resp.Error)
+}
+
+func TestPOSTPeerInvalidPort(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	peer := apimodels.PeerPost{
+		ID:      400002,
+		OwnerID: adminUser.ID,
+		IP:      "10.0.0.1",
+		Port:    0,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	resp, w := testutils.CreatePeer(t, router, adminJar, peer)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "Port must be between 1 and 65535", resp.Error)
+}
+
+func TestGETPeersOpenBridgeDisabledNotRegistered(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithOptions(func(cfg *config.Config) {
+		cfg.DMR.OpenBridge.Enabled = false
+	})
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	// When OpenBridge is disabled the peer API routes are not registered.
+	// The request may return 404 or be caught by the SPA wildcard (200 + text/html).
+	// Either way, the response must NOT be JSON from the peers controller.
+	ct := w.Header().Get("Content-Type")
+	assert.NotContains(t, ct, "application/json",
+		"Peers API endpoint should not be registered when OpenBridge is disabled")
+}
+
+func TestPOSTPeerOpenBridgeDisabledReturns404(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithOptions(func(cfg *config.Config) {
+		cfg.DMR.OpenBridge.Enabled = false
+	})
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	peer := apimodels.PeerPost{
+		ID:      400001,
+		IP:      "10.0.0.1",
+		Port:    62035,
+		Ingress: true,
+		Egress:  true,
+	}
+
+	jsonBody, err := json.Marshal(peer)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/peers", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGETMyPeersOpenBridgeDisabledReturns404(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithOptions(func(cfg *config.Config) {
+		cfg.DMR.OpenBridge.Enabled = false
+	})
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers/my", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestPATCHPeerEnhancedIsForAdmins(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	testutils.SeedAccount(t, tdb.DB(), 3002068, "N6CALL", "owner")
+	ownerJar := testutils.Login(t, router, "owner")
+
+	_, w := testutils.CreatePeer(t, router, adminJar, apimodels.PeerPost{
+		ID: 200002, OwnerID: 3002068, IP: "10.0.0.2", Port: 62035, Ingress: true, Egress: true, Enhanced: true,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var stored models.Peer
+	require.NoError(t, tdb.DB().First(&stored, 200002).Error)
+	assert.True(t, stored.Enhanced, "an admin creates an enhanced peer")
+
+	off := false
+	_, w = testutils.PatchPeer(t, router, 200002, ownerJar, apimodels.PeerPatch{Enhanced: &off})
+	assert.Equal(t, http.StatusForbidden, w.Code, "the owner cannot change the protocol")
+	require.NoError(t, tdb.DB().First(&stored, 200002).Error)
+	assert.True(t, stored.Enhanced)
+
+	resp, w := testutils.PatchPeer(t, router, 200002, adminJar, apimodels.PeerPatch{Enhanced: &off})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, resp.Enhanced)
+}
+
+func TestPeerOwnerCanReadTheirPeer(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	testutils.SeedAccount(t, tdb.DB(), 3002068, "N6CALL", "owner")
+	testutils.SeedAccount(t, tdb.DB(), 3002198, "N8CALL", "other")
+	_, w := testutils.CreatePeer(t, router, adminJar, apimodels.PeerPost{ID: 200003, OwnerID: 3002068, IP: "10.0.0.3", Port: 62035})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	get := func(jar testutils.CookieJar) int {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/peers/200003", nil)
+		for _, cookie := range jar.Cookies() {
+			req.Header.Add("Cookie", cookie.String())
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+	assert.Equal(t, http.StatusOK, get(testutils.Login(t, router, "owner")), "the owner reads their peer")
+	assert.Equal(t, http.StatusForbidden, get(testutils.Login(t, router, "other")), "another user does not")
+}
+
+func TestPOSTPeerRuleMatch(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	require.NoError(t, tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error)
+
+	peer := apimodels.PeerPost{ID: 300020, OwnerID: adminUser.ID, IP: "10.1.0.20", Port: 62035, Ingress: true, Egress: true}
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	for _, c := range []struct {
+		rule apimodels.PeerRulePost
+		want models.PeerRuleMatch
+	}{
+		{apimodels.PeerRulePost{Direction: false, SubjectIDMin: 3000001, SubjectIDMax: 3000099}, models.PeerRuleMatchSource},
+		{apimodels.PeerRulePost{Direction: false, Match: "destination", SubjectIDMin: 3100, SubjectIDMax: 3100}, models.PeerRuleMatchDestination},
+		{apimodels.PeerRulePost{Direction: true, SubjectIDMin: 91, SubjectIDMax: 91}, models.PeerRuleMatchDestination},
+		{apimodels.PeerRulePost{Direction: true, Match: "source", SubjectIDMin: 3000001, SubjectIDMax: 3000099}, models.PeerRuleMatchSource},
+	} {
+		resp, w := testutils.CreatePeerRule(t, router, peer.ID, adminJar, c.rule)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, c.want, resp.Rule.Match)
+	}
+
+	_, w = testutils.CreatePeerRule(t, router, peer.ID, adminJar, apimodels.PeerRulePost{Match: "talkgroup", SubjectIDMin: 1, SubjectIDMax: 1})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	rulesResp, w := testutils.GetPeerRules(t, router, peer.ID, adminJar)
+	require.Equal(t, http.StatusOK, w.Code)
+	got := make([]models.PeerRuleMatch, 0, len(rulesResp.Rules))
+	for _, r := range rulesResp.Rules {
+		got = append(got, r.Match)
+	}
+	assert.Equal(t, []models.PeerRuleMatch{models.PeerRuleMatchSource, models.PeerRuleMatchDestination, models.PeerRuleMatchDestination, models.PeerRuleMatchSource}, got)
+}
+
+func TestPeerPrivateCallSwitches(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var adminUser models.User
+	require.NoError(t, tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error)
+
+	peer := apimodels.PeerPost{ID: 300021, OwnerID: adminUser.ID, IP: "10.1.0.21", Port: 62035, Ingress: true, Egress: true, EgressPrivate: true}
+	_, w := testutils.CreatePeer(t, router, adminJar, peer)
+	require.Equal(t, http.StatusOK, w.Code)
+	got, w := testutils.GetPeer(t, router, peer.ID, adminJar)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, got.IngressPrivate)
+	assert.True(t, got.EgressPrivate)
+
+	on, off := true, false
+	got, w = testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{IngressPrivate: &on, EgressPrivate: &off})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, got.IngressPrivate)
+	assert.False(t, got.EgressPrivate)
+
+	got, w = testutils.PatchPeer(t, router, peer.ID, adminJar, apimodels.PeerPatch{IngressPrivate: &off})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, got.IngressPrivate)
+	assert.False(t, got.EgressPrivate)
+}

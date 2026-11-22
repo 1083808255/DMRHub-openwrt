@@ -1,0 +1,449 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package kv
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/clock"
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/metrics"
+	"github.com/puzpuzpuz/xsync/v4"
+)
+
+const kvStatusSuccess = "success"
+
+func makeInMemoryKV(ctx context.Context, _ *config.Config, c clock.Clock) (KV, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	kv := inMemoryKV{
+		kv:      xsync.NewMap[string, kvValue](),
+		cancel:  cancel,
+		metrics: metrics.NewMetrics(),
+		clock:   clock.Or(c),
+	}
+
+	// Start background cleanup goroutine
+	go kv.cleanupExpiredKeys(ctx)
+
+	return kv, nil
+}
+
+type kvValue struct {
+	value []byte
+	ttl   time.Time
+}
+
+type inMemoryKV struct {
+	kv      *xsync.Map[string, kvValue]
+	cancel  context.CancelFunc
+	metrics *metrics.Metrics
+	clock   clock.Clock
+}
+
+func (kv inMemoryKV) Has(_ context.Context, key string) (bool, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("has", "success", duration)
+	}()
+
+	obj, ok := kv.kv.Load(key)
+	if !ok {
+		return false, nil
+	}
+	if !obj.ttl.IsZero() && obj.ttl.Before(kv.clock.Now()) {
+		kv.dropExpired(key)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (kv inMemoryKV) Get(_ context.Context, key string) ([]byte, error) {
+	start := time.Now()
+	var status string
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("get", status, duration)
+	}()
+
+	value, ok := kv.kv.Load(key)
+	if !ok {
+		status = "not_found"
+		return nil, fmt.Errorf("key %s %w", key, ErrNotFound)
+	}
+	if !value.ttl.IsZero() && value.ttl.Before(kv.clock.Now()) {
+		kv.dropExpired(key)
+		status = "expired"
+		return nil, fmt.Errorf("key %s has expired: %w", key, ErrNotFound)
+	}
+	status = kvStatusSuccess
+	return value.value, nil // Return the first value
+}
+
+func (kv inMemoryKV) Set(_ context.Context, key string, value []byte) error {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("set", "success", duration)
+	}()
+
+	kv.kv.Store(key, kvValue{
+		value: value,
+	})
+	return nil
+}
+
+func (kv inMemoryKV) Delete(_ context.Context, key string) error {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("delete", "success", duration)
+	}()
+
+	kv.kv.Delete(key)
+	return nil
+}
+
+func (kv inMemoryKV) Expire(_ context.Context, key string, ttl time.Duration) error {
+	start := time.Now()
+	var status string
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("expire", status, duration)
+	}()
+
+	var found bool
+	kv.kv.Compute(key, func(oldValue kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		if !loaded {
+			found = false
+			return kvValue{}, xsync.CancelOp
+		}
+		found = true
+		if ttl <= 0 {
+			return kvValue{}, xsync.DeleteOp
+		}
+		oldValue.ttl = kv.clock.Now().Add(ttl)
+		return oldValue, xsync.UpdateOp
+	})
+	if !found {
+		status = "not_found"
+		return fmt.Errorf("key %s not found", key)
+	}
+	if ttl <= 0 {
+		status = "deleted"
+	} else {
+		status = kvStatusSuccess
+	}
+	return nil
+}
+
+func (kv inMemoryKV) Scan(_ context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("scan", "success", duration)
+	}()
+
+	keys := make([]string, 0)
+	keyCount := 0
+	kv.kv.Range(func(key string, value kvValue) bool {
+		keyCount++
+		// Check if the key matches the pattern
+		var matched bool
+		if match == "" {
+			matched = true // Empty pattern matches all keys
+		} else {
+			var err error
+			matched, err = filepath.Match(match, key)
+			if err != nil {
+				// If pattern is invalid, fall back to exact match
+				matched = (match == key)
+			}
+		}
+
+		if matched {
+			if !value.ttl.IsZero() && value.ttl.Before(kv.clock.Now()) {
+				kv.dropExpired(key)
+				return true // continue iteration
+			}
+			keys = append(keys, key)
+		}
+		return true // continue iteration
+	})
+
+	// Update total key count metric
+	kv.metrics.SetKVKeysTotal(float64(keyCount))
+
+	return keys, 0, nil // cursor is not used in this implementation
+}
+
+func (kv inMemoryKV) SetNX(_ context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	start := time.Now()
+	var status string
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("setnx", status, duration)
+	}()
+
+	var set bool
+	kv.kv.Compute(key, func(oldValue kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		if loaded && (oldValue.ttl.IsZero() || !oldValue.ttl.Before(kv.clock.Now())) {
+			// Key exists and is not expired.
+			set = false
+			return oldValue, xsync.CancelOp
+		}
+		set = true
+		nv := kvValue{value: []byte(value)}
+		if ttl > 0 {
+			nv.ttl = kv.clock.Now().Add(ttl)
+		}
+		return nv, xsync.UpdateOp
+	})
+
+	if set {
+		status = kvStatusSuccess
+	} else {
+		status = "not_set"
+	}
+	return set, nil
+}
+
+func (kv inMemoryKV) RPush(_ context.Context, key string, value []byte) (int64, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("rpush", "success", duration)
+	}()
+
+	var length int64
+	kv.kv.Compute(key, func(oldValue kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		var newList []byte
+		if loaded && oldValue.value != nil {
+			newList = append(append([]byte{}, oldValue.value...), encodeListEntry(value)...)
+		} else {
+			newList = encodeListEntry(value)
+		}
+		length = countListEntries(newList)
+		return kvValue{value: newList, ttl: oldValue.ttl}, xsync.UpdateOp
+	})
+	return length, nil
+}
+
+func (kv inMemoryKV) LDrain(_ context.Context, key string) ([][]byte, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		kv.metrics.RecordKVOperation("ldrain", "success", duration)
+	}()
+
+	existing, loaded := kv.kv.LoadAndDelete(key)
+	if !loaded || existing.value == nil {
+		return nil, nil
+	}
+	return decodeListEntries(existing.value), nil
+}
+
+func (kv inMemoryKV) RPushTrim(_ context.Context, key string, value []byte, keep int64, ttl time.Duration) error {
+	if keep < 1 {
+		return fmt.Errorf("rpushtrim %s: %w", key, ErrKeep)
+	}
+	start := time.Now()
+	defer func() {
+		kv.metrics.RecordKVOperation("rpushtrim", kvStatusSuccess, time.Since(start).Seconds())
+	}()
+
+	kv.kv.Compute(key, func(oldValue kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		var entries [][]byte
+		if loaded && (oldValue.ttl.IsZero() || !oldValue.ttl.Before(kv.clock.Now())) {
+			entries = decodeListEntries(oldValue.value)
+		}
+		entries = append(entries, value)
+		if n := int64(len(entries)); n > keep {
+			entries = entries[n-keep:]
+		}
+		list := make([]byte, 0, len(oldValue.value)+4+len(value))
+		for _, e := range entries {
+			list = append(list, encodeListEntry(e)...)
+		}
+		return kvValue{value: list, ttl: kv.clock.Now().Add(ttl)}, xsync.UpdateOp
+	})
+	return nil
+}
+
+func (kv inMemoryKV) LRange(_ context.Context, key string) ([][]byte, error) {
+	start := time.Now()
+	defer func() {
+		kv.metrics.RecordKVOperation("lrange", kvStatusSuccess, time.Since(start).Seconds())
+	}()
+
+	value, ok := kv.kv.Load(key)
+	if !ok || value.value == nil || (!value.ttl.IsZero() && value.ttl.Before(kv.clock.Now())) {
+		return nil, nil
+	}
+	return decodeListEntries(value.value), nil
+}
+
+func (kv inMemoryKV) DeleteIfEqual(_ context.Context, key string, value []byte) (bool, error) {
+	start := time.Now()
+	defer func() {
+		kv.metrics.RecordKVOperation("deleteifequal", kvStatusSuccess, time.Since(start).Seconds())
+	}()
+
+	deleted := false
+	kv.kv.Compute(key, func(oldValue kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		if !loaded || (!oldValue.ttl.IsZero() && oldValue.ttl.Before(kv.clock.Now())) || !bytes.Equal(oldValue.value, value) {
+			return oldValue, xsync.CancelOp
+		}
+		deleted = true
+		return kvValue{}, xsync.DeleteOp
+	})
+	return deleted, nil
+}
+
+func (kv inMemoryKV) Update(ctx context.Context, key string, ttl time.Duration, fn func(old []byte) ([]byte, error)) error {
+	if _, ok := ctx.Deadline(); !ok {
+		return fmt.Errorf("memory update %s: %w", key, ErrNoDeadline)
+	}
+	start := time.Now()
+	defer func() {
+		kv.metrics.RecordKVOperation("update", kvStatusSuccess, time.Since(start).Seconds())
+	}()
+
+	var err error
+	kv.kv.Compute(key, func(v kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		var old []byte
+		if loaded && (v.ttl.IsZero() || !v.ttl.Before(kv.clock.Now())) {
+			old = v.value
+		}
+		next, ferr := fn(old)
+		if ferr != nil {
+			err = ferr
+			return v, xsync.CancelOp
+		}
+		nv := kvValue{value: next}
+		if ttl > 0 {
+			nv.ttl = kv.clock.Now().Add(ttl)
+		}
+		return nv, xsync.UpdateOp
+	})
+	return err
+}
+
+// dropExpired deletes key only if its value is still expired, so that a
+// value set after an expired one was read stays.
+func (kv inMemoryKV) dropExpired(key string) {
+	kv.kv.Compute(key, func(v kvValue, loaded bool) (kvValue, xsync.ComputeOp) {
+		if loaded && !v.ttl.IsZero() && v.ttl.Before(kv.clock.Now()) {
+			return kvValue{}, xsync.DeleteOp
+		}
+		return v, xsync.CancelOp
+	})
+}
+
+// encodeListEntry encodes a single entry as [4-byte big-endian length][data].
+func encodeListEntry(data []byte) []byte {
+	l := len(data)
+	entry := make([]byte, 4+l)
+	entry[0] = byte(l >> 24)
+	entry[1] = byte(l >> 16)
+	entry[2] = byte(l >> 8)
+	entry[3] = byte(l)
+	copy(entry[4:], data)
+	return entry
+}
+
+// decodeListEntries decodes entries from the format produced by encodeListEntry.
+func decodeListEntries(data []byte) [][]byte {
+	var entries [][]byte
+	for len(data) >= 4 {
+		l := int(data[0])<<24 | int(data[1])<<16 | int(data[2])<<8 | int(data[3])
+		data = data[4:]
+		if l > len(data) {
+			break
+		}
+		entry := make([]byte, l)
+		copy(entry, data[:l])
+		entries = append(entries, entry)
+		data = data[l:]
+	}
+	return entries
+}
+
+// countListEntries counts the number of entries in the encoded list.
+func countListEntries(data []byte) int64 {
+	var count int64
+	for len(data) >= 4 {
+		l := int(data[0])<<24 | int(data[1])<<16 | int(data[2])<<8 | int(data[3])
+		data = data[4:]
+		if l > len(data) {
+			break
+		}
+		data = data[l:]
+		count++
+	}
+	return count
+}
+
+func (kv inMemoryKV) Close() error {
+	// Cancel the cleanup goroutine
+	kv.cancel()
+	return nil
+}
+
+// cleanupExpiredKeys runs periodically to remove expired keys
+func (kv inMemoryKV) cleanupExpiredKeys(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return // Context cancelled, stop cleanup
+		case <-ticker.C:
+			// Perform cleanup with metrics
+			start := time.Now()
+			now := kv.clock.Now()
+			keysToDelete := make([]string, 0)
+
+			// Collect expired keys
+			kv.kv.Range(func(key string, value kvValue) bool {
+				if !value.ttl.IsZero() && value.ttl.Before(now) {
+					keysToDelete = append(keysToDelete, key)
+				}
+				return true // continue iteration
+			})
+
+			// Delete expired keys
+			for _, key := range keysToDelete {
+				kv.dropExpired(key)
+			}
+
+			// Record metrics
+			duration := time.Since(start).Seconds()
+			expiredCount := float64(len(keysToDelete))
+			kv.metrics.RecordKVCleanup(duration)
+			kv.metrics.IncrementKVExpiredKeys(expiredCount)
+		}
+	}
+}

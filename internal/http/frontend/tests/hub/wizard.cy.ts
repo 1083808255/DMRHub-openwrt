@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+const hub = 'http://localhost:3005';
+const password = 'Correct-Horse-Battery-9';
+
+type Started = { wizard: boolean };
+
+const start = (name: string, dir: string, env: Record<string, string> = {}) =>
+  cy.task<Started>('hubStart', { name, dir, env }, { timeout: 120000 });
+
+const openWizard = (wizard: boolean) => {
+  expect(wizard, 'the setup wizard must start').to.eq(true);
+  cy.visit(hub);
+  cy.contains('h1', 'Set up DMRHub').should('be.visible');
+  cy.get('[data-test="setup-menu"] a').first().should('have.attr', 'data-test', 'menu-database');
+  cy.get('[data-test="tab-database"]').should('be.visible');
+  cy.get('header nav').should('not.exist');
+};
+
+const tab = (id: string) => {
+  cy.get(`[data-test="menu-${id}"]`).click();
+  cy.get(`[data-test="tab-${id}"]`).should('be.visible');
+};
+
+const save = () => {
+  cy.get('[data-test="save"]').should('contain.text', 'Save and continue').click();
+};
+
+const createAdmin = (name: string) => {
+  cy.location('pathname', { timeout: 20000 }).should('eq', '/setup/user');
+  cy.get('[data-test="first-admin-banner"]').should('contain.text', 'Whoever creates this account first becomes the admin.');
+  cy.get('#dmr_id').type('3002068');
+  cy.get('#username').type('admin');
+  cy.get('#callsign').type('N6CALL');
+  cy.get('#password').type(password);
+  cy.get('#confirmPassword').type(password);
+  cy.contains('button', 'Create User').click();
+  cy.task('hubWait', { name, pattern: 'Server ready to accept traffic' }, { timeout: 120000 });
+};
+
+const login = (base = hub) =>
+  cy.request({ method: 'POST', url: `${base}/api/v1/auth/login`, body: { username: 'admin', password } })
+    .its('status').should('eq', 200);
+
+const fillSetup = () => {
+  tab('http');
+  cy.get('#setup-http-canonical-host').clear();
+  cy.get('#setup-http-canonical-host').type('http://localhost:3005');
+  cy.get('[data-test="menu-error-http"]').should('not.exist');
+  tab('accounts');
+  cy.get('label[for="setup-dmr-disable-radio-id-validation"]').click();
+  save();
+};
+
+describe('First start and the setup wizard', () => {
+  before(() => {
+    cy.task('placeholderStart');
+    cy.visit(hub);
+    cy.task('placeholderStop');
+  });
+
+  afterEach(() => {
+    cy.task('hubStopAll', null, { timeout: 60000 });
+  });
+
+  after(() => {
+    cy.task('stopBackends', null, { timeout: 60000 });
+  });
+
+  it('sets up a fresh install with nothing set, and a restart keeps the made secrets', () => {
+    cy.task<string>('workdir', 'fresh').then((dir) => {
+      start('fresh', dir).then(({ wizard }) => {
+        openWizard(wizard);
+        cy.get('[data-test="database-reached"]').should('have.text', 'Connected.');
+        cy.get('#setup-database-driver').should('be.disabled');
+        cy.get('[data-test="menu-error-http"]').should('exist');
+        cy.get('[data-test="savebar-message"]').should('have.text', 'Set the Site URL on the HTTP tab.');
+        cy.intercept('PUT', '**/api/v1/config').as('put');
+        save();
+        cy.location('hash').should('eq', '#http');
+        cy.get('[data-test="field-http.canonical-host"] [data-test="field-error"]').should('have.text', 'Required.');
+        cy.get('@put.all').should('have.length', 0);
+        tab('general');
+        cy.get('#setup-secret').should('be.disabled');
+        cy.contains('DMRHub made a random value at its first start and keeps it in the database.').should('be.visible');
+        cy.get('#setup-network-name').should('not.be.disabled');
+        fillSetup();
+        createAdmin('fresh');
+      });
+      login();
+      cy.request(`${hub}/api/v1/users/me`).its('body.username').should('eq', 'admin');
+      cy.task('readFile', `${dir}/dmrhub-database.json`).should('eq', null);
+
+      cy.task('hubStop', 'fresh', { timeout: 60000 });
+      start('fresh', dir).its('wizard').should('eq', false);
+      cy.request(`${hub}/api/v1/users/me`).its('body.username').should('eq', 'admin', 'the session of before the restart still works, so the secret is the same');
+      cy.clearCookies();
+      login();
+      cy.task<string>('hubLog', 'fresh').should('not.match', /Opening setup wizard/);
+    });
+  });
+
+  it('fixes a database that DMRHub cannot reach, keeps the fix, and the next start uses it', () => {
+    cy.task<string>('workdir', 'baddb').then((dir) => {
+      cy.task('mkdir', `${dir}/DMRHub.db`);
+      start('baddb', dir).then(({ wizard }) => {
+        openWizard(wizard);
+        cy.get('[data-test="database-problem"]').should('contain.text', 'DMRHub cannot reach its database.')
+          .and('contain.text', `${dir}/dmrhub-database.json`);
+        cy.get('#setup-database-host').should('not.exist');
+        cy.get('#setup-database-database').should('not.be.disabled');
+        cy.get('[data-test="database-test"] button').click();
+        cy.get('[data-test="database-test-result"]').should('contain.text', 'DMRHub cannot reach this database');
+        cy.get('#setup-database-database').clear();
+        cy.get('#setup-database-database').type('hub.db');
+        cy.get('[data-test="database-test"] button').click();
+        cy.get('[data-test="database-test-result"]').should('have.text', 'Connected.');
+        cy.task('readFile', `${dir}/hub.db`).should('eq', null);
+        cy.task('readFile', `${dir}/dmrhub-database.json`).should('eq', null);
+        tab('general');
+        cy.get('#setup-network-name').should('be.disabled');
+        tab('database');
+        save();
+        cy.get('[data-test="database-problem"]', { timeout: 20000 }).should('not.exist');
+        cy.get('[data-test="database-reached"]').should('have.text', 'Connected.');
+        tab('general');
+        cy.get('#setup-network-name').should('not.be.disabled');
+        fillSetup();
+        createAdmin('baddb');
+      });
+      cy.task('fileMode', `${dir}/dmrhub-database.json`).should('eq', 0o600);
+      cy.task<string>('readFile', `${dir}/dmrhub-database.json`).should('contain', 'hub.db');
+      login();
+
+      cy.task('hubStop', 'baddb', { timeout: 60000 });
+      start('baddb', dir).its('wizard').should('eq', false);
+      cy.clearCookies();
+      login();
+    });
+  });
+
+  it('opens on the first admin when the deployment sets everything', () => {
+    const env = {
+      SECRET: 'a-secret-that-the-deployment-sets-1234',
+      PASSWORD_SALT: 'a-salt-that-the-deployment-sets-5678',
+      HTTP_CANONICAL_HOST: 'http://localhost:3005',
+      NETWORK_NAME: 'Deployed Net',
+      DMR_DISABLE_RADIO_ID_VALIDATION: 'true',
+    };
+    cy.task<string>('workdir', 'locked').then((dir) => {
+      start('locked', dir, env).then(({ wizard }) => {
+        expect(wizard, 'the setup wizard must start').to.eq(true);
+        cy.visit(hub);
+        createAdmin('locked');
+      });
+      login();
+      cy.request(`${hub}/api/v1/config`).its('body').then((body) => {
+        expect(body['network-name']).to.eq('Deployed Net');
+        expect(body.settings['network-name'].locked).to.eq(true);
+        expect(body.settings['network-name'].source).to.eq('env');
+      });
+    });
+  });
+
+  it('shares a save with a second replica that joins, and shows both replicas', () => {
+    cy.task<Record<string, string>>('backends', null, { timeout: 180000 }).then((backends) => {
+      cy.task<string>('workdir', 'replica-a').then((dirA) => {
+        start('a', dirA, { ...backends, DMR_MMDVM_PORT: '62131' }).then(({ wizard }) => {
+          openWizard(wizard);
+          fillSetup();
+          createAdmin('a');
+        });
+      });
+      cy.task<string>('workdir', 'replica-b').then((dirB) => {
+        start('b', dirB, { ...backends, HTTP_PORT: '3105', DMR_MMDVM_PORT: '62231' }).its('wizard').should('eq', false);
+      });
+      login();
+      cy.visit(`${hub}/admin/setup#general`);
+      cy.get('[data-test="setup-status"]', { timeout: 30000 }).should('contain.text', '2 replicas');
+      cy.get('[data-test="replicas-differ"]').should('contain.text', 'Port (MMDVM)');
+      cy.get('#setup-network-name').clear();
+      cy.get('#setup-network-name').type('Shared Net');
+      cy.intercept('PUT', '**/api/v1/config').as('save');
+      cy.get('[data-test="save"]').click();
+      cy.wait('@save').then(({ response }) => {
+        expect(response?.statusCode).to.eq(200);
+        const replicas = response?.body.replicas as { self: boolean; answered: boolean }[];
+        expect(replicas).to.have.length(2);
+        expect(replicas.every((r) => r.answered), 'every replica reports before the save returns').to.eq(true);
+      });
+      cy.get('[data-test="apply-errors"]').should('not.exist');
+      cy.request('http://localhost:3105/api/v1/network/name').its('body').should('eq', 'Shared Net');
+    });
+  });
+});

@@ -1,0 +1,531 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package pubsub_test
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils"
+	"github.com/USA-RedDragon/configulator/v2"
+)
+
+func makeTestPubSub(t *testing.T) pubsub.PubSub {
+	t.Helper()
+	defConfig, err := configulator.New(config.ConfigSchema()).Default()
+	if err != nil {
+		t.Fatalf("Failed to create default config: %v", err)
+	}
+	ps, err := pubsub.MakePubSub(context.Background(), &defConfig)
+	if err != nil {
+		t.Fatalf("Failed to create pubsub: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ps.Close()
+	})
+	return ps
+}
+
+const deliveryWait = time.Minute
+
+func next[T any](t *testing.T, ch <-chan T, format string, args ...any) (T, bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), deliveryWait)
+	defer cancel()
+	select {
+	case v, ok := <-ch:
+		return v, ok
+	case <-ctx.Done():
+		t.Fatalf(format+" within %s", append(args, deliveryWait)...)
+		var zero T
+		return zero, false
+	}
+}
+
+func TestPubSubPublishAndSubscribe(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	sub := ps.Subscribe("test-topic")
+	defer func() { _ = sub.Close() }()
+
+	msg := []byte("hello world")
+	err := ps.Publish("test-topic", msg)
+	if err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	received, _ := next(t, sub.Channel(), "Timed out waiting for message")
+	if string(received) != string(msg) {
+		t.Errorf("Expected '%s', got '%s'", string(msg), string(received))
+	}
+}
+
+func TestPubSubMultipleMessages(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	sub := ps.Subscribe("multi")
+	defer func() { _ = sub.Close() }()
+
+	messages := []string{"msg1", "msg2", "msg3"}
+	for _, m := range messages {
+		if err := ps.Publish("multi", []byte(m)); err != nil {
+			t.Fatalf("Publish failed: %v", err)
+		}
+	}
+
+	for _, expected := range messages {
+		received, _ := next(t, sub.Channel(), "Timed out waiting for message '%s'", expected)
+		if string(received) != expected {
+			t.Errorf("Expected '%s', got '%s'", expected, string(received))
+		}
+	}
+}
+
+func TestPubSubDifferentTopics(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	sub1 := ps.Subscribe("topic1")
+	defer func() { _ = sub1.Close() }()
+	sub2 := ps.Subscribe("topic2")
+	defer func() { _ = sub2.Close() }()
+
+	_ = ps.Publish("topic1", []byte("for-topic1"))
+	_ = ps.Publish("topic2", []byte("for-topic2"))
+
+	received, _ := next(t, sub1.Channel(), "Timed out on topic1")
+	if string(received) != "for-topic1" {
+		t.Errorf("topic1: Expected 'for-topic1', got '%s'", string(received))
+	}
+
+	received, _ = next(t, sub2.Channel(), "Timed out on topic2")
+	if string(received) != "for-topic2" {
+		t.Errorf("topic2: Expected 'for-topic2', got '%s'", string(received))
+	}
+}
+
+func TestPubSubClose(t *testing.T) {
+	t.Parallel()
+	defConfig, err := configulator.New(config.ConfigSchema()).Default()
+	if err != nil {
+		t.Fatalf("Failed to create default config: %v", err)
+	}
+	ps, err := pubsub.MakePubSub(context.Background(), &defConfig)
+	if err != nil {
+		t.Fatalf("Failed to create pubsub: %v", err)
+	}
+	_ = ps.Subscribe("topic")
+	err = ps.Close()
+	if err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
+}
+
+func TestPubSubSubscribeBeforePublish(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	// Subscribe first, then publish
+	sub := ps.Subscribe("pre-sub")
+	defer func() { _ = sub.Close() }()
+
+	_ = ps.Publish("pre-sub", []byte("data"))
+
+	received, _ := next(t, sub.Channel(), "Timed out")
+	if string(received) != "data" {
+		t.Errorf("Expected 'data', got '%s'", string(received))
+	}
+}
+
+func TestPubSubMultipleSubscribers(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	// Three subscribers on the same topic
+	sub1 := ps.Subscribe("fanout")
+	defer func() { _ = sub1.Close() }()
+	sub2 := ps.Subscribe("fanout")
+	defer func() { _ = sub2.Close() }()
+	sub3 := ps.Subscribe("fanout")
+	defer func() { _ = sub3.Close() }()
+
+	msg := []byte("broadcast-data")
+	if err := ps.Publish("fanout", msg); err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	// All three subscribers should receive the message
+	for i, sub := range []pubsub.Subscription{sub1, sub2, sub3} {
+		received, _ := next(t, sub.Channel(), "sub%d: timed out waiting for message", i+1)
+		if string(received) != string(msg) {
+			t.Errorf("sub%d: expected '%s', got '%s'", i+1, string(msg), string(received))
+		}
+	}
+}
+
+func TestPubSubBinaryData(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	sub := ps.Subscribe("binary")
+	defer func() { _ = sub.Close() }()
+
+	data := []byte{0x00, 0xFF, 0xAB, 0xCD, 0xEF}
+	_ = ps.Publish("binary", data)
+
+	received, _ := next(t, sub.Channel(), "Timed out")
+	if len(received) != len(data) {
+		t.Fatalf("Expected %d bytes, got %d", len(data), len(received))
+	}
+	for i, b := range data {
+		if received[i] != b {
+			t.Errorf("Byte %d: expected %x, got %x", i, b, received[i])
+		}
+	}
+}
+
+func TestPubSubSubscriptionCloseClosesChannel(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	sub := ps.Subscribe("close-test")
+
+	// Publish a message so we know the subscription works
+	_ = ps.Publish("close-test", []byte("before-close"))
+	next(t, sub.Channel(), "Timed out waiting for message before close")
+
+	// Close the subscription
+	err := sub.Close()
+	if err != nil {
+		t.Fatalf("sub.Close() failed: %v", err)
+	}
+
+	// The channel should be closed — a range loop or receive should
+	// return the zero value immediately instead of blocking forever.
+	_, ok := next(t, sub.Channel(), "Channel was not closed after sub.Close(); consumer would block forever")
+	if ok {
+		t.Fatal("Expected channel to be closed, but received a value")
+	}
+}
+
+func TestPubSubCloseClosesAllSubscriptionChannels(t *testing.T) {
+	t.Parallel()
+	defConfig, err := configulator.New(config.ConfigSchema()).Default()
+	if err != nil {
+		t.Fatalf("Failed to create default config: %v", err)
+	}
+	ps, err := pubsub.MakePubSub(context.Background(), &defConfig)
+	if err != nil {
+		t.Fatalf("Failed to create pubsub: %v", err)
+	}
+
+	sub1 := ps.Subscribe("ps-close-1")
+	sub2 := ps.Subscribe("ps-close-2")
+
+	// Close the entire pubsub
+	err = ps.Close()
+	if err != nil {
+		t.Fatalf("ps.Close() failed: %v", err)
+	}
+
+	// Both subscription channels should now be closed
+	for i, sub := range []pubsub.Subscription{sub1, sub2} {
+		_, ok := next(t, sub.Channel(), "sub%d: channel not closed after ps.Close()", i+1)
+		if ok {
+			t.Fatalf("sub%d: expected channel to be closed, but received a value", i+1)
+		}
+	}
+}
+
+func TestPubSubDoubleCloseNoPanic(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+
+	sub := ps.Subscribe("double-close")
+	_ = sub.Close()
+	// Calling Close a second time should not panic
+	_ = sub.Close()
+}
+
+// --- Benchmarks ---
+
+func makeTestPubSubB(b *testing.B) pubsub.PubSub {
+	b.Helper()
+	defConfig, err := configulator.New(config.ConfigSchema()).Default()
+	if err != nil {
+		b.Fatalf("Failed to create default config: %v", err)
+	}
+	ps, err := pubsub.MakePubSub(context.Background(), &defConfig)
+	if err != nil {
+		b.Fatalf("Failed to create pubsub: %v", err)
+	}
+	b.Cleanup(func() {
+		_ = ps.Close()
+	})
+	return ps
+}
+
+func BenchmarkPubSubPublish(b *testing.B) {
+	ps := makeTestPubSubB(b)
+	sub := ps.Subscribe("bench-topic")
+	defer func() { _ = sub.Close() }()
+	msg := make([]byte, 55) // typical MMDVM packet size
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ps.Publish("bench-topic", msg)
+		<-sub.Channel()
+	}
+}
+
+func BenchmarkPubSubPublishFanOut(b *testing.B) {
+	ps := makeTestPubSubB(b)
+	const numSubs = 10
+	subs := make([]pubsub.Subscription, numSubs)
+	for i := 0; i < numSubs; i++ {
+		subs[i] = ps.Subscribe("fanout-bench")
+	}
+	defer func() {
+		for _, s := range subs {
+			_ = s.Close()
+		}
+	}()
+	msg := make([]byte, 55)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ps.Publish("fanout-bench", msg)
+		for _, s := range subs {
+			<-s.Channel()
+		}
+	}
+}
+
+// TestEachCallOfChannelGetsEveryMessage checks, on both backends, that a
+// subscriber that asks for its channel again, as a select loop does, loses
+// no message.
+func TestEachCallOfChannelGetsEveryMessage(t *testing.T) {
+	t.Parallel()
+	for _, be := range []testutils.Backend{testutils.SQLiteMemoryBackend(), testutils.PostgresRedisBackend(), testutils.MySQLBackend(), testutils.MariaDBBackend()} {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := configulator.New(config.ConfigSchema()).Default()
+			if err != nil {
+				t.Fatal(err)
+			}
+			be.Setup(t, &cfg)
+			ps, err := pubsub.MakePubSub(context.Background(), &cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ps.Close() })
+			sub := ps.Subscribe("again")
+			defer func() { _ = sub.Close() }()
+			for range 5 {
+				_ = sub.Channel()
+			}
+			const n = 20
+			for i := range n {
+				if err := ps.Publish("again", []byte{byte(i)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := range n {
+				m, _ := next(t, sub.Channel(), "message %d did not come", i)
+				if len(m) != 1 || m[0] != byte(i) {
+					t.Fatalf("message %d: got %v", i, m)
+				}
+			}
+		})
+	}
+}
+
+// TestSubscribeIsActiveWhenItReturns publishes right after each Subscribe.
+// Each message must come, so that a caller can subscribe and then tell
+// others to send, as a replica that takes a repeater over does.
+func TestSubscribeIsActiveWhenItReturns(t *testing.T) {
+	t.Parallel()
+	for _, be := range []testutils.Backend{testutils.SQLiteMemoryBackend(), testutils.PostgresRedisBackend(), testutils.MySQLBackend(), testutils.MariaDBBackend()} {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := configulator.New(config.ConfigSchema()).Default()
+			if err != nil {
+				t.Fatal(err)
+			}
+			be.Setup(t, &cfg)
+			ps, err := pubsub.MakePubSub(context.Background(), &cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ps.Close() })
+			for i := range 200 {
+				topic := fmt.Sprintf("at-once-%d", i)
+				sub := ps.Subscribe(topic)
+				if err := ps.Publish(topic, []byte{1}); err != nil {
+					t.Fatal(err)
+				}
+				next(t, sub.Channel(), "the message published right after Subscribe of %s was lost", topic)
+				_ = sub.Close()
+			}
+		})
+	}
+}
+
+// TestSubscribersSeeOneOrder publishes to one topic from several
+// goroutines at once. Every subscriber must get the messages in the same
+// order, as Redis delivers them, since the replicas of a hub agree on who
+// sends what by the order of the messages on one topic.
+func TestSubscribersSeeOneOrder(t *testing.T) {
+	t.Parallel()
+	ps := makeTestPubSub(t)
+	const subs, writers, each = 4, 8, 12
+	all := make([]pubsub.Subscription, 0, subs)
+	for range subs {
+		all = append(all, ps.Subscribe("order"))
+	}
+	var wg sync.WaitGroup
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range each {
+				_ = ps.Publish("order", []byte{byte(w), byte(i)})
+			}
+		}()
+	}
+	wg.Wait()
+	var first []string
+	for n, sub := range all {
+		got := make([]string, 0, writers*each)
+		for range writers * each {
+			m, _ := next(t, sub.Channel(), "subscriber %d got %d messages", n, len(got))
+			got = append(got, string(m))
+		}
+		if n == 0 {
+			first = got
+			continue
+		}
+		if !slices.Equal(first, got) {
+			t.Fatalf("subscriber %d got another order than subscriber 0", n)
+		}
+	}
+}
+
+func backendPubSub(t *testing.T, be testutils.Backend) pubsub.PubSub {
+	t.Helper()
+	cfg, err := configulator.New(config.ConfigSchema()).Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	be.Setup(t, &cfg)
+	ps, err := pubsub.MakePubSub(context.Background(), &cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ps.Close() })
+	return ps
+}
+
+// TestAFeedGetsItsTopicsInPublishOrder publishes to three topics in turn.
+// A feed of all three must get every message in the order it was
+// published, with its topic.
+func TestAFeedGetsItsTopicsInPublishOrder(t *testing.T) {
+	t.Parallel()
+	for _, be := range []testutils.Backend{testutils.SQLiteMemoryBackend(), testutils.PostgresRedisBackend(), testutils.MySQLBackend(), testutils.MariaDBBackend()} {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			ps := backendPubSub(t, be)
+			f := ps.Feed()
+			defer func() { _ = f.Close() }()
+			topics := []string{"feed-a", "feed-b", "feed-c"}
+			for _, topic := range topics {
+				f.Add(topic)
+			}
+			const n = 300
+			for i := range n {
+				if err := ps.Publish(topics[i%7%3], []byte{byte(i), byte(i >> 8)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := range n {
+				m, _ := next(t, f.Channel(), "message %d did not come", i)
+				if m.Topic != topics[i%7%3] || len(m.Payload) != 2 || int(m.Payload[0])|int(m.Payload[1])<<8 != i {
+					t.Fatalf("message %d: got %q on %s", i, m.Payload, m.Topic)
+				}
+			}
+		})
+	}
+}
+
+// TestAFeedTopicIsActiveWhenAddReturns publishes right after each Add.
+// Each message must come.
+func TestAFeedTopicIsActiveWhenAddReturns(t *testing.T) {
+	t.Parallel()
+	for _, be := range []testutils.Backend{testutils.SQLiteMemoryBackend(), testutils.PostgresRedisBackend(), testutils.MySQLBackend(), testutils.MariaDBBackend()} {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			ps := backendPubSub(t, be)
+			f := ps.Feed()
+			defer func() { _ = f.Close() }()
+			for i := range 100 {
+				topic := fmt.Sprintf("feed-at-once-%d", i)
+				f.Add(topic)
+				if err := ps.Publish(topic, []byte{1}); err != nil {
+					t.Fatal(err)
+				}
+				m, _ := next(t, f.Channel(), "the message published right after Add of %s was lost", topic)
+				if m.Topic != topic {
+					t.Fatalf("got a message of %s, want %s", m.Topic, topic)
+				}
+				f.Remove(topic)
+			}
+		})
+	}
+}
+
+// TestClosingAFeedClosesItsChannel closes a feed, and then the pubsub.
+func TestClosingAFeedClosesItsChannel(t *testing.T) {
+	t.Parallel()
+	for _, be := range []testutils.Backend{testutils.SQLiteMemoryBackend(), testutils.PostgresRedisBackend(), testutils.MySQLBackend(), testutils.MariaDBBackend()} {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			ps := backendPubSub(t, be)
+			f := ps.Feed()
+			f.Add("feed-close")
+			_ = f.Close()
+			_, ok := next(t, f.Channel(), "closing the feed left its channel open")
+			if ok {
+				t.Fatal("a closed feed got a message")
+			}
+			_ = ps.Publish("feed-close", []byte{1})
+			other := ps.Feed()
+			_ = ps.Close()
+			next(t, other.Channel(), "closing the pubsub left a feed open")
+		})
+	}
+}

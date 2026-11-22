@@ -1,0 +1,445 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package peers
+
+import (
+	"errors"
+	"log/slog"
+	"net"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/hub"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/apimodels"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/utils"
+	"github.com/USA-RedDragon/DMRHub/internal/smtp"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+)
+
+const (
+	errorKey         = "error"
+	msgTryAgainLater = "Try again later"
+	msgAuthFailed    = "Authentication failed"
+	msgInvalidPeerID = "Invalid peer ID"
+	messageKey       = "message"
+	msgPeerNotFound  = "Peer not found"
+	msgInvalidJSON   = "JSON data is invalid"
+)
+
+const (
+	LinkTypeDynamic = "dynamic"
+	LinkTypeStatic  = "static"
+)
+
+func GETPeers(c *gin.Context) {
+	db, ok := utils.GetPaginatedDB(c)
+	if !ok {
+		return
+	}
+	cDb, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	peers, err := models.ListPeers(db)
+	if err != nil {
+		slog.Error("Error listing peers", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	count, err := models.CountPeers(cDb)
+	if err != nil {
+		slog.Error("Error counting peers", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"total": count, "peers": peers})
+}
+
+func GETMyPeers(c *gin.Context) {
+	db, ok := utils.GetPaginatedDB(c)
+	if !ok {
+		return
+	}
+	cDb, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	session := sessions.Default(c)
+
+	userID := session.Get("user_id")
+	if userID == nil {
+		slog.Error("userID not found")
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: msgAuthFailed})
+		return
+	}
+
+	uid, ok := userID.(uint)
+	if !ok {
+		slog.Error("Unable to convert userID to uint", "function", "GETMyPeers", "userID", userID)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	// Get all peers owned by user
+	peers, err := models.GetUserPeers(db, uid)
+	if err != nil {
+		slog.Error("Error getting peers owned by user", "userID", userID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "Error getting peers owned by user"})
+		return
+	}
+
+	count, err := models.CountUserPeers(cDb, uid)
+	if err != nil {
+		slog.Error("Error counting user peers", "userID", userID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"total": count, "peers": peers})
+}
+
+func GETPeer(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	id := c.Param("id")
+	// Convert string id into uint
+	peerID, err := strconv.ParseUint(id, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidPeerID})
+		return
+	}
+	exists, err := models.PeerIDExists(db, uint(peerID))
+	if err != nil {
+		slog.Error("Error checking peer existence", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "Peer does not exist"})
+		return
+	}
+	peer, err := models.FindPeerByID(db, uint(peerID))
+	if err != nil {
+		slog.Error("Error finding peer", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	c.JSON(http.StatusOK, peer)
+}
+
+func DELETEPeer(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	idUint64, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidPeerID})
+		return
+	}
+	if err = models.DeletePeer(db, uint(idUint64)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+		return
+	}
+	peerChanged(c, uint(idUint64))
+	c.JSON(http.StatusOK, gin.H{messageKey: "Peer deleted"})
+}
+
+func PATCHPeer(c *gin.Context) {
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	idUint64, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidPeerID})
+		return
+	}
+	peerID := uint(idUint64)
+	exists, err := models.PeerIDExists(db, peerID)
+	if err != nil {
+		slog.Error("Error checking peer existence", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{errorKey: msgPeerNotFound})
+		return
+	}
+
+	var json apimodels.PeerPatch
+	if err := c.ShouldBindJSON(&json); err != nil {
+		slog.Error(msgInvalidJSON, "function", "PATCHPeer", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidJSON})
+		return
+	}
+
+	updates := make(map[string]interface{})
+	if json.IP != nil {
+		if net.ParseIP(*json.IP) == nil {
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Invalid IP address"})
+			return
+		}
+		updates["ip"] = *json.IP
+	}
+	if json.Port != nil {
+		const maxPort = 65535
+		if *json.Port < 1 || *json.Port > maxPort {
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Port must be between 1 and 65535"})
+			return
+		}
+		updates["port"] = *json.Port
+	}
+	if json.Ingress != nil {
+		updates["ingress"] = *json.Ingress
+	}
+	if json.Egress != nil {
+		updates["egress"] = *json.Egress
+	}
+	if json.IngressPrivate != nil {
+		updates["ingress_private"] = *json.IngressPrivate
+	}
+	if json.EgressPrivate != nil {
+		updates["egress_private"] = *json.EgressPrivate
+	}
+	if json.Enhanced != nil {
+		if !requesterIsAdmin(c, db) {
+			c.JSON(http.StatusForbidden, gin.H{errorKey: "Only an admin can change whether a peer uses enhanced OpenBridge"})
+			return
+		}
+		updates["enhanced"] = *json.Enhanced
+	}
+	if json.Codec2 != nil {
+		if !requesterIsAdmin(c, db) {
+			c.JSON(http.StatusForbidden, gin.H{errorKey: "Only an admin can change whether a peer carries Codec2"})
+			return
+		}
+		updates["codec2"] = *json.Codec2
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "No fields to update"})
+		return
+	}
+
+	if err := db.Model(&models.Peer{}).Where("id = ?", peerID).Updates(updates).Error; err != nil {
+		slog.Error("Error updating peer", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	peerChanged(c, peerID)
+
+	peer, err := models.FindPeerByID(db, peerID)
+	if err != nil {
+		slog.Error("Error finding updated peer", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	c.JSON(http.StatusOK, peer)
+}
+
+func POSTPeer(c *gin.Context) {
+	session := sessions.Default(c)
+	usID := session.Get("user_id")
+	if usID == nil {
+		slog.Error("userID not found")
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: msgAuthFailed})
+		return
+	}
+	userID, ok := usID.(uint)
+	if !ok {
+		slog.Error("userID cast failed")
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: msgAuthFailed})
+		return
+	}
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	config, ok := utils.GetConfig(c)
+	if !ok {
+		return
+	}
+	var json apimodels.PeerPost
+	err := c.ShouldBindJSON(&json)
+	if err != nil {
+		slog.Error(msgInvalidJSON, "function", "POSTPeer", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidJSON})
+	} else {
+		exists, existsErr := models.PeerIDExists(db, json.ID)
+		if existsErr != nil {
+			slog.Error("Error checking peer ID existence", "function", "POSTPeer", "peerID", json.ID, "error", existsErr)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+		if exists {
+			slog.Error("Peer ID already exists", "function", "POSTPeer", "peerID", json.ID)
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Peer ID already exists"})
+			return
+		}
+
+		// Validate IP address
+		if net.ParseIP(json.IP) == nil {
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Invalid IP address"})
+			return
+		}
+
+		// Validate port range
+		const maxPort = 65535
+		if json.Port < 1 || json.Port > maxPort {
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Port must be between 1 and 65535"})
+			return
+		}
+
+		var peer models.Peer
+
+		peer.Egress = json.Egress
+		peer.Ingress = json.Ingress
+		peer.IngressPrivate = json.IngressPrivate
+		peer.EgressPrivate = json.EgressPrivate
+		peer.Enhanced = json.Enhanced
+		peer.Codec2 = json.Codec2
+		peer.IP = json.IP
+		peer.Port = json.Port
+
+		// Peer validated to fit within a 4 byte integer
+		if json.ID <= 0 || json.ID > 4294967295 {
+			slog.Error("Peer ID is invalid", "function", "POSTPeer", "peerID", json.ID)
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Peer ID is invalid"})
+			return
+		}
+
+		peer.ID = json.ID
+
+		peer.Password, err = utils.NewPeerPassword()
+		if err != nil {
+			slog.Error("Failed to generate a peer password", "function", "POSTPeer", "error", err)
+			c.JSON(http.StatusBadRequest, gin.H{errorKey: "Failed to generate a peer password"})
+			return
+		}
+
+		var user models.User
+		if err := db.First(&user, json.OwnerID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusBadRequest, gin.H{errorKey: "Owner does not exist"})
+				return
+			}
+			slog.Error("Error getting user", "function", "POSTPeer", "userID", userID, "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: "Error getting user"})
+			return
+		}
+
+		peer.Owner = user
+		peer.OwnerID = json.OwnerID
+		if err := db.Preload("Owner").Create(&peer).Error; err != nil {
+			slog.Error("Error creating peer", "function", "POSTPeer", "peerID", peer.ID, "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+			return
+		}
+		peerChanged(c, peer.ID)
+		c.JSON(http.StatusOK, gin.H{messageKey: "Peer created", "password": peer.Password})
+
+		if config.SMTP.Enabled {
+			err = smtp.SendToAdmins(
+				config,
+				db,
+				"OpenBridge peer created",
+				"New OpenBridge peer created with ID "+strconv.FormatUint(uint64(peer.ID), 10)+" by "+peer.Owner.Username,
+			)
+			if err != nil {
+				slog.Error("Error sending email", "function", "POSTPeer", "error", err)
+			}
+		}
+	}
+}
+
+// POSTPeerRotatePassword gives the peer a new random password in place of
+// the old one, which stops working at once: the OpenBridge server of every
+// replica takes only the new one from then on. The response holds the new
+// password, which DMRHub does not show again. Only a signed-in owner or
+// admin may rotate it, not an app with a token.
+func POSTPeerRotatePassword(c *gin.Context) {
+	if utils.ViaToken(c) {
+		c.JSON(http.StatusForbidden, gin.H{errorKey: "Sign in to rotate the password of a peer"})
+		return
+	}
+	db, ok := utils.GetDB(c)
+	if !ok {
+		return
+	}
+	idUint64, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: msgInvalidPeerID})
+		return
+	}
+	peerID := uint(idUint64)
+	password, err := utils.NewPeerPassword()
+	if err != nil {
+		slog.Error("Failed to generate a peer password", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	switch err := models.SetPeerPassword(db, peerID, password); {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		c.JSON(http.StatusNotFound, gin.H{errorKey: msgPeerNotFound})
+		return
+	case err != nil:
+		slog.Error("Error saving the peer password", "peerID", peerID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+		return
+	}
+	rotatedAt := time.Now()
+	peerChanged(c, peerID)
+	slog.Info("Peer password rotated", "peerID", peerID, "by", sessions.Default(c).Get("user_id"))
+	c.JSON(http.StatusOK, apimodels.PeerRotatePasswordResponse{Password: password, RotatedAt: rotatedAt})
+}
+
+func requesterIsAdmin(c *gin.Context, db *gorm.DB) bool {
+	userID, ok := sessions.Default(c).Get("user_id").(uint)
+	if !ok {
+		return false
+	}
+	user, err := models.FindUserByID(db, userID)
+	if err != nil {
+		return false
+	}
+	return user.Admin && user.Approved && !user.Suspended
+}
+
+func peerChanged(c *gin.Context, peerID uint) {
+	if h, ok := dmrHubOf(c); ok {
+		h.PeerChanged(peerID)
+	}
+}
+
+func dmrHubOf(c *gin.Context) (*hub.Hub, bool) {
+	v, ok := c.Get("Hub")
+	if !ok {
+		return nil, false
+	}
+	h, ok := v.(*hub.Hub)
+	return h, ok && h != nil
+}

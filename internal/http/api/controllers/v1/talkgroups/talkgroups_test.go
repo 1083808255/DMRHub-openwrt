@@ -1,0 +1,527 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package talkgroups_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/apimodels"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const testTimeout = 1 * time.Minute
+
+func TestGETTalkgroupsAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+	require.NoError(t, tdb.DB().Create(&models.Talkgroup{ID: 31337, Name: "Echo net"}).Error)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/talkgroups", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var result struct {
+		Total      int                `json:"total"`
+		Talkgroups []models.Talkgroup `json:"talkgroups"`
+	}
+	err = json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, result.Total)
+}
+
+func TestGETTalkgroupByID(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+	require.NoError(t, tdb.DB().Create(&models.Talkgroup{ID: 31337, Name: "Echo net"}).Error)
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/talkgroups/31337", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var tg models.Talkgroup
+	err = json.Unmarshal(w.Body.Bytes(), &tg)
+	assert.NoError(t, err)
+	assert.Equal(t, uint(31337), tg.ID)
+	assert.Equal(t, "Echo net", tg.Name)
+}
+
+// TestGETTalkgroupByIDReturnsAdminsAndNCOs is a regression test ensuring that
+// GETTalkgroup returns the Admins and NCOs associations in the response. A
+// previous bug caused GETTalkgroup to make two redundant DB queries, where the
+// second (which populated the associations) had its error discarded. After the
+// fix, FindTalkgroupByID is called once and already preloads Admins and NCOs.
+func TestGETTalkgroupByIDReturnsAdminsAndNCOs(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	// Look up the admin user's actual ID from the database
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	assert.NoError(t, err)
+
+	// Create a talkgroup
+	createBody := map[string]interface{}{
+		"id":          uint(12345),
+		"name":        "Test TG",
+		"description": "Test talkgroup",
+	}
+	jsonBytes, err := json.Marshal(createBody)
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/talkgroups", bytes.NewBuffer(jsonBytes))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Assign admin user as an admin of the talkgroup
+	adminAction := map[string]interface{}{
+		"user_ids": []uint{adminUser.ID},
+	}
+	jsonBytes, err = json.Marshal(adminAction)
+	assert.NoError(t, err)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/talkgroups/12345/admins", bytes.NewBuffer(jsonBytes))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Also assign as NCO
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/talkgroups/12345/ncos", bytes.NewBuffer(jsonBytes))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// GET the talkgroup and verify Admins and NCOs are populated
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/talkgroups/12345", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var tg models.Talkgroup
+	err = json.Unmarshal(w.Body.Bytes(), &tg)
+	assert.NoError(t, err)
+	assert.Equal(t, uint(12345), tg.ID)
+	assert.Equal(t, "Test TG", tg.Name)
+	assert.Len(t, tg.Admins, 1, "Admins should be populated in GET response")
+	assert.Equal(t, adminUser.ID, tg.Admins[0].ID)
+	assert.Equal(t, adminUser.Callsign, tg.Admins[0].Callsign)
+	assert.Empty(t, tg.Admins[0].Username)
+	assert.Len(t, tg.NCOs, 1, "NCOs should be populated in GET response")
+	assert.Equal(t, adminUser.ID, tg.NCOs[0].ID)
+	assert.Empty(t, tg.NCOs[0].Username)
+}
+
+func TestGETTalkgroupInvalidID(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/talkgroups/notanumber", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGETMyTalkgroupsAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/talkgroups/my", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestPOSTTalkgroup(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	tg := apimodels.TalkgroupPost{
+		ID:          10001,
+		Name:        "My Test TG",
+		Description: "A test talkgroup",
+	}
+
+	resp, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, resp.Error)
+
+	// Verify it appears in GET
+	tgResp, w := testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, tg.ID, tgResp.ID)
+	assert.Equal(t, tg.Name, tgResp.Name)
+	assert.Equal(t, tg.Description, tgResp.Description)
+}
+
+func TestPATCHTalkgroupPreservesName(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	tg := apimodels.TalkgroupPost{
+		ID:          10002,
+		Name:        "Original Name",
+		Description: "Original description",
+	}
+
+	_, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// PATCH only description
+	_, w = testutils.PatchTalkgroup(t, router, tg.ID, adminJar, apimodels.TalkgroupPatch{
+		Description: "Updated description",
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify name unchanged
+	tgResp, w := testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Original Name", tgResp.Name, "PATCH description should not change name")
+	assert.Equal(t, "Updated description", tgResp.Description)
+}
+
+func TestPATCHTalkgroupPreservesDescription(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	tg := apimodels.TalkgroupPost{
+		ID:          10003,
+		Name:        "Original Name",
+		Description: "Original description",
+	}
+
+	_, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// PATCH only name
+	_, w = testutils.PatchTalkgroup(t, router, tg.ID, adminJar, apimodels.TalkgroupPatch{
+		Name: "Updated Name",
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify description unchanged
+	tgResp, w := testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Updated Name", tgResp.Name)
+	assert.Equal(t, "Original description", tgResp.Description, "PATCH name should not change description")
+}
+
+func TestPOSTTalkgroupAdminsPreservesFields(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	tg := apimodels.TalkgroupPost{
+		ID:          10004,
+		Name:        "Admin Test TG",
+		Description: "A talkgroup for admin tests",
+	}
+
+	_, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Look up the admin user's actual ID
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	// Set admins
+	resp, w := testutils.SetTalkgroupAdmins(t, router, tg.ID, adminJar, apimodels.TalkgroupAdminAction{
+		UserIDs: []uint{adminUser.ID},
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, resp.Error)
+
+	// Verify name and description unchanged
+	tgResp, w := testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Admin Test TG", tgResp.Name, "Setting admins should not change name")
+	assert.Equal(t, "A talkgroup for admin tests", tgResp.Description, "Setting admins should not change description")
+	assert.Len(t, tgResp.Admins, 1)
+}
+
+func TestPOSTTalkgroupNCOsPreservesFields(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	tg := apimodels.TalkgroupPost{
+		ID:          10005,
+		Name:        "NCO Test TG",
+		Description: "A talkgroup for NCO tests",
+	}
+
+	_, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Look up the admin user's actual ID
+	var adminUser models.User
+	err = tdb.DB().Where("username = ?", "Admin").First(&adminUser).Error
+	require.NoError(t, err)
+
+	// Set NCOs
+	resp, w := testutils.SetTalkgroupNCOs(t, router, tg.ID, adminJar, apimodels.TalkgroupAdminAction{
+		UserIDs: []uint{adminUser.ID},
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, resp.Error)
+
+	// Verify name and description unchanged
+	tgResp, w := testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "NCO Test TG", tgResp.Name, "Setting NCOs should not change name")
+	assert.Equal(t, "A talkgroup for NCO tests", tgResp.Description, "Setting NCOs should not change description")
+	assert.Len(t, tgResp.NCOs, 1)
+}
+
+func TestDELETETalkgroup(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	tg := apimodels.TalkgroupPost{
+		ID:          10006,
+		Name:        "Delete Test TG",
+		Description: "A talkgroup to delete",
+	}
+
+	_, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Create a user and repeater, assign the talkgroup
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206801,
+	}
+	_, w = testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Assign the talkgroup to the repeater
+	_, w = testutils.SetRepeaterTalkgroups(t, router, repeaterPost.RadioID, userJar, apimodels.RepeaterTalkgroupsPost{
+		TS1StaticTalkgroups: []models.Talkgroup{{ID: tg.ID}},
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Delete the talkgroup
+	delResp, w := testutils.DeleteTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Talkgroup deleted", delResp.Message)
+
+	// Verify it's gone (controller returns 500 for record not found)
+	_, w = testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	// Verify repeater no longer references the talkgroup
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, rpt.TS1StaticTalkgroups, "Deleting a talkgroup should remove it from repeater associations")
+}
+
+func TestGETMyTalkgroupsReturnsAdminsAndNCOs(t *testing.T) {
+	t.Parallel()
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	var admin models.User
+	require.NoError(t, tdb.DB().Where("username = ?", "Admin").First(&admin).Error)
+	nco := testutils.SeedAccount(t, tdb.DB(), 3000001, "N0TEST", "nco")
+	require.NoError(t, tdb.DB().Create(&models.Talkgroup{ID: 3000, Name: "Demo", Admins: []models.User{admin}, NCOs: []models.User{nco}}).Error)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/talkgroups/my", nil)
+	for _, cookie := range adminJar.Cookies() {
+		req.Header.Add("Cookie", cookie.String())
+	}
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var res struct {
+		Talkgroups []models.Talkgroup `json:"talkgroups"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	require.Len(t, res.Talkgroups, 1)
+	require.Len(t, res.Talkgroups[0].Admins, 1)
+	assert.Equal(t, admin.ID, res.Talkgroups[0].Admins[0].ID)
+	require.Len(t, res.Talkgroups[0].NCOs, 1)
+	assert.Equal(t, "N0TEST", res.Talkgroups[0].NCOs[0].Callsign)
+}
+
+// TestPATCHTalkgroupListen takes a talkgroup off the listen monitor and
+// puts it back, and checks that a PATCH without the field keeps it.
+func TestPATCHTalkgroupListen(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	tg := apimodels.TalkgroupPost{ID: 10003, Name: "Listen", Description: "Listen test"}
+	_, w := testutils.CreateTalkgroup(t, router, adminJar, tg)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	off, on := false, true
+	for _, step := range []struct {
+		patch    apimodels.TalkgroupPatch
+		noListen bool
+	}{
+		{apimodels.TalkgroupPatch{}, false},
+		{apimodels.TalkgroupPatch{Listen: &off}, true},
+		{apimodels.TalkgroupPatch{Name: "Renamed"}, true},
+		{apimodels.TalkgroupPatch{Listen: &on}, false},
+	} {
+		_, w = testutils.PatchTalkgroup(t, router, tg.ID, adminJar, step.patch)
+		require.Equal(t, http.StatusOK, w.Code)
+		got, w := testutils.GetTalkgroup(t, router, tg.ID, adminJar)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, step.noListen, got.NoListen)
+		ok, err := models.Listenable(tdb.DB(), tg.ID)
+		require.NoError(t, err)
+		assert.Equal(t, !step.noListen, ok)
+	}
+}

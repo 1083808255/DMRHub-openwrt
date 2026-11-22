@@ -1,0 +1,4 @@
+config dmrhub 'main'
+	option enabled '1'
+	option config '/opt/dmrhub/config.yaml'
+	option data_dir '/opt/dmrhub'

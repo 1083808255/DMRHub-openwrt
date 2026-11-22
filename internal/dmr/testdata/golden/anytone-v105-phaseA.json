@@ -1,0 +1,49 @@
+{
+  "source": "testdata/anytone-v105-phaseA.txt: three unconfirmed AnyTone texts from the radio",
+  "transmissions": [
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false
+    }
+  ],
+  "messages": [
+    {
+      "format": "anytone",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": "TEST"
+    },
+    {
+      "format": "anytone",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": "GJGJGJGJGJGJGJGJGJGJGJGJGJHJGJGKGKGJGJGKGLHJGJGJGJGJGJGKGJGJGJGJGJGKGJGJGJGJGJGJGJGKGJGLGJGJHJGJGKGJ"
+    },
+    {
+      "format": "anytone",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    }
+  ]
+}

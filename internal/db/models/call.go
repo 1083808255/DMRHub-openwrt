@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package models
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// CallKind is what the bursts of a transmission carry.
+type CallKind string
+
+// The CallKind values.
+const (
+	CallKindVoice   CallKind = "voice"
+	CallKindData    CallKind = "data"
+	CallKindUDT     CallKind = "udt"
+	CallKindCSBK    CallKind = "csbk"
+	CallKindMBC     CallKind = "mbc"
+	CallKindUSBD    CallKind = "usbd"
+	CallKindIdle    CallKind = "idle"
+	CallKindAlias   CallKind = "alias"
+	CallKindGPS     CallKind = "gps"
+	CallKindUnknown CallKind = "unknown"
+)
+
+// CallResponse is the response that a confirmed transmission got.
+type CallResponse string
+
+// The CallResponse values. CallResponseNone is a transmission without a
+// response.
+const (
+	CallResponseNone CallResponse = ""
+	CallResponseACK  CallResponse = "ack"
+	CallResponseNACK CallResponse = "nack"
+	CallResponseSACK CallResponse = "sack"
+)
+
+// Call is one transmission of any kind: a voice call, a data call, a
+// control block, a talker alias or a GPS position. UserID and RepeaterID
+// are set only when the source and the ingress repeater are registered;
+// SourceID and IngressID always hold the IDs that the packets carried.
+type Call struct {
+	ID            uint          `json:"id" gorm:"primarykey"`
+	CallData      Blob          `json:"-"`
+	StreamID      uint          `json:"-"`
+	StartTime     time.Time     `json:"start_time"`
+	Duration      time.Duration `json:"duration"`
+	Active        bool          `json:"active"`
+	User          User          `json:"user" gorm:"foreignKey:UserID"`
+	UserID        *uint         `json:"-"`
+	Repeater      Repeater      `json:"repeater" gorm:"foreignKey:RepeaterID"`
+	RepeaterID    *uint         `json:"-"`
+	TimeSlot      bool          `json:"time_slot"`
+	GroupCall     bool          `json:"group_call"`
+	IsToTalkgroup bool          `json:"is_to_talkgroup"`
+	ToTalkgroupID *uint         `json:"-"`
+	ToTalkgroup   Talkgroup     `json:"to_talkgroup" gorm:"foreignKey:ToTalkgroupID"`
+	IsToUser      bool          `json:"is_to_user"`
+	ToUserID      *uint         `json:"-"`
+	ToUser        User          `json:"to_user" gorm:"foreignKey:ToUserID"`
+	IsToRepeater  bool          `json:"is_to_repeater"`
+	ToRepeaterID  *uint         `json:"-"`
+	ToRepeater    Repeater      `json:"to_repeater" gorm:"foreignKey:ToRepeaterID"`
+	IsToPlugin    bool          `json:"is_to_plugin" gorm:"not null;default:false"`
+	// IsToLocalGroup marks a group call to a local talkgroup, which went
+	// to the repeaters of the local group LocalGroupID, named
+	// LocalGroupName when the call was made.
+	IsToLocalGroup bool           `json:"is_to_local_group" gorm:"not null;default:false"`
+	LocalGroupID   *uint          `json:"local_group_id"`
+	LocalGroupName string         `json:"local_group_name" gorm:"size:64"`
+	DestinationID  uint           `json:"destination_id"`
+	TotalPackets   uint           `json:"-"`
+	LostSequences  uint           `json:"-"`
+	Loss           float32        `json:"loss"`
+	Jitter         float32        `json:"jitter"`
+	LastFrameNum   uint           `json:"-"`
+	LastSeq        uint           `json:"-"`
+	BER            float32        `json:"ber"`
+	RSSI           float32        `json:"rssi"`
+	TotalBits      uint           `json:"-"`
+	TotalErrors    int            `json:"-"`
+	LastPacketTime time.Time      `json:"-"`
+	HasHeader      bool           `json:"-"`
+	HasTerm        bool           `json:"-"`
+	Kind           CallKind       `json:"kind" gorm:"size:16;not null;default:'voice';index"`
+	SubKind        string         `json:"sub_kind" gorm:"size:64"`
+	SourceID       uint           `json:"source_id" gorm:"index"`
+	Transport      string         `json:"transport" gorm:"size:16"`
+	IngressID      uint           `json:"ingress_id"`
+	Bursts         uint           `json:"bursts"`
+	FID            *uint8         `json:"fid"`
+	Opcode         *uint8         `json:"opcode"`
+	SAP            *uint8         `json:"sap"`
+	DataFormat     string         `json:"data_format" gorm:"size:16"`
+	Confirmed      bool           `json:"confirmed"`
+	Blocks         uint           `json:"blocks"`
+	Octets         uint           `json:"octets"`
+	BadCRC         uint           `json:"bad_crc"`
+	LostBlocks     uint           `json:"lost_blocks"`
+	Response       CallResponse   `json:"response" gorm:"size:8"`
+	TalkerAlias    string         `json:"talker_alias" gorm:"size:64"`
+	AliasFormat    string         `json:"alias_format" gorm:"size:16"`
+	Latitude       *float64       `json:"latitude"`
+	Longitude      *float64       `json:"longitude"`
+	PositionError  *uint8         `json:"position_error"`
+	Partial        bool           `json:"partial"`
+	Undeliverable  []string       `json:"undeliverable" gorm:"serializer:json;type:text"`
+	CreatedAt      time.Time      `json:"-"`
+	UpdatedAt      time.Time      `json:"-"`
+	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Codec is the codec of a voice call, "ambe" or "codec2", and
+	// Codec2Mode the Codec2 mode, 2400 or 3200, once the frames show it.
+	Codec      string `json:"codec" gorm:"size:8"`
+	Codec2Mode int    `json:"codec2_mode"`
+	// SentAMBE and SentCodec2 count the targets that got the call
+	// converted to AMBE and to Codec2.
+	SentAMBE   int `json:"sent_ambe"`
+	SentCodec2 int `json:"sent_codec2"`
+	// MissedMS is the audio, in milliseconds, that could not be converted
+	// and went out as silence.
+	MissedMS int `json:"missed_ms"`
+	// TranscodeBusy marks a call that was not converted because every
+	// AMBE server was busy.
+	TranscodeBusy bool `json:"busy"`
+}
+
+// BeforeSave keeps StartTime in UTC, so that SQLite, which compares times
+// as text, filters the calls by their start right.
+func (c *Call) BeforeSave(*gorm.DB) error {
+	c.StartTime = c.StartTime.UTC()
+	return nil
+}
+
+// lastHeard picks the calls of the public last heard: those to a
+// talkgroup or a local group, and the group calls to an ID that a plugin
+// owns, such as the parrot, which has no talkgroup.
+const lastHeard = "(is_to_talkgroup = ? OR is_to_local_group = ? OR (group_call = ? AND is_to_plugin = ?))"
+
+func FindCalls(db *gorm.DB) ([]Call, error) {
+	var calls []Call
+	err := db.Preload("User").Preload("Repeater").Preload("ToTalkgroup").Preload("ToUser").Preload("ToRepeater").Where(lastHeard, true, true, true, true).Order("start_time desc").Find(&calls).Error
+	return calls, err
+}
+
+func CountCalls(db *gorm.DB) (int, error) {
+	var count int64
+	err := db.Model(&Call{}).Where(lastHeard, true, true, true, true).Count(&count).Error
+	return int(count), err
+}
+
+func FindRepeaterCalls(db *gorm.DB, repeaterID uint) ([]Call, error) {
+	var calls []Call
+	err := db.Preload("User").Preload("Repeater").Preload("ToTalkgroup").Preload("ToUser").Preload("ToRepeater").
+		Where("(is_to_repeater = ? AND to_repeater_id = ?) OR repeater_id = ?", true, repeaterID, repeaterID).
+		Order("start_time desc").Find(&calls).Error
+	return calls, err
+}
+
+func CountRepeaterCalls(db *gorm.DB, repeaterID uint) (int, error) {
+	var count int64
+	err := db.Model(&Call{}).Where("(is_to_repeater = ? AND to_repeater_id = ?) OR repeater_id = ?", true, repeaterID, repeaterID).Count(&count).Error
+	return int(count), err
+}
+
+func FindUserCalls(db *gorm.DB, userID uint) ([]Call, error) {
+	var calls []Call
+	err := db.Preload("User").Preload("Repeater").Preload("ToTalkgroup").Preload("ToUser").Preload("ToRepeater").
+		Where("source_id = ? OR (group_call = ? AND destination_id = ?)", userID, false, userID).
+		Order("start_time desc").Find(&calls).Error
+	return calls, err
+}
+
+func CountUserCalls(db *gorm.DB, userID uint) (int, error) {
+	var count int64
+	err := db.Model(&Call{}).Where("source_id = ? OR (group_call = ? AND destination_id = ?)", userID, false, userID).Count(&count).Error
+	return int(count), err
+}
+
+func FindTalkgroupCalls(db *gorm.DB, talkgroupID uint) ([]Call, error) {
+	var calls []Call
+	// Find calls where (IsToTalkgroup is true and ToTalkgroupID is talkgroupID)
+	err := db.Preload("User").Preload("Repeater").Preload("ToTalkgroup").Preload("ToUser").Preload("ToRepeater").
+		Where("is_to_talkgroup = ? AND to_talkgroup_id = ?", true, talkgroupID).
+		Order("start_time desc").Find(&calls).Error
+	return calls, err
+}
+
+func CountTalkgroupCalls(db *gorm.DB, talkgroupID uint) (int, error) {
+	var count int64
+	err := db.Model(&Call{}).Where("is_to_talkgroup = ? AND to_talkgroup_id = ?", true, talkgroupID).Count(&count).Error
+	return int(count), err
+}
+
+func FindActiveCall(db *gorm.DB, streamID uint, src uint, dst uint, slot bool, groupCall bool) (Call, error) {
+	var call Call
+	err := db.Preload("User").Preload("Repeater").Preload("ToTalkgroup").Preload("ToUser").Preload("ToRepeater").Where("stream_id = ? AND active = ? AND user_id = ? AND destination_id = ? AND time_slot = ? AND group_call = ?", streamID, true, src, dst, slot, groupCall).First(&call).Error
+	if err != nil {
+		return call, err
+	}
+	return call, nil
+}
+
+func ActiveCallExists(db *gorm.DB, streamID uint, src uint, dst uint, slot bool, groupCall bool) (bool, error) {
+	var count int64
+	err := db.Model(&Call{}).Where("stream_id = ? AND active = ? AND user_id = ? AND destination_id = ? AND time_slot = ? AND group_call = ?", streamID, true, src, dst, slot, groupCall).Count(&count).Error
+	return count > 0, err
+}
+
+// FindTalkgroupCallsInTimeRange returns calls for a talkgroup within a time window.
+// The window takes in the whole millisecond of each bound, the precision of
+// the column on MySQL and MariaDB, so a call is in it whatever precision
+// the bounds have.
+func FindTalkgroupCallsInTimeRange(db *gorm.DB, talkgroupID uint, startTime, endTime time.Time) ([]Call, error) {
+	startTime, endTime = rangeBounds(startTime, endTime)
+	var calls []Call
+	err := db.Preload("User").Preload("Repeater").Preload("ToTalkgroup").Preload("ToUser").Preload("ToRepeater").
+		Where("is_to_talkgroup = ? AND to_talkgroup_id = ? AND start_time >= ? AND start_time <= ? AND kind = ? AND user_id IS NOT NULL", true, talkgroupID, startTime, endTime, CallKindVoice).
+		Order("start_time desc").Find(&calls).Error
+	return calls, err
+}
+
+// CountTalkgroupCallsInTimeRange returns the count of calls for a talkgroup within a time window,
+// as FindTalkgroupCallsInTimeRange takes it.
+func CountTalkgroupCallsInTimeRange(db *gorm.DB, talkgroupID uint, startTime, endTime time.Time) (int, error) {
+	startTime, endTime = rangeBounds(startTime, endTime)
+	var count int64
+	err := db.Model(&Call{}).Where("is_to_talkgroup = ? AND to_talkgroup_id = ? AND start_time >= ? AND start_time <= ? AND kind = ? AND user_id IS NOT NULL", true, talkgroupID, startTime, endTime, CallKindVoice).Count(&count).Error
+	return int(count), err
+}
+
+// CountUniqueUsersInTimeRange returns the number of distinct users who made calls on a talkgroup within a time window,
+// as FindTalkgroupCallsInTimeRange takes it.
+func CountUniqueUsersInTimeRange(db *gorm.DB, talkgroupID uint, startTime, endTime time.Time) (int, error) {
+	startTime, endTime = rangeBounds(startTime, endTime)
+	var count int64
+	err := db.Model(&Call{}).Where("is_to_talkgroup = ? AND to_talkgroup_id = ? AND start_time >= ? AND start_time <= ? AND kind = ? AND user_id IS NOT NULL", true, talkgroupID, startTime, endTime, CallKindVoice).
+		Distinct("user_id").Count(&count).Error
+	return int(count), err
+}
+
+func rangeBounds(start, end time.Time) (time.Time, time.Time) {
+	start = start.UTC().Truncate(time.Millisecond)
+	end = end.UTC()
+	if up := end.Truncate(time.Millisecond); up.Before(end) {
+		end = up.Add(time.Millisecond)
+	}
+	return start, end
+}

@@ -1,0 +1,440 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package hub
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/puzpuzpuz/xsync/v4"
+)
+
+// claimedTopic carries each claim of a repeater by a replica, as
+// "<repeater ID> <instance ID> <since>", where since is the time in Unix
+// nanoseconds when the packet that made the replica claim it came in.
+const claimedTopic = "hub:claimed"
+
+// MoveSlack is how long before the time of a claim the repeater may have
+// moved already. The load balancer ends the old session of the repeater
+// when it gets the packet, which reaches the replica that claims it later,
+// by as much as the load balancer stalls: 300 ms under CPU throttling in
+// TestRotationMidCall. What the old replica sent in that time, or sent
+// earlier and the load balancer had not passed on yet, is lost with the
+// old session. So the old replica hands over all that it sent from
+// MoveSlack before the claim, and the repeater may get some of it twice,
+// which is better than not at all. IPSC peers and browser hotspots take
+// such copies. An MMDVM repeater plays a copy of any but its last frame as
+// audio, so the MMDVM server hands over less; see mmdvm.MoveSlack.
+const MoveSlack = 500 * time.Millisecond
+
+func ownerKey(repeaterID uint) string {
+	return fmt.Sprintf("%s%d", peerOwnerKeyPrefix, repeaterID)
+}
+
+// InstanceID returns the ID of the replica of this hub, or "" when it has
+// none.
+func (h *Hub) InstanceID() string {
+	return h.instanceID
+}
+
+// ownerSinceKey is the KV key of the claim time of a repeater. It holds
+// "<replica> <claim time in Unix nanoseconds>", with the TTL of the
+// ownership record, apart from that record, whose plain replica ID older
+// replicas read.
+func ownerSinceKey(repeaterID uint) string {
+	return fmt.Sprintf("%s%d", peerOwnerSinceKeyPrefix, repeaterID)
+}
+
+const peerOwnerSinceKeyPrefix = "dmrhub:peer_owner_since:"
+
+func claimValue(instance string, since time.Time) []byte {
+	return []byte(instance + " " + strconv.FormatInt(since.UnixNano(), 10))
+}
+
+func parseClaimValue(v []byte) (string, time.Time) {
+	f := strings.Fields(string(v))
+	if len(f) != 2 {
+		return "", time.Time{}
+	}
+	ns, err := strconv.ParseInt(f[1], 10, 64)
+	if err != nil {
+		return "", time.Time{}
+	}
+	return f[0], time.Unix(0, ns)
+}
+
+// claimTime returns the time of the claim of owner on the repeater, or
+// zero when the KV store has none of owner, as for an older replica.
+func (h *Hub) claimTime(ctx context.Context, repeaterID uint, owner string) time.Time {
+	if h.kv == nil {
+		return time.Time{}
+	}
+	v, err := h.kv.Get(ctx, ownerSinceKey(repeaterID))
+	if err != nil {
+		return time.Time{}
+	}
+	if by, since := parseClaimValue(v); by == owner {
+		return since
+	}
+	return time.Time{}
+}
+
+// owner returns the replica that last claimed the repeater.
+func (h *Hub) owner(ctx context.Context, repeaterID uint) (string, bool) {
+	if h.kv == nil {
+		return "", false
+	}
+	v, err := h.kv.Get(ctx, ownerKey(repeaterID))
+	if err != nil || len(v) == 0 {
+		return "", false
+	}
+	return string(v), true
+}
+
+// moveTTL is how long the record of a takeover of a repeater from one
+// owner lasts.
+const moveTTL = 2 * time.Minute
+
+// OwnedElsewhere reports whether the KV store names another replica as
+// the owner of the repeater, and that replica is registered, serving or
+// draining. A session of the repeater here must not resume then: the
+// other replica serves it. It is false without replica IDs, and when the
+// owner stopped or died.
+func (h *Hub) OwnedElsewhere(ctx context.Context, repeaterID uint) bool {
+	if h.instanceID == "" {
+		return false
+	}
+	owner, ok := h.owner(ctx, repeaterID)
+	return ok && owner != h.instanceID && servers.InstanceRegistered(ctx, h.kv, owner)
+}
+
+// OwnerLeaving reports whether the repeater was last claimed by another
+// replica that drains, so that this replica may take its session over. It
+// is false without replica IDs, as for a lone instance, when the owner
+// still serves, and after the owner stopped or died.
+func (h *Hub) OwnerLeaving(ctx context.Context, repeaterID uint) bool {
+	_, ok := h.leavingOwner(ctx, repeaterID)
+	return ok
+}
+
+func (h *Hub) leavingOwner(ctx context.Context, repeaterID uint) (string, bool) {
+	if h.instanceID == "" {
+		return "", false
+	}
+	owner, ok := h.owner(ctx, repeaterID)
+	if !ok || owner == h.instanceID {
+		return "", false
+	}
+	return owner, servers.InstanceDraining(ctx, h.kv, owner)
+}
+
+func moveKey(repeaterID uint, owner string) string {
+	return fmt.Sprintf("dmrhub:move:%d:%s", repeaterID, owner)
+}
+
+// movedTo reports whether the replica by took the session of the repeater
+// id over from this one with TakeOver. Its claim is then not stale even
+// when it is for a time before this replica's own, as the drain notice of
+// a browser hotspot is whole seconds.
+func (h *Hub) movedTo(ctx context.Context, id uint, by string) bool {
+	if h.kv == nil || h.instanceID == "" {
+		return false
+	}
+	v, err := h.kv.Get(ctx, moveKey(id, h.instanceID))
+	return err == nil && string(v) == by
+}
+
+// TakeOver reports whether this replica may take over the session of the
+// repeater from its owner, which drains, as OwnerLeaving does. Of the
+// replicas that ask about one owner, only the first gets true, so that
+// two addresses that claim the repeater at two replicas at once never
+// both get its session.
+func (h *Hub) TakeOver(ctx context.Context, repeaterID uint) bool {
+	owner, ok := h.leavingOwner(ctx, repeaterID)
+	if !ok {
+		return false
+	}
+	key := moveKey(repeaterID, owner)
+	won, err := h.kv.SetNX(ctx, key, h.instanceID, moveTTL)
+	if err != nil {
+		slog.Warn("failed to record a takeover of a repeater", "repeaterID", repeaterID, "error", err)
+		return false
+	}
+	return won
+}
+
+// ownerCheck is how often HandOverWait reads whether the replica that
+// hands a repeater over still drains.
+const ownerCheck = 100 * time.Millisecond
+
+// HandOverWait returns a channel that closes when a replica that takes the
+// repeater id over should stop waiting for the handover of the replica
+// that owns it now: wait after the KV store last showed that replica as
+// registered and draining, or limit after the call, whichever comes first.
+// A replica that a starved machine slows down still drains, so its
+// handover is waited for; one that stopped or died ends the wait that
+// long after. limit is at least wait. Call it before the claim. stop ends the
+// wait and frees it.
+func (h *Hub) HandOverWait(ctx context.Context, id uint, wait, limit time.Duration) (<-chan struct{}, func()) {
+	ctx = context.WithoutCancel(ctx)
+	owner, draining := h.leavingOwner(ctx, id)
+	expired := make(chan struct{})
+	quit := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(quit) }) }
+	start := h.clock.Now()
+	end := start.Add(max(limit, wait))
+	h.goTracked(func() {
+		defer close(expired)
+		check := h.clock.NewTicker(ownerCheck)
+		defer check.Stop()
+		deadline := start.Add(wait)
+		for {
+			select {
+			case <-quit:
+				return
+			case <-h.done:
+				return
+			case <-check.C():
+			}
+			now := h.clock.Now()
+			if draining && servers.InstanceDraining(ctx, h.kv, owner) {
+				deadline = now.Add(wait)
+			} else {
+				draining = false
+			}
+			if !now.Before(deadline) || !now.Before(end) {
+				return
+			}
+		}
+	})
+	return expired, stop
+}
+
+// OnClaimedElsewhere calls fn with each repeater that is active on this
+// hub when another replica claims it, and the time when the packet that
+// made the other replica claim it came in there. A server ends its own
+// session of the repeater then, without a word to the repeater, which
+// another replica serves now. The returned func stops the calls.
+func (h *Hub) OnClaimedElsewhere(fn func(repeaterID uint, since time.Time)) (stop func()) {
+	h.claimedMu.Lock()
+	defer h.claimedMu.Unlock()
+	if h.claimed == nil {
+		h.claimed = map[int]func(uint, time.Time){}
+	}
+	h.claimedNext++
+	n := h.claimedNext
+	h.claimed[n] = fn
+	return func() {
+		h.claimedMu.Lock()
+		defer h.claimedMu.Unlock()
+		delete(h.claimed, n)
+	}
+}
+
+//nolint:contextcheck // the claims are followed for the life of the hub, past any caller
+func (h *Hub) followClaims(sub pubsub.Subscription) {
+	defer func() { _ = sub.Close() }()
+	ch := sub.Channel()
+	for {
+		select {
+		case <-h.done:
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			id, instance, since, ok := parseClaim(msg, h.clock.Now())
+			if !ok || instance == h.instanceID {
+				continue
+			}
+			h.claimedElsewhere.Store(id, since)
+			h.handOff(context.Background(), id, instance, since)
+		}
+	}
+}
+
+// handOff runs the claim callbacks for the repeater id, which the replica
+// by claimed for a packet that it got at since, when the repeater is
+// active here and this replica did not claim it again since: a claim that
+// comes after this replica's own newer one is stale. Of two claims at the
+// same time, the one of the replica whose ID sorts last wins, so that
+// exactly one replica keeps the repeater. Once they are done,
+// it stops the subscriptions of the repeater here when no server did and
+// another replica still owns it. WaitMoved waits for it.
+func (h *Hub) handOff(ctx context.Context, id uint, by string, since time.Time) {
+	if _, active := h.subscriptionMgr.subscriptions.Load(id); !active {
+		return
+	}
+	if mine, ok := h.claimedAt.Load(id); ok && (since.Before(mine) || (since.Equal(mine) && by < h.instanceID)) && !h.movedTo(ctx, id, by) {
+		return
+	}
+	h.claimedMu.Lock()
+	fns := make([]func(uint, time.Time), 0, len(h.claimed))
+	for _, fn := range h.claimed {
+		fns = append(fns, fn)
+	}
+	h.claimedMu.Unlock()
+	h.handing.Add()
+	h.goTracked(func() {
+		defer h.handing.Done()
+		if owner, ok := h.owner(ctx, id); ok && owner == h.instanceID {
+			return
+		}
+		var wg sync.WaitGroup
+		for _, fn := range fns {
+			wg.Go(func() { fn(id, since) })
+		}
+		wg.Wait()
+		if _, active := h.subscriptionMgr.subscriptions.Load(id); !active {
+			return
+		}
+		if owner, ok := h.owner(ctx, id); ok && owner != h.instanceID {
+			h.deactivateRepeater(ctx, id)
+		}
+	})
+}
+
+func (h *Hub) publishClaim(repeaterID uint, since time.Time) {
+	if h.pubsub == nil {
+		return
+	}
+	msg := strconv.FormatUint(uint64(repeaterID), 10) + " " + h.instanceID + " " + strconv.FormatInt(since.UnixNano(), 10)
+	if err := h.pubsub.Publish(claimedTopic, []byte(msg)); err != nil {
+		slog.Warn("failed to publish a repeater claim", "repeaterID", repeaterID, "error", err)
+	}
+}
+
+func parseClaim(b []byte, now time.Time) (uint, string, time.Time, bool) {
+	f := strings.Fields(string(b))
+	if len(f) < 2 {
+		return 0, "", time.Time{}, false
+	}
+	n, err := strconv.ParseUint(f[0], 10, 64)
+	if err != nil {
+		return 0, "", time.Time{}, false
+	}
+	since := now
+	if len(f) > 2 {
+		if ns, err := strconv.ParseInt(f[2], 10, 64); err == nil {
+			since = time.Unix(0, ns)
+		}
+	}
+	return uint(n), f[1], since, true
+}
+
+func (h *Hub) activeRepeaters() map[uint]bool {
+	out := map[uint]bool{}
+	h.subscriptionMgr.subscriptions.Range(func(id uint, _ *xsync.Map[uint, *subscription]) bool {
+		out[id] = true
+		return true
+	})
+	return out
+}
+
+// WaitMoved blocks until every repeater that is active on this hub has
+// left it, or ctx ends, and returns the number of repeaters that are still
+// here. A repeater leaves when its session ends, or when another replica
+// claims it and the servers here have handed it over. A draining replica
+// calls it before it stops, so that it keeps serving each repeater until
+// the repeater's next packet has reached another replica and it has handed
+// over what it sent after that.
+func (h *Hub) WaitMoved(ctx context.Context) int {
+	if h.instanceID == "" || h.pubsub == nil {
+		return len(h.activeRepeaters())
+	}
+	pending := h.activeRepeaters()
+	noticed := map[uint]time.Time{}
+	recheck := h.clock.NewTicker(claimRecheck)
+	defer recheck.Stop()
+	for {
+		active := h.activeRepeaters()
+		for id := range pending {
+			if !active[id] {
+				delete(pending, id)
+			}
+		}
+		if len(pending) == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return len(pending)
+		case <-recheck.C():
+			h.handOffMissed(ctx, pending, noticed)
+		case <-h.left:
+		}
+	}
+	h.waitHanding(ctx)
+	return 0
+}
+
+// waitHanding waits until the servers handed over every repeater that
+// another replica claimed, or ctx ends.
+func (h *Hub) waitHanding(ctx context.Context) {
+	done := make(chan struct{})
+	h.goTracked(func() {
+		h.handing.Wait()
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+// claimRecheck is how often WaitMoved reads the owners again, in case a
+// claim on pubsub was lost.
+const claimRecheck = time.Second
+
+// handOffMissed hands off each pending repeater that the KV store has
+// named another owner of at two rechecks in a row, from the time of the
+// claim that the KV store holds for that owner, or as if the claim had
+// come at the first recheck when it holds none, as for an older replica.
+// A claim on pubsub follows its KV record at once, so a repeater that is
+// still here a recheck later lost its claim.
+func (h *Hub) handOffMissed(ctx context.Context, pending map[uint]bool, noticed map[uint]time.Time) {
+	for id := range pending {
+		owner, ok := h.owner(ctx, id)
+		if !ok || owner == h.instanceID {
+			delete(noticed, id)
+			continue
+		}
+		at, seen := noticed[id]
+		switch {
+		case !seen:
+			noticed[id] = h.clock.Now()
+		case !at.IsZero():
+			if claimed := h.claimTime(ctx, id, owner); !claimed.IsZero() {
+				at = claimed
+			}
+			slog.Warn("Handing off a repeater whose claim did not come", "repeaterID", id, "owner", owner)
+			h.handOff(context.WithoutCancel(ctx), id, owner, at)
+			noticed[id] = time.Time{}
+		}
+	}
+}

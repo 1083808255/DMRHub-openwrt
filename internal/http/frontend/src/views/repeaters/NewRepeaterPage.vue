@@ -1,0 +1,297 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <div>
+    <form @submit.prevent="handleRepeater(!v$.$invalid)">
+      <Card>
+        <CardHeader>
+          <CardTitle>{{ $t("New Repeater") }}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div v-if="repeaterTypes.length > 1" class="field">
+            <label class="field-label" for="repeaterType">{{ $t("Repeater Type") }}</label>
+            <select
+              id="repeaterType"
+              v-model="repeaterType"
+              class="ui-select"
+            >
+              <option v-for="type in repeaterTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
+            </select>
+          </div>
+          <br v-if="repeaterTypes.length > 1" />
+          <label class="field-label" for="radioID">{{ $t("DMR Radio ID") }}</label>
+          <ShadInput
+            id="radioID"
+            type="text"
+            v-model="v$.radioID.$model"
+            :aria-invalid="v$.radioID.$invalid && submitted"
+          />
+          <span v-if="v$.radioID.$error && submitted">
+            <span v-for="(error, index) of v$.radioID.$errors" :key="index">
+              <small class="p-error">{{ error.$message.replace("Value", "Radio ID") }}</small>
+            </span>
+            <br />
+          </span>
+          <span v-else>
+            <small
+              v-if="
+                (v$.radioID.$invalid && submitted) ||
+                v$.radioID.$pending.$response
+              "
+              class="p-error"
+              >{{
+                v$.radioID.required.$message.replace("Value", "Radio ID")
+              }}</small
+            >
+          </span>
+          <br />
+          <br />
+          <div v-if="isAdmin" class="field" data-test="owner-field">
+            <label class="field-label" for="owner-search">{{ $t("Owner") }}</label>
+            <UserPicker
+              v-model="ownerID"
+              :users="ownerChoices"
+              name="owner"
+              :label="$t('Owner')"
+              input-id="owner-search"
+              test-prefix="owner"
+            />
+            <small v-if="ownersError" class="p-error">{{ ownersError }}</small>
+          </div>
+          <br v-if="isAdmin" />
+          <div class="field">
+            <label class="checkbox-label">
+              <input
+                type="checkbox"
+                v-model="simplexRepeater"
+              />
+              {{ $t("Simplex Repeater") }}
+            </label>
+            <small class="field-help">{{ $t("When enabled, transmissions on one timeslot are echoed back on the opposite timeslot.") }}</small>
+          </div>
+        </CardContent>
+        <CardFooter>
+          <div class="card-footer">
+            <ShadButton type="submit" variant="outline" size="sm">{{ $t("Save") }}</ShadButton>
+          </div>
+        </CardFooter>
+      </Card>
+    </form>
+  </div>
+</template>
+
+<script lang="ts">
+import { t } from '@/i18n';
+
+import { Button as ShadButton } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input as ShadInput } from '@/components/ui/input';
+import UserPicker from '@/components/users/UserPicker.vue';
+import { keepSecret } from '@/lib/enroll';
+import { getAssignableUsers, type PickableUser } from '@/services/accounts';
+import API from '@/services/API';
+import { errorText } from '@/services/settings';
+import { useSettingsStore, useUserStore } from '@/store';
+
+import { useVuelidate } from '@vuelidate/core';
+import { required, numeric } from '@vuelidate/validators';
+
+export default {
+  components: {
+    ShadButton,
+    Card,
+    CardContent,
+    CardFooter,
+    CardHeader,
+    CardTitle,
+    ShadInput,
+    UserPicker,
+  },
+  head: {
+    title: 'New Repeater',
+  },
+  setup: () => ({ v$: useVuelidate() }),
+  created() {
+    const settingsStore = useSettingsStore();
+    settingsStore.fetchConfig();
+  },
+  mounted() {},
+  data: function() {
+    return {
+      radioID: '',
+      repeaterType: 'mmdvm',
+      simplexRepeater: false,
+      submitted: false,
+      owner: null as number | null,
+      owners: [] as PickableUser[],
+      ownersError: '',
+    };
+  },
+  validations() {
+    return {
+      radioID: {
+        required,
+        numeric,
+      },
+    };
+  },
+  watch: {
+    isAdmin: {
+      immediate: true,
+      handler(admin: boolean) {
+        if (admin && this.owners.length === 0) {
+          void this.loadOwners();
+        }
+      },
+    },
+  },
+  computed: {
+    isAdmin(): boolean {
+      return useUserStore().admin;
+    },
+    ownerID: {
+      get(): number | null {
+        return this.owner ?? (useUserStore().id || null);
+      },
+      set(id: number | null) {
+        this.owner = id;
+      },
+    },
+    ownerChoices(): PickableUser[] {
+      const me = useUserStore().id;
+      return [...this.owners].sort((a, b) => Number(b.id === me) - Number(a.id === me));
+    },
+    repeaterTypes() {
+      const settingsStore = useSettingsStore();
+      const types = [
+        { label: 'MMDVM', value: 'mmdvm' },
+      ];
+      if (settingsStore.ipscEnabled) {
+        types.push({ label: 'Motorola IPSC', value: 'ipsc' });
+      }
+      return types;
+    },
+  },
+  methods: {
+    async loadOwners() {
+      try {
+        this.owners = await getAssignableUsers();
+        this.ownersError = '';
+      } catch (err) {
+        this.ownersError = errorText(err, t('Could not load the users.'));
+      }
+    },
+    handleRepeater(isFormValid: boolean) {
+      this.submitted = true;
+      if (!isFormValid) {
+        return;
+      }
+
+      const numericID = parseInt(this.radioID);
+      if (!numericID) {
+        return;
+      }
+      const body: Record<string, unknown> = {
+        id: numericID,
+        type: this.repeaterType,
+        simplex_repeater: this.simplexRepeater,
+      };
+      if (this.isAdmin && this.ownerID) {
+        body.owner = this.ownerID;
+      }
+      API.post('/repeaters', body)
+        .then((res) => {
+          if (!res.data) {
+            this.$toast.add({
+              summary: t('Error'),
+              severity: 'error',
+              detail: `Error registering repeater`,
+              life: 3000,
+            });
+          } else {
+            keepSecret(numericID, res.data.password);
+            this.$router.push(`/repeaters/${numericID}/connect`);
+          }
+        })
+        .catch((err) => {
+          console.error(err);
+          if (err.response && err.response.data && err.response.data.error) {
+            this.$toast.add({
+              summary: t('Error'),
+              severity: 'error',
+              detail: err.response.data.error,
+              life: 3000,
+            });
+          } else {
+            this.$toast.add({
+              summary: t('Error'),
+              severity: 'error',
+              detail: t('Error creating repeater'),
+              life: 3000,
+            });
+          }
+        });
+    },
+  },
+};
+</script>
+
+<style scoped>
+.field-label {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.ui-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 0.5rem 0.75rem;
+}
+
+.ui-select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.field-help {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+</style>

@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package models
+
+import (
+	"fmt"
+	"log/slog"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+type Talkgroup struct {
+	ID          uint   `json:"id" gorm:"primaryKey"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Admins      []User `json:"admins" gorm:"many2many:talkgroup_admins;"`
+	NCOs        []User `json:"ncos" gorm:"many2many:talkgroup_ncos;"`
+	AutoCreated bool   `json:"-" gorm:"not null;default:false"`
+	// NoListen keeps the talkgroup off the listen-only monitor of DMRHub
+	// Radio.
+	NoListen   bool           `json:"no_listen" gorm:"not null;default:false"`
+	LastCallAt *time.Time     `json:"-"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"-"`
+	DeletedAt  gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+func ListTalkgroups(db *gorm.DB) ([]Talkgroup, error) {
+	var talkgroups []Talkgroup
+	err := db.Preload("Admins").Preload("NCOs").Order("id asc").Find(&talkgroups).Error
+	return talkgroups, err
+}
+
+func CountTalkgroups(db *gorm.DB) (int, error) {
+	var count int64
+	err := db.Model(&Talkgroup{}).Count(&count).Error
+	return int(count), err
+}
+
+func TalkgroupIDExists(db *gorm.DB, id uint) (bool, error) {
+	var count int64
+	err := db.Model(&Talkgroup{}).Where("ID = ?", id).Limit(1).Count(&count).Error
+	return count > 0, err
+}
+
+func FindTalkgroupByID(db *gorm.DB, id uint) (Talkgroup, error) {
+	var talkgroup Talkgroup
+	err := db.Preload("Admins").Preload("NCOs").First(&talkgroup, id).Error
+	return talkgroup, err
+}
+
+// ListenTalkgroup is a talkgroup that visitors may hear on the
+// listen-only monitor.
+type ListenTalkgroup struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListenTalkgroups returns the talkgroups that visitors may hear, in order
+// of ID.
+func ListenTalkgroups(db *gorm.DB) ([]ListenTalkgroup, error) {
+	list := []ListenTalkgroup{}
+	err := db.Model(&Talkgroup{}).Select("id", "name").Where("no_listen = ?", false).Order("id asc").Find(&list).Error
+	return list, err
+}
+
+// Listenable reports whether visitors may hear the talkgroup id: it exists
+// and its admins did not take it off the monitor.
+func Listenable(db *gorm.DB, id uint) (bool, error) {
+	var count int64
+	err := db.Model(&Talkgroup{}).Where("id = ? AND no_listen = ?", id, false).Limit(1).Count(&count).Error
+	return count > 0, err
+}
+
+// FindTalkgroupsByIDs returns the talkgroups of ids that exist, in order of
+// ID.
+func FindTalkgroupsByIDs(db *gorm.DB, ids []uint) ([]Talkgroup, error) {
+	talkgroups := []Talkgroup{}
+	if len(ids) == 0 {
+		return talkgroups, nil
+	}
+	err := db.Where("id IN ?", ids).Order("id asc").Find(&talkgroups).Error
+	return talkgroups, err
+}
+
+// DeleteTalkgroup deletes the talkgroup id, its calls and its routing
+// rules, takes it off the repeaters, and returns the repeaters that had it.
+// It locks the talkgroup row first, so that a row that refers to it and
+// that another connection inserts meanwhile waits for the delete and does
+// not stop it.
+func DeleteTalkgroup(db *gorm.DB, id uint) ([]uint, error) {
+	var affectedRepeaterIDs []uint
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var locked []Talkgroup
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).Select("id").Where("id = ?", id).Find(&locked).Error; err != nil {
+			return fmt.Errorf("lock the talkgroup: %w", err)
+		}
+		// Delete calls where IsToTalkgroup is true and IsToTalkgroupID is id
+		tx.Unscoped().Where("is_to_talkgroup = ? AND to_talkgroup_id = ?", true, id).Delete(&Call{})
+
+		// Collect all repeater IDs that reference this talkgroup (dynamic or static)
+		affectedSet := make(map[uint]struct{})
+
+		// Find repeaters with TS1DynamicTalkgroup or TS2DynamicTalkgroup set to id
+		var repeaters []Repeater
+		tx.Where("ts1_dynamic_talkgroup_id = ? OR ts2_dynamic_talkgroup_id = ?", id, id).Find(&repeaters)
+		// Set TS1DynamicTalkgroup or TS2DynamicTalkgroup to nil
+		for _, repeater := range repeaters {
+			repeater := repeater
+			affectedSet[repeater.ID] = struct{}{}
+			if repeater.TS1DynamicTalkgroupID != nil && *repeater.TS1DynamicTalkgroupID == id {
+				repeater.TS1DynamicTalkgroup = Talkgroup{}
+				repeater.TS1DynamicTalkgroupID = nil
+			}
+			if repeater.TS2DynamicTalkgroupID != nil && *repeater.TS2DynamicTalkgroupID == id {
+				repeater.TS2DynamicTalkgroup = Talkgroup{}
+				repeater.TS2DynamicTalkgroupID = nil
+			}
+			err := tx.Save(&repeater).Error
+			if err != nil {
+				slog.Error("Error saving repeater", "error", err)
+				return err
+			}
+		}
+
+		// Find repeaters with static talkgroup assignments
+		var staticTS1RepeaterIDs []uint
+		tx.Table("repeater_ts1_static_talkgroups").Where("talkgroup_id = ?", id).Pluck("repeater_id", &staticTS1RepeaterIDs)
+		for _, rid := range staticTS1RepeaterIDs {
+			affectedSet[rid] = struct{}{}
+		}
+		var staticTS2RepeaterIDs []uint
+		tx.Table("repeater_ts2_static_talkgroups").Where("talkgroup_id = ?", id).Pluck("repeater_id", &staticTS2RepeaterIDs)
+		for _, rid := range staticTS2RepeaterIDs {
+			affectedSet[rid] = struct{}{}
+		}
+
+		tx.Unscoped().Table("repeater_ts1_static_talkgroups").Where("talkgroup_id = ?", id).Delete(&Repeater{})
+		tx.Unscoped().Table("repeater_ts2_static_talkgroups").Where("talkgroup_id = ?", id).Delete(&Repeater{})
+
+		if err := tx.Where("subject_id = ? AND kind IN ?", id, []RoutingRuleKind{RoutingRuleRestrictedTalkgroup, RoutingRuleApprovedLink}).Delete(&RoutingRule{}).Error; err != nil {
+			return fmt.Errorf("delete the access rules: %w", err)
+		}
+
+		tx.Unscoped().Select(clause.Associations, "Admins").Select(clause.Associations, "NCOs").Delete(&Talkgroup{ID: id})
+
+		// Collect affected IDs for the caller
+		for rid := range affectedSet {
+			affectedRepeaterIDs = append(affectedRepeaterIDs, rid)
+		}
+
+		return nil
+	})
+	if err != nil {
+		slog.Error("Error deleting talkgroup", "error", err)
+		return nil, fmt.Errorf("failed to delete talkgroup: %w", err)
+	}
+	return affectedRepeaterIDs, nil
+}
+
+func FindTalkgroupsByOwnerID(db *gorm.DB, ownerID uint) ([]Talkgroup, error) {
+	var talkgroups []Talkgroup
+	if err := db.Preload("Admins").Preload("NCOs").Joins("JOIN talkgroup_admins on talkgroup_admins.talkgroup_id=talkgroups.id").
+		Joins("JOIN users on talkgroup_admins.user_id=users.id").Order("talkgroups.id asc").Where("users.id=?", ownerID).
+		Group("talkgroups.id").Find(&talkgroups).Error; err != nil {
+		slog.Error("Error getting talkgroups owned by user", "user_id", ownerID, "error", err)
+		return nil, err
+	}
+	return talkgroups, nil
+}
+
+func CountTalkgroupsByOwnerID(db *gorm.DB, ownerID uint) (int, error) {
+	var count int64
+	err := db.Model(&Talkgroup{}).Joins("JOIN talkgroup_admins on talkgroup_admins.talkgroup_id=talkgroups.id").
+		Joins("JOIN users on talkgroup_admins.user_id=users.id").
+		Where("users.id=?", ownerID).Count(&count).Error
+	return int(count), err
+}

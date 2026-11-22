@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+# DMRHub init script for OpenWrt procd
+START=95
+STOP=10
+USE_PROCD=1
+
+EXTRA_COMMANDS="status"
+EXTRA_HELP="        status  Show DMRHub run status"
+
+CONF_DIR=/opt/dmrhub
+BIN=/usr/bin/dmrhub
+
+start_service() {
+    # Ensure persistent data/config directory exists
+    mkdir -p "$CONF_DIR/data"
+
+    # Seed a usable config on first run. DMRHub searches ./config.yaml from
+    # its working directory, so running from $CONF_DIR picks this up.
+    if [ ! -f "$CONF_DIR/config.yaml" ]; then
+        cat > "$CONF_DIR/config.yaml" <<EOF
+log-level: "info"
+secret: "change-me-dmrhub-secret-key-please"
+password-salt: "change-me-dmrhub-password-salt-please"
+database:
+  driver: "sqlite"
+  database: "$CONF_DIR/data/DMRHub.db"
+  extra-parameters: ["_pragma=foreign_keys(1)", "_pragma=journal_mode(WAL)", "_pragma=synchronous(NORMAL)"]
+http:
+  bind: "[::]"
+  port: 3005
+EOF
+    fi
+
+    procd_open_instance dmrhub
+    procd_set_param command "$BIN"
+    procd_set_param workingdir "$CONF_DIR"
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+    procd_close_instance
+}
+
+status() {
+    if pgrep -f "$BIN" >/dev/null 2>&1; then
+        echo "DMRHub is running"
+    else
+        echo "DMRHub is not running"
+    fi
+}

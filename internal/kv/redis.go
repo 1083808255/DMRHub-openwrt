@@ -1,0 +1,401 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package kv
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/rand/v2"
+	"runtime"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/consts"
+	"github.com/USA-RedDragon/DMRHub/internal/redisping"
+	"github.com/redis/go-redis/extra/redisotel/v9"
+	"github.com/redis/go-redis/v9"
+)
+
+func makeRedisKV(ctx context.Context, config *config.Config, unbounded bool) (KV, error) {
+	timeout := consts.RedisTimeout
+	if unbounded {
+		timeout = -1
+	}
+	client := redis.NewClient(&redis.Options{
+		Addr:                  fmt.Sprintf("%s:%d", config.Redis.Host, config.Redis.Port),
+		Password:              config.Redis.Password,
+		PoolFIFO:              true,
+		PoolSize:              runtime.GOMAXPROCS(0) * consts.ConnsPerCPU,
+		MinIdleConns:          runtime.GOMAXPROCS(0),
+		ConnMaxIdleTime:       consts.MaxIdleTime,
+		DialTimeout:           consts.RedisDialTimeout,
+		ReadTimeout:           timeout,
+		WriteTimeout:          timeout,
+		ContextTimeoutEnabled: true,
+	})
+	if !unbounded {
+		client.AddHook(callTimeoutHook{timeout: consts.RedisCallTimeout})
+	}
+
+	if err := redisping.Until(ctx, func(ctx context.Context) error { return client.Ping(ctx).Err() }); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("failed to connect to redis: %w", err)
+	}
+
+	if config.Metrics.OTLPEndpoint != "" {
+		if err := redisotel.InstrumentTracing(client); err != nil {
+			return nil, fmt.Errorf("failed to trace redis: %w", err)
+		}
+		if err := redisotel.InstrumentMetrics(client); err != nil {
+			return nil, fmt.Errorf("failed to instrument redis metrics: %w", err)
+		}
+	}
+
+	if unbounded {
+		return callerBoundKV{&redisKV{client: client}}, nil
+	}
+	return &redisKV{client: client}, nil
+}
+
+// callTimeoutHook gives each call a deadline that its retries share. go-redis
+// retries a read that timed out, so ReadTimeout alone lets a call to a hung
+// Redis run for MaxRetries+1 read timeouts.
+type callTimeoutHook struct {
+	timeout time.Duration
+}
+
+func (callTimeoutHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h callTimeoutHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		ctx, cancel := context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+		return next(ctx, cmd)
+	}
+}
+
+func (h callTimeoutHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		ctx, cancel := context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+		return next(ctx, cmds)
+	}
+}
+
+type redisKV struct {
+	client *redis.Client
+}
+
+// callerBoundKV is a Redis store without a bound of its own. go-redis
+// turns the deadline of a context into the deadline of a socket read or
+// write, but does not watch for a context that ends without one, so
+// callerBoundKV returns when such a context ends and leaves the call to
+// end when Redis answers or the store closes.
+type callerBoundKV struct {
+	*redisKV
+}
+
+type result[T any] struct {
+	v   T
+	err error
+}
+
+func untilDone[T any](ctx context.Context, call func() (T, error)) (T, error) {
+	if _, ok := ctx.Deadline(); ok || ctx.Done() == nil {
+		return call()
+	}
+	got := make(chan result[T], 1)
+	go func() {
+		v, err := call()
+		got <- result[T]{v, err}
+	}()
+	select {
+	case r := <-got:
+		return r.v, r.err
+	case <-ctx.Done():
+		select {
+		case r := <-got:
+			return r.v, r.err
+		default:
+		}
+		var zero T
+		return zero, fmt.Errorf("redis call: %w", context.Cause(ctx))
+	}
+}
+
+func untilDoneErr(ctx context.Context, call func() error) error {
+	_, err := untilDone(ctx, func() (struct{}, error) { return struct{}{}, call() })
+	return err
+}
+
+func (kv callerBoundKV) Has(ctx context.Context, key string) (bool, error) {
+	return untilDone(ctx, func() (bool, error) { return kv.redisKV.Has(ctx, key) })
+}
+
+func (kv callerBoundKV) Get(ctx context.Context, key string) ([]byte, error) {
+	return untilDone(ctx, func() ([]byte, error) { return kv.redisKV.Get(ctx, key) })
+}
+
+func (kv callerBoundKV) Set(ctx context.Context, key string, value []byte) error {
+	return untilDoneErr(ctx, func() error { return kv.redisKV.Set(ctx, key, value) })
+}
+
+func (kv callerBoundKV) Delete(ctx context.Context, key string) error {
+	return untilDoneErr(ctx, func() error { return kv.redisKV.Delete(ctx, key) })
+}
+
+func (kv callerBoundKV) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	return untilDoneErr(ctx, func() error { return kv.redisKV.Expire(ctx, key, ttl) })
+}
+
+type scanPage struct {
+	keys []string
+	next uint64
+}
+
+func (kv callerBoundKV) Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {
+	page, err := untilDone(ctx, func() (scanPage, error) {
+		keys, next, err := kv.redisKV.Scan(ctx, cursor, match, count)
+		return scanPage{keys, next}, err
+	})
+	return page.keys, page.next, err
+}
+
+func (kv callerBoundKV) SetNX(ctx context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	return untilDone(ctx, func() (bool, error) { return kv.redisKV.SetNX(ctx, key, value, ttl) })
+}
+
+func (kv callerBoundKV) RPush(ctx context.Context, key string, value []byte) (int64, error) {
+	return untilDone(ctx, func() (int64, error) { return kv.redisKV.RPush(ctx, key, value) })
+}
+
+func (kv callerBoundKV) LDrain(ctx context.Context, key string) ([][]byte, error) {
+	return untilDone(ctx, func() ([][]byte, error) { return kv.redisKV.LDrain(ctx, key) })
+}
+
+func (kv callerBoundKV) RPushTrim(ctx context.Context, key string, value []byte, keep int64, ttl time.Duration) error {
+	return untilDoneErr(ctx, func() error { return kv.redisKV.RPushTrim(ctx, key, value, keep, ttl) })
+}
+
+func (kv callerBoundKV) LRange(ctx context.Context, key string) ([][]byte, error) {
+	return untilDone(ctx, func() ([][]byte, error) { return kv.redisKV.LRange(ctx, key) })
+}
+
+func (kv callerBoundKV) DeleteIfEqual(ctx context.Context, key string, value []byte) (bool, error) {
+	return untilDone(ctx, func() (bool, error) { return kv.redisKV.DeleteIfEqual(ctx, key, value) })
+}
+
+func (kv *redisKV) Has(ctx context.Context, key string) (bool, error) {
+	result, err := kv.client.Exists(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("redis exists %s: %w", key, err)
+	}
+	return result > 0, nil
+}
+
+func (kv *redisKV) Get(ctx context.Context, key string) ([]byte, error) {
+	value, err := kv.client.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("redis get %s: %w", key, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("redis get %s: %w", key, err)
+	}
+	return value, nil
+}
+
+func (kv *redisKV) Set(ctx context.Context, key string, value []byte) error {
+	if err := kv.client.Set(ctx, key, value, 0).Err(); err != nil {
+		return fmt.Errorf("redis set %s: %w", key, err)
+	}
+	return nil
+}
+
+func (kv *redisKV) Delete(ctx context.Context, key string) error {
+	if err := kv.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("redis delete %s: %w", key, err)
+	}
+	return nil
+}
+
+func (kv *redisKV) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	result, err := kv.client.Expire(ctx, key, ttl).Result()
+	if err != nil {
+		return fmt.Errorf("redis expire %s: %w", key, err)
+	}
+	if !result {
+		return fmt.Errorf("key %s not found", key)
+	}
+	return nil
+}
+
+func (kv *redisKV) Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {
+	keys, next, err := kv.client.Scan(ctx, cursor, match, count).Result()
+	if err != nil {
+		return nil, 0, fmt.Errorf("redis scan match %s: %w", match, err)
+	}
+	return keys, next, nil
+}
+
+func (kv *redisKV) SetNX(ctx context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	err := kv.client.SetArgs(ctx, key, value, redis.SetArgs{
+		Mode: "nx",
+		TTL:  ttl,
+	}).Err()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("redis setnx %s: %w", key, err)
+	}
+	return true, nil
+}
+
+func (kv *redisKV) RPush(ctx context.Context, key string, value []byte) (int64, error) {
+	result, err := kv.client.RPush(ctx, key, value).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redis rpush %s: %w", key, err)
+	}
+	return result, nil
+}
+
+func (kv *redisKV) LDrain(ctx context.Context, key string) ([][]byte, error) {
+	// Use a pipeline to atomically get all elements and delete the key.
+	pipe := kv.client.TxPipeline()
+	lrangeCmd := pipe.LRange(ctx, key, 0, -1)
+	pipe.Del(ctx, key)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("redis ldrain %s: %w", key, err)
+	}
+	vals, err := lrangeCmd.Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis ldrain lrange %s: %w", key, err)
+	}
+	result := make([][]byte, len(vals))
+	for i, v := range vals {
+		result[i] = []byte(v)
+	}
+	return result, nil
+}
+
+func (kv *redisKV) RPushTrim(ctx context.Context, key string, value []byte, keep int64, ttl time.Duration) error {
+	if keep < 1 {
+		return fmt.Errorf("redis rpushtrim %s: %w", key, ErrKeep)
+	}
+	pipe := kv.client.TxPipeline()
+	pipe.RPush(ctx, key, value)
+	pipe.LTrim(ctx, key, -keep, -1)
+	pipe.PExpire(ctx, key, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("redis rpushtrim %s: %w", key, err)
+	}
+	return nil
+}
+
+func (kv *redisKV) LRange(ctx context.Context, key string) ([][]byte, error) {
+	vals, err := kv.client.LRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis lrange %s: %w", key, err)
+	}
+	result := make([][]byte, len(vals))
+	for i, v := range vals {
+		result[i] = []byte(v)
+	}
+	return result, nil
+}
+
+type fnError struct{ err error }
+
+func (e fnError) Error() string { return e.err.Error() }
+
+func (kv *redisKV) Update(ctx context.Context, key string, ttl time.Duration, fn func(old []byte) ([]byte, error)) error {
+	if _, ok := ctx.Deadline(); !ok {
+		return fmt.Errorf("redis update %s: %w", key, ErrNoDeadline)
+	}
+	for try := 0; ; try++ {
+		if try > 0 {
+			if err := backoff(ctx, try); err != nil {
+				return fmt.Errorf("redis update %s: %w: %w", key, ErrConflict, err)
+			}
+		}
+		err := kv.client.Watch(ctx, func(tx *redis.Tx) error {
+			old, err := tx.Get(ctx, key).Bytes()
+			switch {
+			case errors.Is(err, redis.Nil):
+				old = nil
+			case err != nil:
+				return err //nolint:wrapcheck
+			}
+			next, err := fn(old)
+			if err != nil {
+				return fnError{err}
+			}
+			_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+				p.Set(ctx, key, next, ttl)
+				return nil
+			})
+			return err //nolint:wrapcheck
+		}, key)
+		var fe fnError
+		switch {
+		case err == nil:
+			return nil
+		case errors.As(err, &fe):
+			return fe.err
+		case errors.Is(err, redis.TxFailedErr):
+			continue
+		default:
+			return fmt.Errorf("redis update %s: %w", key, err)
+		}
+	}
+}
+
+// backoff waits a random time below a limit that doubles with each try,
+// from 1 ms up to 256 ms, so that writers that changed one key at once try
+// again at different times.
+func backoff(ctx context.Context, try int) error {
+	limit := time.Millisecond << min(try-1, 8)
+	t := time.NewTimer(rand.N(limit) + 1) //nolint:gosec
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err() //nolint:wrapcheck
+	case <-t.C:
+		return nil
+	}
+}
+
+const deleteIfEqualScript = `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`
+
+func (kv *redisKV) DeleteIfEqual(ctx context.Context, key string, value []byte) (bool, error) {
+	n, err := redis.NewScript(deleteIfEqualScript).Run(ctx, kv.client, []string{key}, value).Int()
+	if err != nil {
+		return false, fmt.Errorf("redis deleteifequal %s: %w", key, err)
+	}
+	return n == 1, nil
+}
+
+func (kv *redisKV) Close() error {
+	if err := kv.client.Close(); err != nil {
+		return fmt.Errorf("redis close: %w", err)
+	}
+	return nil
+}

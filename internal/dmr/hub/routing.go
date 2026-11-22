@@ -1,0 +1,516 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package hub
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"strconv"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/dmrconst"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/outbox"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/utils"
+	"github.com/USA-RedDragon/DMRHub/internal/metrics"
+	"github.com/USA-RedDragon/DMRHub/internal/plugins"
+	"github.com/USA-RedDragon/DMRHub/internal/prompts"
+	"github.com/puzpuzpuz/xsync/v4"
+	"go.opentelemetry.io/otel"
+	"gorm.io/gorm"
+)
+
+// trackCall queues the packet, which came at, for the call tracker, which
+// records every kind of transmission, and sets its TrackID.
+func (h *Hub) trackCall(ctx context.Context, packet *models.Packet, sourceName string, at time.Time) {
+	ctx, span := otel.Tracer("DMRHub").Start(ctx, "Hub.TrackCall")
+	defer span.End()
+
+	packet.TrackID = h.callTracker.TrackAt(ctx, *packet, sourceName, h.getServerRole(sourceName) == RolePeer, at)
+}
+
+// RoutePacket is the central routing method for all incoming DMR packets.
+// sourceName identifies the originating server (matches ServerConfig.Name)
+// to prevent echo/loop back to the source. It queues the packet on the
+// worker of its source slot and returns at once, so the read loop of a
+// server never waits on routing, and one source slot never waits on
+// another. The bursts of a source slot reach each target in the order they
+// came, across the streams of it, so that a transmission that starts right
+// after another on a slot does not overtake the end of that one. A stream
+// that another source is already sending is dropped (see admitStream). The
+// call tracker gets the packet before the worker, in the order it came.
+func (h *Hub) RoutePacket(ctx context.Context, packet models.Packet, sourceName string) {
+	h.RouteStreamAt(ctx, packet, sourceName, h.clock.Now(), nil)
+}
+
+// RoutePacketAt is RoutePacket for a packet that came at at, such as the
+// time the kernel got it. The call tracker times the transmission from at,
+// so a packet that waited in the socket or in the server keeps its place
+// in the call.
+func (h *Hub) RoutePacketAt(ctx context.Context, packet models.Packet, sourceName string, at time.Time) {
+	h.RouteStreamAt(ctx, packet, sourceName, at, nil)
+}
+
+// RouteStream is RoutePacket that first calls admitted, when it is not nil,
+// with whether the hub takes the stream of packet in. A packet that the
+// rate of its slot drops gets no call. While the hub checks the claim of a
+// stream in the KV store, it holds the packets of that source slot, and
+// calls admitted for them later on another goroutine, in the order they
+// came.
+func (h *Hub) RouteStream(ctx context.Context, packet models.Packet, sourceName string, admitted func(bool)) {
+	h.RouteStreamAt(ctx, packet, sourceName, h.clock.Now(), admitted)
+}
+
+// RouteStreamAt is RouteStream for a packet that came at at, as
+// RoutePacketAt is.
+func (h *Hub) RouteStreamAt(ctx context.Context, packet models.Packet, sourceName string, at time.Time, admitted func(bool)) {
+	if h.takeUnlockCall(ctx, packet, sourceName) {
+		if admitted != nil {
+			admitted(false)
+		}
+		return
+	}
+	if h.dropsIngress(&packet, sourceName) {
+		return
+	}
+	if !h.AdmitSlotRate(packet, sourceName) || h.holdIngress(ctx, packet, sourceName, at, admitted) {
+		return
+	}
+	h.routeStreamAt(ctx, packet, sourceName, at, admitted)
+}
+
+func (h *Hub) routeStreamAt(ctx context.Context, packet models.Packet, sourceName string, at time.Time, admitted func(bool)) {
+	epoch := h.sessionEpoch(packet.Repeater)
+	h.admitStream(ctx, packet, sourceName, func(ok bool) {
+		ok = ok && h.admitRouting(packet, sourceName)
+		if admitted != nil {
+			admitted(ok)
+		}
+		if !ok {
+			return
+		}
+		h.trackCall(ctx, &packet, sourceName, at)
+		h.queueRouting(packet.StreamID, 1)
+		if !h.routing.Do(ctx, h.sourceSlotOf(packet, sourceName), func() {
+			defer h.queueRouting(packet.StreamID, -1)
+			h.routeNow(ctx, packet, sourceName, at, epoch)
+		}) {
+			h.queueRouting(packet.StreamID, -1)
+			if ctx.Err() == nil {
+				slog.Warn("Dropping packet of a backed-up stream", "stream", packet.StreamID, "src", packet.Src, "dst", packet.Dst)
+			}
+		}
+	})
+}
+
+// streamInRouting reports whether a burst of stream waits for the routing
+// worker of its source or is routed now. Every prune of the state of a
+// stream keeps it while this holds, so that a routing worker that stalls,
+// as on a slow database, finds the state of its streams when it goes on.
+func (h *Hub) streamInRouting(stream uint) bool {
+	_, ok := h.inRouting.Load(stream)
+	return ok
+}
+
+// idleStream reports whether the state of stream, last touched at last,
+// idled for longer than ttl at now, and no burst of stream is in routing.
+func (h *Hub) idleStream(stream uint, last, now time.Time, ttl time.Duration) bool {
+	return now.Sub(last) > ttl && !h.streamInRouting(stream)
+}
+
+// queueRouting adds n to the bursts of stream that wait for routing or
+// that the routing worker routes now.
+func (h *Hub) queueRouting(stream uint, n int) {
+	h.inRouting.Compute(stream, func(old int, _ bool) (int, xsync.ComputeOp) {
+		if old+n <= 0 {
+			return 0, xsync.DeleteOp
+		}
+		return old + n, xsync.UpdateOp
+	})
+}
+
+func (h *Hub) routeNow(ctx context.Context, packet models.Packet, sourceName string, came time.Time, epoch uint64) {
+	ctx, span := otel.Tracer("DMRHub").Start(ctx, "Hub.RoutePacket")
+	defer span.End()
+
+	isVoice, _ := utils.CheckPacketType(packet)
+
+	h.streamActive(packet.StreamID)
+	h.noteIngress(packet, sourceName)
+	h.tapData(packet)
+	if packet.FrameType == dmrconst.FrameDataSync && dmrconst.DataType(packet.DTypeOrVSeq) == dmrconst.DTypeVoiceTerm {
+		defer h.streamEnded(packet.StreamID)
+		defer h.endCodecStream(packet.StreamID)
+	}
+
+	if h.refuseIngress(packet, sourceName) {
+		return
+	}
+	h.keyedOnBusySlot(packet, sourceName)
+
+	h.noteHeardOn(packet, sourceName)
+	defer h.noteSighting(packet, sourceName)
+
+	sc := h.observeCodec(ctx, &packet, sourceName)
+
+	verdict, _ := h.localRoute(packet, sourceName)
+	if verdict == localDrop {
+		h.dropLocal(packet, sourceName)
+		return
+	}
+	if verdict == notLocal && h.routeToTalkgroups(ctx, packet, isVoice, sourceName, came, epoch) {
+		return
+	}
+
+	tx, ticket := h.prepareCopy(ctx, &packet, sc, sourceName)
+	if tx == nil && h.queueBehindCopies(ctx, packet, sourceName) {
+		return
+	}
+	h.fanOut(ctx, packet, sourceName)
+	if tx != nil {
+		tx.queue(context.WithoutCancel(ctx), packet, ticket)
+	}
+}
+
+// routeToTalkgroups hands packet to the plugins and the special
+// destinations, and makes and links its talkgroup as the settings say. It
+// reports whether routing ends here.
+func (h *Hub) routeToTalkgroups(ctx context.Context, packet models.Packet, isVoice bool, sourceName string, came time.Time, epoch uint64) bool {
+	if h.handleSpecialDestinations(ctx, packet, isVoice, sourceName, came, epoch) {
+		return true
+	}
+
+	h.autoCreateTalkgroup(packet, sourceName, isVoice)
+	if packet.GroupCall && isVoice {
+		h.noteTalkgroupCall(packet.Dst)
+	}
+
+	if packet.GroupCall && isVoice && h.getServerRole(sourceName) != RolePeer && !h.routingConfig().DisableDynamicLinks {
+		link, at := packet, h.clock.Now()
+		h.queueLink(ctx, packet.Repeater, func() { h.switchDynamicTalkgroup(ctx, link, at, came, epoch) })
+	}
+	return false
+}
+
+// fanOut sends packet, an original or a copy in the other codec, to the
+// peers, the talkgroup, the local group or the private target.
+func (h *Hub) fanOut(ctx context.Context, packet models.Packet, sourceName string) {
+	switch verdict, group := h.localRoute(packet, sourceName); verdict {
+	case localGroupCall:
+		h.marshalAndPublish(h.sourceSlotOf(packet, sourceName), packet, localGroupTopic(group))
+		return
+	case localDrop:
+		return
+	case notLocal:
+	}
+	_, isPlugin := plugins.PluginOfSource(sourceName)
+	if !isPlugin && h.getServerRole(sourceName) != RolePeer {
+		h.publishForPeers(ctx, packet, sourceName)
+	}
+
+	key := h.sourceSlotOf(packet, sourceName)
+	if packet.GroupCall {
+		if isPlugin {
+			h.publishForPeers(ctx, packet, sourceName)
+		}
+		h.handleGroupCall(key, packet)
+		return
+	}
+	// A private call of a plugin goes to the peers only when the hub
+	// cannot deliver it here, so that a reply to a radio on this hub,
+	// such as the parrot's, does not reach it again through a peer.
+	if !h.handlePrivateCall(ctx, key, packet) && isPlugin {
+		h.publishForPeers(ctx, packet, sourceName)
+	}
+}
+
+// handleSpecialDestinations hands the calls to plugins' IDs to them, and
+// handles unlink (TG 4000).
+// Returns true if the packet was consumed (no further routing needed).
+// Packets from network peers are not handled: their Repeater field is a
+// peer ID, not a repeater to play back to or unlink.
+func (h *Hub) handleSpecialDestinations(ctx context.Context, packet models.Packet, isVoice bool, sourceName string, came time.Time, epoch uint64) bool {
+	if h.toPlugin(ctx, packet, sourceName) {
+		return true
+	}
+	if h.getServerRole(sourceName) == RolePeer {
+		return false
+	}
+	if packet.Dst == 4000 && isVoice {
+		h.queueLink(ctx, packet.Repeater, func() { h.doUnlink(ctx, packet, came, epoch) })
+		return true
+	}
+
+	return false
+}
+
+// toPlugin hands packet to the plugin that owns its destination, unless the
+// plugin sent it, through the outbox of its source slot. A private call
+// goes only to the plugin; a group call also goes to the talkgroup's
+// subscribers when the talkgroup exists. It reports whether routing ends
+// here.
+func (h *Hub) toPlugin(ctx context.Context, packet models.Packet, sourceName string) bool {
+	p := h.plugins.Load()
+	if p == nil {
+		return false
+	}
+	owner, ok := (*p).Owner(packet.Dst)
+	if !ok {
+		return false
+	}
+	if from, isPlugin := plugins.PluginOfSource(sourceName); !isPlugin || from != owner {
+		pl := *p
+		h.outbox.Add(h.sourceSlotOf(packet, sourceName), outbox.Job{
+			Topic: plugins.InTopic(owner),
+			Send:  func() error { return pl.Deliver(owner, packet) },
+		})
+		h.answerPluginData(ctx, packet, sourceName, owner)
+	}
+	if !packet.GroupCall {
+		return true
+	}
+	if _, ok := h.streamTalkgroups.Load(streamTarget{stream: packet.StreamID, dst: packet.Dst}); ok {
+		return false
+	}
+	exists, err := h.talkgroupExists(packet.Dst)
+	if err != nil {
+		slog.Error("Error checking if talkgroup exists", "error", err)
+		countLookupWait(err)
+		return true
+	}
+	return !exists
+}
+
+// handleGroupCall routes a group burst of any kind from the source slot key
+// to all subscribed repeaters.
+func (h *Hub) handleGroupCall(key sourceSlot, packet models.Packet) {
+	target := streamTarget{stream: packet.StreamID, dst: packet.Dst}
+	if _, ok := h.streamTalkgroups.Load(target); !ok {
+		exists, err := h.talkgroupExists(packet.Dst)
+		if err != nil {
+			slog.Error("Error checking if talkgroup exists", "error", err)
+			countLookupWait(err)
+			return
+		}
+		if !exists {
+			slog.Error("Talkgroup does not exist", "talkgroupID", packet.Dst)
+			h.promptRefused(packet, key.server, prompts.TalkgroupNotFound)
+			return
+		}
+		h.streamTalkgroups.Store(target, h.clock.Now())
+	}
+
+	// talkgroupTopicPrefix is the fixed prefix for talkgroup pubsub topics.
+	const talkgroupTopicPrefix = "hub:packets:talkgroup:"
+
+	// Publish to talkgroup topic (subscription manager handles per-repeater fan-out)
+	topic := talkgroupTopicPrefix + strconv.FormatUint(uint64(packet.Dst), 10)
+	h.marshalAndPublish(key, packet, topic)
+}
+
+// handlePrivateCall routes a private burst of any kind from the source
+// slot key to the target repeater or user.
+func (h *Hub) handlePrivateCall(ctx context.Context, key sourceSlot, packet models.Packet) bool {
+	if isRepeaterID(packet.Dst) {
+		return h.routeToRepeater(key, packet)
+	}
+	if isUserID(packet.Dst) {
+		return h.routeToUser(ctx, key, packet)
+	}
+	return false
+}
+
+// routeToRepeater sends a private call packet to a specific repeater via
+// pubsub. It reports whether the repeater exists.
+func (h *Hub) routeToRepeater(key sourceSlot, packet models.Packet) bool {
+	if _, err := h.routingRepeater(packet.Dst); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			slog.Error("Repeater does not exist", "repeaterID", packet.Dst)
+		} else {
+			slog.Error("Error checking if repeater exists", "error", err)
+			countLookupWait(err)
+		}
+		return false
+	}
+
+	// Publish to repeater topic — subscription manager delivers to the correct server
+	h.publishToRepeater(key, packet.Dst, packet)
+	return true
+}
+
+// routeToUser sends private traffic to the repeater where the radio was
+// last heard, or floods it to every repeater, as the private call settings
+// say. It reports whether the hub sent it.
+func (h *Hub) routeToUser(ctx context.Context, key sourceSlot, packet models.Packet) bool {
+	repeaterID, ok := h.privateTarget(ctx, packet)
+	if !ok {
+		h.notRouted(packet)
+		return false
+	}
+	if repeaterID == 0 {
+		h.marshalAndPublish(key, packet, privateFloodTopic)
+		return true
+	}
+	h.publishToRepeater(key, repeaterID, packet)
+	return true
+}
+
+// SetConfig makes src the config whose private call settings the hub
+// routes private traffic with. Without one it uses the defaults. The sweep
+// of the ephemeral talkgroups reads the new config at once.
+func (h *Hub) SetConfig(src config.Source) {
+	h.cfg.Store(&src)
+	for _, set := range []chan struct{}{h.configSet, h.dynamicSet} {
+		select {
+		case set <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// privateRoute returns the private call settings for packet: those of
+// voice for a voice burst, those of SMS and data for the others.
+func (h *Hub) privateRoute(packet models.Packet) config.PrivateRoute {
+	var pc config.PrivateCalls
+	if src := h.cfg.Load(); src != nil {
+		if c := (*src).Get(); c != nil {
+			pc = c.DMR.PrivateCalls
+		}
+	}
+	if isVoice, _ := utils.CheckPacketType(packet); isVoice {
+		return pc.Route()
+	}
+	return pc.DataRoute()
+}
+
+// privateTarget returns the repeater that the private stream of packet to
+// a radio goes to: where its first burst went, or where the radio was last
+// heard, as the private call settings let it follow the radio. A repeater
+// of 0 floods the stream to every repeater.
+func (h *Hub) privateTarget(ctx context.Context, packet models.Packet) (uint, bool) {
+	key := streamTarget{stream: packet.StreamID, dst: packet.Dst}
+	if at, ok := h.streamTargets.Load(key); ok {
+		return at.repeater, true
+	}
+	route := h.privateRoute(packet)
+	owner, err := h.radioOwners.Get(packet.Dst)
+	if err != nil {
+		slog.Error("Error finding the owner of a radio", "error", err)
+		countLookupWait(err)
+		return 0, false
+	}
+	if owner == 0 && route.Reach == config.PrivateReachMembers {
+		h.logPrivateDrop(key, packet, route, "the radio ID is not a member's")
+		return 0, false
+	}
+	repeaterID, ok, waited := h.locateRadio(ctx, packet.Dst, owner, route)
+	if !ok {
+		if route.Unknown != config.PrivateUnknownFlood {
+			if waited != "" {
+				metrics.NewMetrics().IncrementIngressDropped(waited)
+			}
+			h.logPrivateDrop(key, packet, route, "the radio was not heard where its traffic may follow it")
+			return 0, false
+		}
+		repeaterID = 0
+	}
+	h.streamTargets.Store(key, targetAt{repeater: repeaterID, at: h.clock.Now()})
+	return repeaterID, true
+}
+
+// logPrivateDrop logs once per stream that the hub drops private traffic
+// to a radio, and why.
+func (h *Hub) logPrivateDrop(key streamTarget, packet models.Packet, route config.PrivateRoute, why string) {
+	if _, logged := h.privateDropLogged.LoadOrStore(key.stream, h.clock.Now()); logged {
+		return
+	}
+	slog.Info("Dropping private traffic to a radio", "dst", packet.Dst, "src", packet.Src, "stream", packet.StreamID,
+		"reach", route.Reach, "maxAge", route.MaxAge, "reason", why)
+}
+
+// privateTargetRepeater returns the repeater that the private burst
+// packet goes to. A flooded burst goes to no one repeater.
+func (h *Hub) privateTargetRepeater(ctx context.Context, packet models.Packet) (*models.Repeater, bool) {
+	id := packet.Dst
+	if !isRepeaterID(id) {
+		if !isUserID(id) {
+			return nil, false
+		}
+		var ok bool
+		if id, ok = h.privateTarget(ctx, packet); !ok || id == 0 {
+			return nil, false
+		}
+	}
+	rpt, err := h.routingRepeater(id)
+	if err != nil {
+		return nil, false
+	}
+	return rpt, true
+}
+
+// streamTarget is a private stream to a radio. The repeater that its first
+// burst went to takes the rest of the stream, even when the radio is heard
+// elsewhere meanwhile.
+type streamTarget struct {
+	stream uint
+	dst    uint
+}
+
+type targetAt struct {
+	repeater uint
+	at       time.Time
+}
+
+// isRepeaterID checks if an ID looks like a repeater (6-digit or 9-digit)
+func isRepeaterID(id uint) bool {
+	const (
+		rptIDMin     = 100000
+		rptIDMax     = 999999
+		hotspotIDMin = 100000000
+		hotspotIDMax = 999999999
+	)
+	return (id >= rptIDMin && id <= rptIDMax) || (id >= hotspotIDMin && id <= hotspotIDMax)
+}
+
+// isUserID checks if an ID looks like a user (7 or 8-digit)
+func isUserID(id uint) bool {
+	const (
+		userIDMin = 1000000
+		userIDMax = 99999999
+	)
+	return id >= userIDMin && id <= userIDMax
+}
+
+// Plugins tells which plugin owns a DMR ID and hands it the bursts to that
+// ID.
+type Plugins interface {
+	Owner(id uint) (uint, bool)
+	Deliver(id uint, p models.Packet) error
+}
+
+// SetPlugins makes p the plugins that the hub hands the bursts to their IDs.
+func (h *Hub) SetPlugins(p Plugins) {
+	h.plugins.Store(&p)
+	if h.callTracker != nil {
+		h.callTracker.SetPlugins(p)
+	}
+}

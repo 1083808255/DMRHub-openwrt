@@ -1,0 +1,6 @@
+#!/bin/sh
+# First-boot setup for DMRHub
+[ -f /etc/config/dmrhub ] || exit 0
+mkdir -p /opt/dmrhub/data
+chmod 755 /opt/dmrhub
+exit 0

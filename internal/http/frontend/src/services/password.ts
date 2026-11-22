@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+import API from '@/services/API';
+
+export type Me = {
+  id: number;
+  callsign: string;
+  username: string;
+  admin: boolean;
+  superAdmin: boolean;
+  created_at: string;
+  must_change_password?: boolean;
+  email?: string;
+  email_verified?: boolean;
+};
+
+export async function getMe(): Promise<Me> {
+  const res = await API.get('/users/me');
+  return res.data;
+}
+
+export async function changePassword(id: number, current: string, password: string): Promise<void> {
+  await API.patch(`/users/${id}`, { password, current_password: current });
+}
+
+export async function forgotPassword(user: string): Promise<void> {
+  await API.post('/auth/forgot-password', { user });
+}
+
+export async function checkResetLink(token: string): Promise<string> {
+  const res = await API.post('/auth/reset-password/check', { token });
+  return res.data.callsign;
+}
+
+export async function resetPassword(token: string, password: string): Promise<void> {
+  await API.post('/auth/reset-password', { token, password });
+}
+
+/**
+ * Makes the user id choose a new password at their next login and logs them
+ * out everywhere. With generate, the user also gets a new random password,
+ * which only this answer holds.
+ */
+export async function requirePasswordChange(id: number, generate: boolean): Promise<string | undefined> {
+  const res = await API.post(`/users/${id}/require-password-change`, { generate_password: generate });
+  return res.data.password;
+}
+
+export async function setEmail(email: string): Promise<string> {
+  const res = await API.put('/users/me/email', { email });
+  return res.data.message;
+}
+
+export async function verifyEmail(token: string): Promise<string> {
+  const res = await API.post('/auth/verify-email', { token });
+  return res.data.message;
+}

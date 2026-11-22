@@ -1,0 +1,387 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <BaseMap class="h-full w-full" @ready="onReady">
+    <svg class="tx-lines" aria-hidden="true" data-test="tx-lines" :data-ready="map ? 'true' : 'false'">
+      <TransitionGroup name="tx-line" tag="g">
+        <path
+          v-for="l in linePaths"
+          :key="l.key"
+          :d="l.d"
+          class="tx-line"
+          :class="l.data ? 'tx-line--data' : 'tx-line--voice'"
+          :style="{ stroke: l.color }"
+          :data-test="`line-${l.key}`"
+        />
+      </TransitionGroup>
+    </svg>
+    <span
+      v-for="l in dataDots"
+      :key="l.key"
+      class="tx-dot"
+      :style="{ offsetPath: `path('${l.d}')`, background: l.color }"
+      aria-hidden="true"
+    />
+    <div
+      v-if="card"
+      class="pointer-events-none absolute z-10 flex flex-col gap-0.5 whitespace-nowrap rounded-lg border bg-background px-3 py-2 text-[13px] shadow-md"
+      :style="card.left ? { right: `${card.width - card.x + 14}px`, top: `${card.y - 64}px` } : { left: `${card.x + 14}px`, top: `${card.y - 64}px` }"
+      data-test="position-card"
+    >
+      <b class="font-semibold">{{ card.title }}</b>
+      <span class="text-muted-foreground">{{ card.where }}</span>
+      <span class="text-muted-foreground">{{ card.when }}</span>
+    </div>
+  </BaseMap>
+</template>
+
+<script setup lang="ts">
+import type { GeoJSONSource, Map as MapLibre, MapLayerMouseEvent, Marker } from 'maplibre-gl';
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+
+import BaseMap from '@/components/map/BaseMap.vue';
+import { blipElement, setBlipMode } from '@/lib/blip';
+import type { TxMode } from '@/lib/txActivity';
+import { curvePath, RADIO_PIN_RADIUS, REPEATER_PIN_RADIUS, type TxEnd, type TxLine } from '@/lib/txLines';
+import { formatAgo, formatCoordinates, type Position } from '@/services/positions';
+
+export type MapTrack = {
+  radio: number;
+  color: string;
+  title: string;
+  points: Position[];
+};
+
+export type MapRepeater = {
+  id: number;
+  color: string;
+  title: string;
+  latitude: number;
+  longitude: number;
+  location: string;
+  connected_time: string;
+};
+
+const props = withDefaults(
+  defineProps<{
+    tracks: MapTrack[];
+    selected: number | null;
+    repeaters?: MapRepeater[];
+    selectedRepeater?: number | null;
+    blipRadios?: Record<number, TxMode>;
+    blipRepeaters?: Record<number, TxMode>;
+    lines?: (TxLine & { data: boolean })[];
+  }>(),
+  { repeaters: () => [], selectedRepeater: null, blipRadios: () => ({}), blipRepeaters: () => ({}), lines: () => [] },
+);
+const emit = defineEmits<{ select: [radio: number]; selectRepeater: [id: number] }>();
+
+const SOURCE_TRACKS = 'positions-tracks';
+const SOURCE_LATEST = 'positions-latest';
+const SOURCE_REPEATERS = 'positions-repeaters';
+const LAYER_REPEATER_HALO = 'positions-repeaters-halo';
+const CARD_ROOM = 260;
+const RADIO_PIN = 2 * RADIO_PIN_RADIUS;
+const REPEATER_PIN = 2 * REPEATER_PIN_RADIUS;
+
+const map = shallowRef<MapLibre | null>(null);
+const moved = ref(0);
+let fitted = false;
+let makeMarker: ((el: HTMLElement) => Marker) | null = null;
+const blips = new Map<string, { marker: Marker; el: HTMLElement }>();
+
+const tracksData = () => ({
+  type: 'FeatureCollection' as const,
+  features: props.tracks
+    .filter((t) => t.points.length > 1)
+    .map((t) => ({
+      type: 'Feature' as const,
+      properties: { radio: t.radio, color: t.color },
+      geometry: { type: 'LineString' as const, coordinates: t.points.map((p) => [p.longitude, p.latitude]) },
+    })),
+});
+
+const latestData = () => ({
+  type: 'FeatureCollection' as const,
+  features: props.tracks
+    .filter((t) => t.points.length > 0)
+    .map((t) => {
+      const p = t.points[t.points.length - 1]!;
+      return {
+        type: 'Feature' as const,
+        properties: { radio: t.radio, color: t.color },
+        geometry: { type: 'Point' as const, coordinates: [p.longitude, p.latitude] },
+      };
+    }),
+});
+
+const repeatersData = () => ({
+  type: 'FeatureCollection' as const,
+  features: props.repeaters.map((r) => ({
+    type: 'Feature' as const,
+    properties: { repeater: r.id, color: r.color },
+    geometry: { type: 'Point' as const, coordinates: [r.longitude, r.latitude] },
+  })),
+});
+
+function addLayers(m: MapLibre) {
+  if (m.getSource(SOURCE_TRACKS)) {
+    return;
+  }
+  m.addSource(SOURCE_TRACKS, { type: 'geojson', data: tracksData() });
+  m.addSource(SOURCE_LATEST, { type: 'geojson', data: latestData() });
+  m.addSource(SOURCE_REPEATERS, { type: 'geojson', data: repeatersData() });
+  m.addLayer({
+    id: LAYER_REPEATER_HALO,
+    type: 'circle',
+    source: SOURCE_REPEATERS,
+    paint: { 'circle-color': ['get', 'color'], 'circle-radius': 18, 'circle-opacity': 0.2 },
+  });
+  m.addLayer({
+    id: SOURCE_REPEATERS,
+    type: 'circle',
+    source: SOURCE_REPEATERS,
+    paint: {
+      'circle-color': ['get', 'color'],
+      'circle-radius': 9,
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 3,
+    },
+  });
+  m.addLayer({
+    id: SOURCE_TRACKS,
+    type: 'line',
+    source: SOURCE_TRACKS,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 0.85 },
+  });
+  m.addLayer({
+    id: SOURCE_LATEST,
+    type: 'circle',
+    source: SOURCE_LATEST,
+    paint: {
+      'circle-color': ['get', 'color'],
+      'circle-radius': 8,
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 3,
+    },
+  });
+}
+
+function refresh() {
+  const m = map.value;
+  if (!m) {
+    return;
+  }
+  (m.getSource(SOURCE_TRACKS) as GeoJSONSource | undefined)?.setData(tracksData());
+  (m.getSource(SOURCE_LATEST) as GeoJSONSource | undefined)?.setData(latestData());
+  (m.getSource(SOURCE_REPEATERS) as GeoJSONSource | undefined)?.setData(repeatersData());
+  fit();
+}
+
+function fit() {
+  const m = map.value;
+  const points: { latitude: number; longitude: number }[] = [...props.tracks.flatMap((t) => t.points), ...props.repeaters];
+  if (!m || fitted || points.length === 0) {
+    return;
+  }
+  fitted = true;
+  const lons = points.map((p) => p.longitude);
+  const lats = points.map((p) => p.latitude);
+  m.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], {
+    padding: 80,
+    maxZoom: 14,
+    duration: 0,
+  });
+}
+
+const onMove = () => {
+  moved.value++;
+};
+
+const onStyle = () => {
+  if (map.value) {
+    addLayers(map.value);
+  }
+};
+
+const onClick = (e: MapLayerMouseEvent) => {
+  const radio = e.features?.[0]?.properties?.radio;
+  if (typeof radio === 'number') {
+    emit('select', radio);
+  }
+};
+
+const onRepeaterClick = (e: MapLayerMouseEvent) => {
+  const id = e.features?.[0]?.properties?.repeater;
+  if (typeof id === 'number') {
+    emit('selectRepeater', id);
+  }
+};
+
+const pointer = (m: MapLibre, on: boolean) => () => {
+  m.getCanvas().style.cursor = on ? 'pointer' : '';
+};
+
+type Want = { at: [number, number]; color: string; mode: TxMode; size: number; test: string };
+
+function wantedBlips(): Map<string, Want> {
+  const want = new Map<string, Want>();
+  for (const t of props.tracks) {
+    const mode = props.blipRadios[t.radio];
+    const p = t.points[t.points.length - 1];
+    if (mode && p) {
+      want.set(`radio:${t.radio}`, { at: [p.longitude, p.latitude], color: t.color, mode, size: RADIO_PIN, test: `blip-radio-${t.radio}` });
+    }
+  }
+  for (const r of props.repeaters) {
+    const mode = props.blipRepeaters[r.id];
+    if (mode) {
+      want.set(`repeater:${r.id}`, { at: [r.longitude, r.latitude], color: r.color, mode, size: REPEATER_PIN, test: `blip-repeater-${r.id}` });
+    }
+  }
+  return want;
+}
+
+function syncBlips() {
+  const m = map.value;
+  if (!m || !makeMarker) {
+    return;
+  }
+  const want = wantedBlips();
+  for (const [key, b] of blips) {
+    if (!want.has(key)) {
+      b.marker.remove();
+      blips.delete(key);
+    }
+  }
+  for (const [key, w] of want) {
+    const have = blips.get(key);
+    if (have) {
+      setBlipMode(have.el, w.mode);
+      have.marker.setLngLat(w.at);
+      continue;
+    }
+    const el = blipElement(w.color, w.mode, w.size);
+    el.dataset.test = w.test;
+    blips.set(key, { marker: makeMarker(el).setLngLat(w.at).addTo(m), el });
+  }
+}
+
+function clearBlips() {
+  for (const b of blips.values()) {
+    b.marker.remove();
+  }
+  blips.clear();
+}
+
+function onReady(m: MapLibre) {
+  map.value = m;
+  void import('maplibre-gl').then((lib) => {
+    makeMarker = (el) => new lib.Marker({ element: el, anchor: 'center' });
+    syncBlips();
+  });
+  addLayers(m);
+  m.on('styledata', onStyle);
+  m.on('move', onMove);
+  m.on('click', SOURCE_LATEST, onClick);
+  m.on('click', SOURCE_REPEATERS, onRepeaterClick);
+  for (const layer of [SOURCE_LATEST, SOURCE_REPEATERS]) {
+    m.on('mouseenter', layer, pointer(m, true));
+    m.on('mouseleave', layer, pointer(m, false));
+  }
+  fit();
+}
+
+watch(() => [props.tracks, props.repeaters], refresh, { deep: true });
+watch(() => [props.tracks, props.repeaters, props.blipRadios, props.blipRepeaters], syncBlips, { deep: true });
+
+const pinRadius = (e: TxEnd) => (e.kind === 'radio' ? RADIO_PIN_RADIUS : REPEATER_PIN_RADIUS);
+
+const linePaths = computed(() => {
+  void moved.value;
+  const m = map.value;
+  if (!m || props.lines.length === 0) {
+    return [];
+  }
+  return props.lines
+    .map((l) => {
+      const a = m.project([l.from.longitude, l.from.latitude]);
+      const b = m.project([l.to.longitude, l.to.latitude]);
+      return { key: l.key, color: l.color, data: l.data, d: curvePath(a, b, pinRadius(l.from), pinRadius(l.to)) };
+    })
+    .filter((l) => l.d !== '');
+});
+
+const dataDots = computed(() => linePaths.value.filter((l) => l.data));
+
+const repeaterCard = () => {
+  const m = map.value;
+  const r = props.repeaters.find((x) => x.id === props.selectedRepeater);
+  if (!m || !r) {
+    return null;
+  }
+  const at = m.project([r.longitude, r.latitude]);
+  const width = m.getContainer().clientWidth;
+  return {
+    x: at.x,
+    y: at.y,
+    width,
+    left: at.x > width - CARD_ROOM,
+    title: r.title,
+    where: r.location ? `${formatCoordinates(r)} · ${r.location}` : formatCoordinates(r),
+    when: `Repeater · connected ${formatAgo(r.connected_time)}`,
+  };
+};
+
+const card = computed(() => {
+  void moved.value;
+  if (props.selectedRepeater !== null) {
+    return repeaterCard();
+  }
+  const m = map.value;
+  const t = props.tracks.find((x) => x.radio === props.selected);
+  const p = t?.points[t.points.length - 1];
+  if (!m || !t || !p) {
+    return null;
+  }
+  const at = m.project([p.longitude, p.latitude]);
+  const width = m.getContainer().clientWidth;
+  const accuracy = p.accuracy_m !== null ? ` · ±${Math.round(p.accuracy_m)} m` : '';
+  return {
+    x: at.x,
+    y: at.y,
+    width,
+    left: at.x > width - CARD_ROOM,
+    title: t.title,
+    where: formatCoordinates(p) + accuracy,
+    when: `${formatAgo(p.received_at)} via ${p.repeater_id} TS${p.slot}`,
+  };
+});
+
+onBeforeUnmount(() => {
+  clearBlips();
+  map.value?.off('styledata', onStyle);
+  map.value?.off('move', onMove);
+  map.value = null;
+});
+</script>

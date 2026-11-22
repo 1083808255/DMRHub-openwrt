@@ -1,0 +1,329 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package metrics
+
+import (
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+type Metrics struct {
+	// KV Store metrics
+	KVOperationsTotal   *prometheus.CounterVec
+	KVOperationDuration *prometheus.HistogramVec
+	KVKeysTotal         prometheus.Gauge
+	KVExpiredKeysTotal  prometheus.Counter
+	KVCleanupDuration   prometheus.Histogram
+
+	// UndeliverableBurstsTotal counts bursts that a target could not carry.
+	UndeliverableBurstsTotal *prometheus.CounterVec
+
+	// IngressDroppedBurstsTotal counts bursts that the hub took in and did
+	// not route, by reason.
+	IngressDroppedBurstsTotal *prometheus.CounterVec
+
+	// OutboxBursts is the number of routed bursts, and of the other
+	// messages and writes that the hub makes in the background, that wait
+	// in the outboxes for Redis to take them.
+	OutboxBursts prometheus.Gauge
+
+	// PublishRetriesTotal counts the jobs of the outboxes that did not
+	// reach Redis and that the hub ran again.
+	PublishRetriesTotal prometheus.Counter
+
+	// PublishUnconfirmedTotal counts the jobs of the outboxes that failed
+	// after they may have reached Redis, which may still run them.
+	PublishUnconfirmedTotal prometheus.Counter
+
+	// TrackerDroppedTotal counts packets that the call tracker dropped.
+	TrackerDroppedTotal prometheus.Counter
+	// TrackerMatchFailedTotal counts rows and answers that the call
+	// tracker could not match because the KV failed.
+	TrackerMatchFailedTotal prometheus.Counter
+	// TrackerShareFailedTotal counts the voice calls that the call tracker
+	// could not share with the other replicas because the KV failed.
+	TrackerShareFailedTotal prometheus.Counter
+
+	// MessagesDroppedTotal counts data messages that the message store dropped.
+	MessagesDroppedTotal prometheus.Counter
+
+	// PubSubDroppedTotal counts the messages that the in-memory pubsub
+	// dropped for a reader whose queue was full, by the kind of reader:
+	// feed or subscription.
+	PubSubDroppedTotal *prometheus.CounterVec
+
+	// TranscodeMissedSecondsTotal counts the audio of calls that could not
+	// be converted to the other codec, by the codec of the copy and reason.
+	TranscodeMissedSecondsTotal *prometheus.CounterVec
+
+	// RepeaterJobsDroppedTotal counts the jobs of repeaters that a server
+	// did not queue, by kind: best_effort jobs that a full queue drops, and
+	// state jobs that a queue that does not move refuses.
+	RepeaterJobsDroppedTotal *prometheus.CounterVec
+
+	// TranscodeFramesTotal counts the vocoder frames that the transcoder
+	// decoded, by the codec of the call, what the decoder found in each
+	// frame and what it put out for it.
+	TranscodeFramesTotal *prometheus.CounterVec
+}
+
+const labelReason = "reason"
+
+// DropReasonStreamFromOtherSource is the IngressDroppedBurstsTotal reason
+// for a burst of a stream that another source is already sending.
+const DropReasonStreamFromOtherSource = "stream_from_other_source"
+
+// DropReasonTransmit is the IngressDroppedBurstsTotal reason for a burst
+// of a radio that the routing settings do not let transmit, or of a voice
+// call past the longest transmission.
+const DropReasonTransmit = "transmit"
+
+// DropReasonSlotRate is the IngressDroppedBurstsTotal reason for a burst
+// over the rate that one repeater slot can carry.
+const DropReasonSlotRate = "slot_rate"
+
+// DropReasonIPSCBurst is the IngressDroppedBurstsTotal reason for a burst
+// from an IPSC peer that does not encode as a DMRD burst.
+const DropReasonIPSCBurst = "ipsc_burst"
+
+// DropReasonIPSCFullLC is the IngressDroppedBurstsTotal reason for a voice
+// header or terminator from an IPSC peer whose Full LC cannot be sealed.
+const DropReasonIPSCFullLC = "ipsc_full_lc"
+
+// DropReasonOversize is the IngressDroppedBurstsTotal reason for a packet
+// from a repeater that is longer than the longest packet of the protocol.
+const DropReasonOversize = "oversize"
+
+// DropReasonIPList is the IngressDroppedBurstsTotal reason for a packet
+// from a source address that the IP list of its server refuses.
+const DropReasonIPList = "ip_list"
+
+// DropReasonLookupWait is the IngressDroppedBurstsTotal reason for a burst
+// that was dropped because a lookup in the database took longer than
+// lookup.Wait.
+const DropReasonLookupWait = "lookup_wait"
+
+// DropReasonClaimWait is the IngressDroppedBurstsTotal reason for a burst
+// that was dropped because the check of the claim of its stream in the KV
+// store took longer than the claim wait of the hub.
+const DropReasonClaimWait = "claim_wait"
+
+// DropReasonLastSeenWait is the IngressDroppedBurstsTotal reason for a
+// private burst that was dropped because the read of where its target was
+// heard took longer than lookup.Wait.
+const DropReasonLastSeenWait = "last_seen_wait"
+
+// RepeaterJobBestEffort is the RepeaterJobsDroppedTotal kind of a job
+// that a later job does again, such as the refresh of a ping.
+const RepeaterJobBestEffort = "best_effort"
+
+// RepeaterJobState is the RepeaterJobsDroppedTotal kind of a job that
+// changes the state of a session, whose refusal ends the session.
+const RepeaterJobState = "state"
+
+var (
+	metricsOnce     sync.Once //nolint:gochecknoglobals
+	metricsInstance *Metrics  //nolint:gochecknoglobals
+)
+
+// NewMetrics returns a singleton Metrics instance. Prometheus collectors
+// are registered on the default registry exactly once, so it is safe to
+// call NewMetrics from multiple goroutines or test cases.
+func NewMetrics() *Metrics {
+	metricsOnce.Do(func() {
+		metricsInstance = &Metrics{
+			KVOperationsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "kv_operations_total",
+				Help: "The total number of KV operations performed",
+			}, []string{"operation", "status"}),
+			KVOperationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "kv_operation_duration_seconds",
+				Help:    "Duration of KV operations",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"operation"}),
+			KVKeysTotal: prometheus.NewGauge(prometheus.GaugeOpts{
+				Name: "kv_keys_total",
+				Help: "The current number of keys in the KV store",
+			}),
+			KVExpiredKeysTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "kv_expired_keys_total",
+				Help: "The total number of expired keys cleaned up",
+			}),
+			KVCleanupDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+				Name:    "kv_cleanup_duration_seconds",
+				Help:    "Duration of KV cleanup operations",
+				Buckets: prometheus.DefBuckets,
+			}),
+			UndeliverableBurstsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "dmr_undeliverable_bursts_total",
+				Help: "The total number of bursts that a target could not carry",
+			}, []string{"target", labelReason}),
+			IngressDroppedBurstsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "dmr_ingress_dropped_bursts_total",
+				Help: "The total number of incoming bursts that were not routed, by reason",
+			}, []string{labelReason}),
+			OutboxBursts: prometheus.NewGauge(prometheus.GaugeOpts{
+				Name: "dmr_outbox_bursts",
+				Help: "The number of routed bursts and other jobs that wait in the outboxes for Redis to take them",
+			}),
+			PublishRetriesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "dmr_publish_retries_total",
+				Help: "The total number of jobs of the outboxes that did not reach Redis and ran again",
+			}),
+			PublishUnconfirmedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "dmr_publish_unconfirmed_bursts_total",
+				Help: "The total number of jobs of the outboxes that failed after they may have reached Redis, which may still run them",
+			}),
+			TrackerDroppedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "call_tracker_dropped_packets_total",
+				Help: "The total number of packets that the call tracker did not record because its queue was full",
+			}),
+			TrackerMatchFailedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "call_tracker_match_failed_total",
+				Help: "The total number of rows and answers that the call tracker could not match with each other because the KV failed, so that an answer was not credited",
+			}),
+			TrackerShareFailedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "call_tracker_share_failed_total",
+				Help: "The total number of times that the call tracker could not share a voice call with the other replicas because the KV failed, so that a call that moves can make two rows",
+			}),
+			MessagesDroppedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: "message_store_dropped_total",
+				Help: "The total number of data messages that the message store did not save because its queue was full",
+			}),
+			PubSubDroppedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "pubsub_dropped_messages_total",
+				Help: "The total number of messages that the in-memory pubsub dropped for a reader whose queue was full, by the kind of reader",
+			}, []string{"reader"}),
+			TranscodeMissedSecondsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "dmr_transcode_missed_seconds_total",
+				Help: "The total seconds of call audio that could not be converted to the other codec and went out as silence, by the codec of the copy and reason",
+			}, []string{"to", labelReason}),
+			RepeaterJobsDroppedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "dmr_repeater_jobs_dropped_total",
+				Help: "The total number of jobs of repeaters that a server did not queue, by kind: best_effort jobs that a full queue dropped, and state jobs that a queue that did not move refused, which ended the session",
+			}, []string{"kind"}),
+			TranscodeFramesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: "dmr_transcode_frames_total",
+				Help: "The total number of vocoder frames that the transcoder decoded, by the codec of the call, what the decoder found in the frame (good, lost, erased or invalid) and what it put out (voice, tone, repeat or silence)",
+			}, []string{"from", "frame", "output"}),
+		}
+		metricsInstance.register()
+	})
+	return metricsInstance
+}
+
+func (m *Metrics) register() {
+	prometheus.MustRegister(m.KVOperationsTotal)
+	prometheus.MustRegister(m.KVOperationDuration)
+	prometheus.MustRegister(m.KVKeysTotal)
+	prometheus.MustRegister(m.KVExpiredKeysTotal)
+	prometheus.MustRegister(m.KVCleanupDuration)
+	prometheus.MustRegister(m.UndeliverableBurstsTotal)
+	prometheus.MustRegister(m.IngressDroppedBurstsTotal)
+	prometheus.MustRegister(m.OutboxBursts)
+	prometheus.MustRegister(m.PublishRetriesTotal)
+	prometheus.MustRegister(m.PublishUnconfirmedTotal)
+	prometheus.MustRegister(m.TrackerDroppedTotal)
+	prometheus.MustRegister(m.TrackerMatchFailedTotal)
+	prometheus.MustRegister(m.TrackerShareFailedTotal)
+	prometheus.MustRegister(m.MessagesDroppedTotal)
+	prometheus.MustRegister(m.PubSubDroppedTotal)
+	prometheus.MustRegister(m.TranscodeMissedSecondsTotal)
+	prometheus.MustRegister(m.TranscodeFramesTotal)
+	prometheus.MustRegister(m.RepeaterJobsDroppedTotal)
+}
+
+// KV Store metrics methods
+func (m *Metrics) RecordKVOperation(operation, status string, duration float64) {
+	m.KVOperationsTotal.WithLabelValues(operation, status).Inc()
+	m.KVOperationDuration.WithLabelValues(operation).Observe(duration)
+}
+
+func (m *Metrics) SetKVKeysTotal(count float64) {
+	m.KVKeysTotal.Set(count)
+}
+
+func (m *Metrics) IncrementKVExpiredKeys(count float64) {
+	m.KVExpiredKeysTotal.Add(count)
+}
+
+func (m *Metrics) RecordKVCleanup(duration float64) {
+	m.KVCleanupDuration.Observe(duration)
+}
+
+// IncrementUndeliverable counts a burst that target could not carry for
+// reason.
+func (m *Metrics) IncrementUndeliverable(target, reason string) {
+	m.UndeliverableBurstsTotal.WithLabelValues(target, reason).Inc()
+}
+
+// IncrementIngressDropped counts an incoming burst that was not routed.
+func (m *Metrics) IncrementIngressDropped(reason string) {
+	m.IngressDroppedBurstsTotal.WithLabelValues(reason).Inc()
+}
+
+// IncrementTrackerDropped counts a packet that the call tracker dropped.
+func (m *Metrics) IncrementTrackerDropped() {
+	m.TrackerDroppedTotal.Inc()
+}
+
+// IncrementTrackerMatchFailed counts a row or an answer that the call
+// tracker could not match.
+func (m *Metrics) IncrementTrackerMatchFailed() {
+	m.TrackerMatchFailedTotal.Inc()
+}
+
+// IncrementTrackerShareFailed counts a voice call that the call tracker
+// could not share with the other replicas.
+func (m *Metrics) IncrementTrackerShareFailed() {
+	m.TrackerShareFailedTotal.Inc()
+}
+
+// IncrementMessagesDropped counts a data message that the message store
+// dropped.
+func (m *Metrics) IncrementMessagesDropped() {
+	m.MessagesDroppedTotal.Inc()
+}
+
+// IncrementPubSubDropped counts a message that the in-memory pubsub
+// dropped for a reader of the kind reader.
+func (m *Metrics) IncrementPubSubDropped(reader string) {
+	m.PubSubDroppedTotal.WithLabelValues(reader).Inc()
+}
+
+// AddTranscodeMissed counts seconds of audio that could not be converted
+// to the codec to, for reason.
+func (m *Metrics) AddTranscodeMissed(to, reason string, seconds float64) {
+	m.TranscodeMissedSecondsTotal.WithLabelValues(to, reason).Add(seconds)
+}
+
+// IncrementTranscodeFrame counts a vocoder frame of a call in the codec
+// from that the transcoder decoded, with the frame and output labels of
+// its report.
+func (m *Metrics) IncrementTranscodeFrame(from, frame, output string) {
+	m.TranscodeFramesTotal.WithLabelValues(from, frame, output).Inc()
+}
+
+// IncrementRepeaterJobsDropped counts a job of a repeater of kind that a
+// server did not queue.
+func (m *Metrics) IncrementRepeaterJobsDropped(kind string) {
+	m.RepeaterJobsDroppedTotal.WithLabelValues(kind).Inc()
+}

@@ -1,0 +1,317 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package websocket
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/utils"
+	"github.com/coder/websocket"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
+)
+
+const (
+	bufferSize = 1024
+	readLimit  = 4096
+)
+
+//nolint:gochecknoglobals
+var (
+	pingInterval = 30 * time.Second
+	pingTimeout  = 10 * time.Second
+	writeTimeout = 10 * time.Second
+)
+
+var (
+	errClientClosed = errors.New("client closed the connection")
+	errStalled      = errors.New("client does not read fast enough")
+	errPingTimeout  = errors.New("client did not answer a ping")
+	errWriteFailed  = errors.New("write to the client failed")
+	errInvalidUTF8  = errors.New("client sent a text frame that is not UTF-8")
+	errGoingAway    = errors.New("server closes its websockets")
+)
+
+type policyCloseError struct {
+	reason string
+}
+
+func (e policyCloseError) Error() string {
+	return "closed by policy: " + e.reason
+}
+
+//nolint:gochecknoglobals
+var errUserChanged = policyCloseError{reason: reasonUserChanged}
+
+type Websocket interface {
+	OnMessage(ctx context.Context, r *http.Request, w Writer, session sessions.Session, msg []byte, t int)
+	// OnConnect starts the work of one connection. It keeps the state of
+	// the connection in the returned function, which the handler calls
+	// once when the connection closes, after the last OnMessage. That
+	// function returns when each goroutine that OnConnect started has
+	// returned, so that no work of the connection runs after Conns.Close.
+	OnConnect(ctx context.Context, r *http.Request, w Writer, session sessions.Session) (onDisconnect func())
+}
+
+// Subprotocol is the websocket subprotocol of DMRHub. An app that opens a
+// websocket with an access token offers it next to the token, as
+// "dmrhub.bearer." and the token, and DMRHub picks it.
+const Subprotocol = "dmrhub"
+
+type WSHandler struct {
+	config  *config.Config
+	handler Websocket
+}
+
+func CreateHandler(config *config.Config, ws Websocket) func(*gin.Context) {
+	return createHandler(config, ws, false)
+}
+
+// CreatePublicHandler serves ws, a websocket of public data, to pages of
+// any site. ws must not read the session: a page of another site can
+// make the browser send the cookie of a user.
+func CreatePublicHandler(config *config.Config, ws Websocket) func(*gin.Context) {
+	return createHandler(config, ws, true)
+}
+
+func createHandler(config *config.Config, ws Websocket, public bool) func(*gin.Context) {
+	handler := &WSHandler{config: config, handler: ws}
+
+	return func(c *gin.Context) {
+		if !public && !utils.ViaToken(c) && !handler.originAllowed(c.Request) {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		session := sessions.Default(c)
+		conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{InsecureSkipVerify: true, Subprotocols: []string{Subprotocol}})
+		if err != nil {
+			slog.Error("Failed to accept websocket", "error", err)
+			return
+		}
+		conn.SetReadLimit(readLimit)
+		value, _ := c.Get(userWatchKey)
+		watch, _ := value.(*userWatch)
+		r := c.Request
+		if g, ok := utils.Grant(c); ok {
+			r = r.WithContext(utils.ContextWithGrant(r.Context(), g))
+		}
+		handler.serve(connsOf(c), session, r, conn, watch)
+	}
+}
+
+// originAllowed reports whether the browser page at the Origin of r may
+// open a websocket: DMRHub's own origin, the host that r was sent to, or,
+// with CORS on, one of the configured CORS origins. A request without an
+// Origin is refused.
+func (h *WSHandler) originAllowed(r *http.Request) bool {
+	origin, ok := parseOrigin(r.Header.Get("Origin"))
+	if !ok {
+		return false
+	}
+	if origin.host == hostOf(origin.scheme, r.Host) {
+		return true
+	}
+	if !h.config.HTTP.CORS.Enabled {
+		return false
+	}
+	for _, allowed := range h.config.HTTP.CORS.Hosts {
+		if originMatches(origin, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+type webOrigin struct {
+	scheme string
+	host   string
+}
+
+func parseOrigin(s string) (webOrigin, bool) {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return webOrigin{}, false
+	}
+	return webOrigin{scheme: u.Scheme, host: hostOf(u.Scheme, u.Host)}, true
+}
+
+// hostOf returns host in lower case, without the default port of scheme.
+func hostOf(scheme, host string) string {
+	host = strings.ToLower(host)
+	switch {
+	case scheme == "https" && strings.HasSuffix(host, ":443"):
+		return strings.TrimSuffix(host, ":443")
+	case scheme == "http" && strings.HasSuffix(host, ":80"):
+		return strings.TrimSuffix(host, ":80")
+	}
+	return host
+}
+
+// originMatches reports whether origin is the configured CORS origin
+// allowed, which is a full origin such as https://example.com or a host
+// such as example.com:443. The match is exact, so evil-example.com does not
+// match example.com.
+func originMatches(origin webOrigin, allowed string) bool {
+	allowed = strings.TrimSuffix(strings.TrimSpace(allowed), "/")
+	if allowed == "*" {
+		return true
+	}
+	if strings.Contains(allowed, "://") {
+		a, ok := parseOrigin(allowed)
+		return ok && a == origin
+	}
+	return hostOf(origin.scheme, allowed) == origin.host
+}
+
+// serve returns when the connection has closed, every goroutine that it
+// started has returned and onDisconnect has run, so that no work of the
+// connection runs after the Close of conns. onDisconnect runs after the
+// last OnMessage.
+func (h *WSHandler) serve(conns *Conns, s sessions.Session, r *http.Request, conn *websocket.Conn, watch *userWatch) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	var wg sync.WaitGroup
+	if conns != nil {
+		wg.Go(func() {
+			select {
+			case <-conns.done:
+				cancel(errGoingAway)
+			case <-ctx.Done():
+			}
+		})
+	}
+	if watch != nil {
+		wg.Go(func() { watch.run(ctx, cancel) })
+	}
+	writer := &wsWriter{out: make(chan Message, bufferSize), done: ctx.Done(), cancel: cancel}
+
+	onDisconnect := h.handler.OnConnect(ctx, r, writer, s)
+
+	wg.Go(func() { h.read(ctx, cancel, s, r, conn, writer) })
+	wg.Go(func() { keepalive(ctx, cancel, conn, writer) })
+	writer.drain(ctx, conn)
+
+	closeConn(conn, context.Cause(ctx))
+	wg.Wait()
+	if onDisconnect != nil {
+		onDisconnect()
+	}
+}
+
+// read does not pass ctx to conn.Read, because the end of ctx would close
+// the TCP connection before closeConn can send a close frame. closeConn
+// unblocks the read instead.
+func (h *WSHandler) read(ctx context.Context, cancel context.CancelCauseFunc, s sessions.Session, r *http.Request, conn *websocket.Conn, w *wsWriter) {
+	readCtx := context.WithoutCancel(ctx)
+	for {
+		typ, msg, err := conn.Read(readCtx)
+		if err != nil {
+			cancel(errClientClosed)
+			return
+		}
+		if typ == websocket.MessageText && !utf8.Valid(msg) {
+			cancel(errInvalidUTF8)
+			return
+		}
+		if typ == websocket.MessageText && strings.EqualFold(string(msg), "ping") {
+			w.WriteMessage(Message{Type: int(websocket.MessageText), Data: []byte("PONG")})
+			continue
+		}
+		h.handler.OnMessage(ctx, r, w, s, msg, int(typ))
+	}
+}
+
+func keepalive(ctx context.Context, cancel context.CancelCauseFunc, conn *websocket.Conn, w *wsWriter) {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if err := ping(ctx, conn, w); err != nil {
+			cancel(errPingTimeout)
+			return
+		}
+	}
+}
+
+func ping(ctx context.Context, conn *websocket.Conn, w *wsWriter) error {
+	pingCtx, pingCancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer pingCancel()
+	result := make(chan error, 1)
+	go func() { result <- conn.Ping(pingCtx) }()
+	timer := time.NewTimer(pingTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case err := <-result:
+			return err
+		case <-timer.C:
+		}
+		select {
+		case err := <-result:
+			return err
+		default:
+		}
+		writing := w.writing()
+		if writing == nil {
+			return errPingTimeout
+		}
+		select {
+		case err := <-result:
+			return err
+		case <-writing:
+		}
+		timer.Reset(pingTimeout)
+	}
+}
+
+func closeConn(conn *websocket.Conn, cause error) {
+	var err error
+	var policy policyCloseError
+	switch {
+	case errors.As(cause, &policy):
+		err = conn.Close(websocket.StatusPolicyViolation, policy.reason)
+	case errors.Is(cause, errInvalidUTF8):
+		err = conn.Close(websocket.StatusInvalidFramePayloadData, "invalid UTF-8")
+	case errors.Is(cause, errGoingAway):
+		err = conn.Close(websocket.StatusGoingAway, "server shutting down")
+	case errors.Is(cause, errClientClosed):
+		err = conn.Close(websocket.StatusNormalClosure, "")
+	default:
+		slog.Debug("Dropping websocket client", "reason", cause)
+		err = conn.CloseNow()
+	}
+	if err != nil && !errors.Is(err, net.ErrClosed) {
+		slog.Debug("Websocket close", "error", err)
+	}
+}

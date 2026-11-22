@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+describe('Admin Setup: OpenBridge', () => {
+  beforeEach(() => {
+    cy.stubCommonEndpoints();
+    cy.loginAsAdmin();
+    cy.mockAPI('GET', '/network/features', { openbridge: true, ipsc: true });
+    cy.mockAPI('GET', '/config', {
+      dmr: {
+        'radio-id-url': 'https://radioid.net/static/users.json',
+        mmdvm: { bind: '[::]', port: 62031 },
+        ipsc: { enabled: true, bind: '[::]', port: 50000, 'network-id': 990360 },
+        openbridge: { enabled: true, bind: '[::]', port: 62035 },
+        retention: { messages: 0, transmissions: 0, bursts: 0 },
+      },
+      http: {}, database: {}, smtp: {}, redis: {}, metrics: {}, pprof: {},
+      secrets: { secretSet: true, passwordSaltSet: true, smtpPasswordSet: false },
+    }).as('config');
+    cy.mockAPI('POST', '/config/validate', { valid: true, errors: {} }).as('validate');
+    cy.mockAPI('PUT', '/config', { message: 'Configuration updated successfully' }).as('save');
+  });
+
+  it('shows the Server ID field and saves it', () => {
+    cy.visit('/admin/setup#openbridge');
+    cy.wait('@config');
+    cy.contains('OpenBridge server').should('be.visible');
+    cy.contains('label', 'Server ID').should('be.visible');
+    cy.get('#setup-dmr-openbridge-server-id').should('be.visible').clear();
+    cy.get('#setup-dmr-openbridge-server-id').type('3129');
+    cy.contains('button', 'Save OpenBridge').click();
+    cy.wait('@validate');
+    cy.wait('@save').its('request.body.dmr.openbridge').should('deep.equal', {
+      enabled: true, bind: '[::]', port: 62035, 'server-id': 3129,
+    });
+  });
+
+  it('turns OpenBridge on from its own switch', () => {
+    cy.mockAPI('GET', '/config', {
+      dmr: { ipsc: { enabled: true }, openbridge: { enabled: false } },
+      http: {}, database: {}, smtp: {}, redis: {}, metrics: {}, pprof: {},
+    }).as('config');
+    cy.visit('/admin/setup#openbridge');
+    cy.wait('@config');
+    cy.get('#setup-dmr-openbridge-server-id').should('not.exist');
+    cy.get('label[for="setup-dmr-openbridge-enabled"]').click();
+    cy.get('#setup-dmr-openbridge-server-id').should('be.visible');
+    cy.get('[data-test="menu-openbridge"] [title="Unsaved changes"]').should('exist');
+    cy.get('[data-test="menu-ipsc"]').click();
+    cy.get('#setup-dmr-ipsc-enabled').should('have.attr', 'data-state', 'checked');
+  });
+});
+
+describe('Admin Setup: Messages', () => {
+  beforeEach(() => {
+    cy.stubCommonEndpoints();
+    cy.loginAsAdmin();
+    cy.mockAPI('GET', '/network/features', { openbridge: true, ipsc: true });
+    cy.mockAPI('GET', '/config', {
+      dmr: {
+        retention: { messages: 0, transmissions: 0, bursts: 0 },
+        messages: { 'hold-days': 7, 'hold-max': 50 },
+      },
+      http: {}, database: {}, smtp: {}, redis: {}, metrics: {}, pprof: {},
+      secrets: { secretSet: true, passwordSaltSet: true, smtpPasswordSet: false },
+    }).as('config');
+    cy.mockAPI('POST', '/config/validate', { valid: true, errors: {} }).as('validate');
+    cy.mockAPI('PUT', '/config', { message: 'Configuration updated successfully' }).as('save');
+  });
+
+  it('shows the store and forward limits and saves them', () => {
+    cy.visit('/admin/setup#messages');
+    cy.wait('@config');
+    cy.contains('Store and forward').should('be.visible');
+    cy.contains('label', 'Hold messages for (days)').should('be.visible');
+    cy.get('#setup-dmr-messages-hold-days').should('have.value', '7').type('{selectall}14');
+    cy.contains('button', 'Save Messages').click();
+    cy.wait('@validate');
+    cy.wait('@save').its('request.body.dmr.messages').should('deep.equal', { 'hold-days': 14, 'hold-max': 50 });
+  });
+});

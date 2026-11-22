@@ -1,0 +1,1355 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package ipsc
+
+import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/dmrconst"
+	"github.com/USA-RedDragon/dmrgo/v2/enums"
+	"github.com/USA-RedDragon/dmrgo/v2/layer2"
+	"github.com/USA-RedDragon/dmrgo/v2/layer2/pdu"
+	"github.com/USA-RedDragon/dmrgo/v2/vocoder"
+	"github.com/USA-RedDragon/dmrgo/v2/voice"
+)
+
+func newTestTranslator(t *testing.T) *IPSCTranslator {
+	t.Helper()
+	return NewIPSCTranslator(12345)
+}
+
+func TestNewIPSCTranslator(t *testing.T) {
+	t.Parallel()
+	tr := NewIPSCTranslator(12345)
+	if tr == nil {
+		t.Fatal("expected non-nil translator")
+	}
+	if tr.streams == nil {
+		t.Fatal("expected non-nil streams map")
+	}
+	if tr.reverseStreams == nil {
+		t.Fatal("expected non-nil reverseStreams map")
+	}
+}
+
+func TestSetPeerID(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	if tr.peerID != 12345 {
+		t.Fatalf("expected peerID 12345, got %d", tr.peerID)
+	}
+	if tr.repeaterID != 12345 {
+		t.Fatalf("expected repeaterID 12345, got %d", tr.repeaterID)
+	}
+}
+
+func TestCleanupStream(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Create some stream state by translating a voice header
+	pkt := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1) // VoiceLCHeader=1
+	tr.TranslateToIPSC(pkt)
+
+	streamID := uint32(pkt.StreamID) //nolint:gosec // test value is within uint32 range
+
+	tr.mu.Lock()
+	_, exists := tr.streams[streamID]
+	tr.mu.Unlock()
+
+	if !exists {
+		t.Fatal("expected stream state to exist after translate")
+	}
+
+	tr.CleanupStream(streamID)
+
+	tr.mu.Lock()
+	_, exists = tr.streams[streamID]
+	tr.mu.Unlock()
+
+	if exists {
+		t.Fatal("expected stream state to be removed after cleanup")
+	}
+}
+
+func makeTestMMDVMPacket(groupCall, slot bool, frameType dmrconst.FrameType, dtypeOrVSeq uint) models.Packet {
+	return models.Packet{
+		Signature:   "DMRD",
+		Seq:         0,
+		Src:         100,
+		Dst:         200,
+		Repeater:    3001,
+		Slot:        slot,
+		GroupCall:   groupCall,
+		FrameType:   frameType,
+		DTypeOrVSeq: dtypeOrVSeq,
+		StreamID:    0x1234,
+		DMRData:     [33]byte{},
+	}
+}
+
+func TestTranslateToIPSCNilOnUnknownFrameType(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, 3, 0) // frameType=3 is unknown
+	result := tr.TranslateToIPSC(pkt)
+	if result != nil {
+		t.Fatalf("expected nil for unknown frame type, got %d packets", len(result))
+	}
+}
+
+func TestTranslateToIPSCVoiceHeaderProduces3Packets(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	// DataTypeVoiceLCHeader = 1
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 voice header packets, got %d", len(result))
+	}
+}
+
+func TestTranslateToIPSCVoiceTerminator(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	// First send a header to establish stream
+	header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// DataTypeTerminatorWithLC = 2
+	term := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 2)
+	term.StreamID = header.StreamID
+	result := tr.TranslateToIPSC(term)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 terminator packet, got %d", len(result))
+	}
+}
+
+func TestTranslateToIPSCGroupCallFlag(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Group call
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 1 {
+		t.Fatal("expected at least 1 packet")
+	}
+	if result[0][0] != 0x80 {
+		t.Fatalf("expected group voice type 0x80, got 0x%02X", result[0][0])
+	}
+
+	// Private call
+	tr2 := newTestTranslator(t)
+	pkt2 := makeTestMMDVMPacket(false, false, dmrconst.FrameDataSync, 1)
+	pkt2.StreamID = 0x5678
+	result2 := tr2.TranslateToIPSC(pkt2)
+	if len(result2) < 1 {
+		t.Fatal("expected at least 1 packet")
+	}
+	if result2[0][0] != 0x81 {
+		t.Fatalf("expected private voice type 0x81, got 0x%02X", result2[0][0])
+	}
+}
+
+func TestTranslateToIPSCPeerIDInHeader(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 1 {
+		t.Fatal("expected at least 1 packet")
+	}
+	peerID := binary.BigEndian.Uint32(result[0][1:5])
+	if peerID != 12345 {
+		t.Fatalf("expected peer ID 12345 in header, got %d", peerID)
+	}
+}
+
+func TestTranslateToIPSCSlotFlag(t *testing.T) {
+	t.Parallel()
+
+	// TS1 (Slot=false)
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 1 {
+		t.Fatal("expected packets")
+	}
+	callInfo := result[0][17]
+	if callInfo&0x20 != 0 {
+		t.Fatalf("expected TS1 (slot bit clear), got callInfo %02X", callInfo)
+	}
+
+	// TS2 (Slot=true)
+	tr2 := newTestTranslator(t)
+	pkt2 := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1)
+	pkt2.StreamID = 0x9999
+	result2 := tr2.TranslateToIPSC(pkt2)
+	if len(result2) < 1 {
+		t.Fatal("expected packets")
+	}
+	callInfo2 := result2[0][17]
+	if callInfo2&0x20 == 0 {
+		t.Fatalf("expected TS2 (slot bit set), got callInfo %02X", callInfo2)
+	}
+}
+
+func TestTranslateToIPSCSrcDstInHeader(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	pkt.Src = 0x123456
+	pkt.Dst = 0xABCDEF
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 1 {
+		t.Fatal("expected packets")
+	}
+	src := uint(result[0][6])<<16 | uint(result[0][7])<<8 | uint(result[0][8])
+	dst := uint(result[0][9])<<16 | uint(result[0][10])<<8 | uint(result[0][11])
+	if src != 0x123456 {
+		t.Fatalf("expected src 0x123456, got 0x%06X", src)
+	}
+	if dst != 0xABCDEF {
+		t.Fatalf("expected dst 0xABCDEF, got 0x%06X", dst)
+	}
+}
+
+func TestTranslateToMMDVMTooShort(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	result := tr.TranslateToMMDVM(0x80, make([]byte, 10))
+	if result != nil {
+		t.Fatal("expected nil for too-short IPSC packet")
+	}
+}
+
+func TestTranslateToMMDVMUnsupportedType(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	result := tr.TranslateToMMDVM(0x99, make([]byte, 54))
+	if result != nil {
+		t.Fatal("expected nil for unsupported packet type")
+	}
+}
+
+func makeTestIPSCPacket(packetType byte, burstType byte, groupCall, slot bool) []byte {
+	buf := make([]byte, 54)
+	buf[0] = packetType
+
+	// Peer ID
+	binary.BigEndian.PutUint32(buf[1:5], 99999)
+
+	// Src (bytes 6-8) — hardcoded test source ID
+	const src uint = 100
+	const dst uint = 200
+	buf[6] = byte(src >> 16)
+	buf[7] = byte(src >> 8)
+	buf[8] = byte(src)
+
+	// Dst (bytes 9-11)
+	buf[9] = byte(dst >> 16)
+	buf[10] = byte(dst >> 8)
+	buf[11] = byte(dst)
+
+	// Call type
+	if groupCall {
+		buf[12] = 0x02
+	} else {
+		buf[12] = 0x01
+	}
+
+	// Call control (bytes 13-16) - unique per call
+	binary.BigEndian.PutUint32(buf[13:17], 0xAAAA)
+
+	// Call info (byte 17)
+	callInfo := byte(0x00)
+	if slot {
+		callInfo |= 0x20
+	}
+	buf[17] = callInfo
+
+	// RTP header stub (bytes 18-29)
+	buf[18] = 0x80
+
+	// Burst type (byte 30)
+	buf[30] = burstType
+
+	// A BPTC(196,96) payload of 12 octets, as an XPR 8400 sends it
+	buf[33] = 0x0A
+	buf[34] = 0x80
+	buf[35] = 0x0A
+	buf[37] = 0x60
+
+	return buf
+}
+
+// ipscVoiceTestPacket returns IPSC voice burst idx (0 to 5 for A to F,
+// wrapping) of the call that header starts, in the layout and with the RTP
+// sequence number an XPR 8400 sends it.
+func ipscVoiceTestPacket(header []byte, callControl uint32, idx int) []byte {
+	var data []byte
+	switch idx % 6 {
+	case 0:
+		data = make([]byte, 52)
+		data[31], data[32] = 0x14, 0x40
+	case 4:
+		data = make([]byte, 66)
+		data[31], data[32] = 0x22, 0x16
+	default:
+		data = make([]byte, 57)
+		data[31], data[32] = 0x19, 0x06
+	}
+	copy(data[:30], header[:30])
+	binary.BigEndian.PutUint32(data[13:17], callControl)
+	binary.BigEndian.PutUint16(data[20:22], uint16(idx+1)) //nolint:gosec // idx is small
+	data[30] = ipscBurstSlot1
+	if header[17]&0x20 != 0 {
+		data[30] = ipscBurstSlot2
+	}
+	// The EMB of bursts B to F: CC 1 and the LCSS of the position
+	if emb := [6]byte{0, 0x12, 0x16, 0x16, 0x14, 0x10}[idx%6]; emb != 0 {
+		data[len(data)-1] = emb
+	}
+	return data
+}
+
+func TestTranslateToMMDVMVoiceHeader(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	result := tr.TranslateToMMDVM(0x80, data)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet for voice header, got %d", len(result))
+	}
+	pkt := result[0]
+	if pkt.Signature != "DMRD" {
+		t.Fatalf("expected DMRD signature, got %q", pkt.Signature)
+	}
+	if pkt.FrameType != dmrconst.FrameDataSync {
+		t.Fatalf("expected frame type %d (data sync), got %d", dmrconst.FrameDataSync, pkt.FrameType)
+	}
+	if pkt.Src != 100 {
+		t.Fatalf("expected src 100, got %d", pkt.Src)
+	}
+	if pkt.Dst != 200 {
+		t.Fatalf("expected dst 200, got %d", pkt.Dst)
+	}
+}
+
+func TestTranslateToMMDVMDuplicateHeaderSkipped(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+
+	// First header should produce a packet
+	result := tr.TranslateToMMDVM(0x80, data)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet for first header, got %d", len(result))
+	}
+
+	// Second header with same call control should be skipped
+	result = tr.TranslateToMMDVM(0x80, data)
+	if len(result) != 0 {
+		t.Fatalf("expected 0 packets for duplicate header, got %d", len(result))
+	}
+}
+
+func TestTranslateToMMDVMVoiceTerminator(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send header first to establish stream
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	tr.TranslateToMMDVM(0x80, header)
+
+	// Send terminator
+	term := makeTestIPSCPacket(0x80, ipscBurstVoiceTerm, true, false)
+	result := tr.TranslateToMMDVM(0x80, term)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet for terminator, got %d", len(result))
+	}
+	if result[0].DTypeOrVSeq != 2 { // DataTypeTerminatorWithLC = 2
+		t.Fatalf("expected dtype 2 (terminator), got %d", result[0].DTypeOrVSeq)
+	}
+}
+
+func TestTranslateToMMDVMPrivateCall(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	data := makeTestIPSCPacket(0x81, ipscBurstVoiceHead, false, false)
+	result := tr.TranslateToMMDVM(0x81, data)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if result[0].GroupCall {
+		t.Fatal("expected GroupCall=false for private call")
+	}
+}
+
+func TestTranslateToMMDVMSlotTS2(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, true)
+	// Use a different call control to avoid collision
+	binary.BigEndian.PutUint32(data[13:17], 0xBBBB)
+	result := tr.TranslateToMMDVM(0x80, data)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if !result[0].Slot {
+		t.Fatal("expected Slot=true for TS2")
+	}
+}
+
+// TestTranslateToMMDVMKeepsARawBlockAfterTheEnd translates a rate 1 data
+// call that an XPR 8400 relayed on 2026-10-15 (internal/dmr/testdata,
+// tag raw1f): the data header, a block, the packet with the end bit, then
+// the raw block (0x1F) of the same call control. All must be one stream.
+func TestTranslateToMMDVMKeepsARawBlockAfterTheEnd(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	var streams []uint
+	for _, h := range []string{
+		"840004977e022dedcf2dedcf0100002c290080dd57932c935972000000000640000a800a006043a22dedcf2dedcf81003cd400764646",
+		"840004977e022dedcf2dedcf0100002c2940805e57942c935b52000000000642000d804a006099a202000c7c2a20f62895890066c5a6f20fc616464d",
+		"840004977e022dedcf2dedcf0100002c2940805e57952c935d320000000013000000",
+		"840004977e022dedcf2dedcf0100002c2900805d57962c935f12000000001f400011800a00c42e3c2a3cb259b259198542ed82efea72e2fdcb784bf8fae4f000006c4643",
+	} {
+		p, err := hex.DecodeString(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, out := range tr.TranslateToMMDVM(p[0], p) {
+			streams = append(streams, out.StreamID)
+		}
+	}
+	if len(streams) != 3 {
+		t.Fatalf("%d MMDVM packets, want 3", len(streams))
+	}
+	if streams[2] != streams[0] {
+		t.Fatalf("streams %v: the raw block after the end packet is on another stream", streams)
+	}
+
+	tr.mu.Lock()
+	for _, rss := range tr.reverseStreams {
+		rss.lastActivity = time.Now().Add(-2 * endedCallHold)
+	}
+	tr.mu.Unlock()
+	if n := tr.CleanupStaleStreams(endedCallHold); n == 0 {
+		t.Fatal("the ended stream is cleaned up when it goes stale")
+	}
+}
+
+func TestTranslateToMMDVMCSBK(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	data := makeTestIPSCPacket(0x83, ipscBurstCSBK, true, false)
+	binary.BigEndian.PutUint32(data[13:17], 0xDDDD)
+	result := tr.TranslateToMMDVM(0x83, data)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet for CSBK, got %d", len(result))
+	}
+	if result[0].DTypeOrVSeq != 3 { // DataTypeCSBK = 3
+		t.Fatalf("expected dtype 3 (CSBK), got %d", result[0].DTypeOrVSeq)
+	}
+}
+
+func TestExtractFullLCBytesGroupCall(t *testing.T) {
+	t.Parallel()
+	pkt := models.Packet{
+		GroupCall: true,
+		Src:       100,
+		Dst:       200,
+	}
+	lc := extractFullLCBytes(pkt)
+	// First byte should be FLCO for group call (0x00)
+	if lc[0] != 0x00 {
+		t.Fatalf("expected FLCO 0x00 (group), got 0x%02X", lc[0])
+	}
+}
+
+func TestExtractFullLCBytesPrivateCall(t *testing.T) {
+	t.Parallel()
+	pkt := models.Packet{
+		GroupCall: false,
+		Src:       100,
+		Dst:       200,
+	}
+	lc := extractFullLCBytes(pkt)
+	// First byte should be FLCO for unit-to-unit (0x03)
+	if lc[0] != 0x03 {
+		t.Fatalf("expected FLCO 0x03 (unit-to-unit), got 0x%02X", lc[0])
+	}
+}
+
+func TestBuildIPSCHeaderDataPacket(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 3) // CSBK
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 1 {
+		t.Fatal("expected at least 1 data packet")
+	}
+	// Data packet should use type 0x83 (group data)
+	if result[0][0] != 0x83 {
+		t.Fatalf("expected data packet type 0x83, got 0x%02X", result[0][0])
+	}
+}
+
+func TestBuildIPSCHeaderEndFlag(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	// First send a header
+	header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Then send terminator (end flag should be set)
+	term := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 2)
+	term.StreamID = header.StreamID
+	result := tr.TranslateToIPSC(term)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 terminator packet, got %d", len(result))
+	}
+	callInfo := result[0][17]
+	if callInfo&0x40 == 0 {
+		t.Fatalf("expected end flag set in terminator, got callInfo %02X", callInfo)
+	}
+}
+
+func TestBuildRTPHeader(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 1 {
+		t.Fatal("expected at least 1 packet")
+	}
+	// RTP version should be 2 (0x80 = version 2, no padding, no ext, 0 CSRCs)
+	if result[0][18] != 0x80 {
+		t.Fatalf("expected RTP version byte 0x80, got 0x%02X", result[0][18])
+	}
+}
+
+func TestBuildRTPHeaderNoMarker(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) < 3 {
+		t.Fatal("expected 3 header packets")
+	}
+	// Third header should not have marker bit
+	pt := result[2][19]
+	if pt&0x80 != 0 {
+		t.Fatalf("expected no marker on third header, got PT byte 0x%02X", pt)
+	}
+}
+
+func TestMultipleStreamsConcurrent(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Start two separate streams
+	pkt1 := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	pkt1.StreamID = 0xAAAA
+	pkt2 := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1)
+	pkt2.StreamID = 0xBBBB
+
+	result1 := tr.TranslateToIPSC(pkt1)
+	result2 := tr.TranslateToIPSC(pkt2)
+
+	if len(result1) != 3 {
+		t.Fatalf("stream 1: expected 3 packets, got %d", len(result1))
+	}
+	if len(result2) != 3 {
+		t.Fatalf("stream 2: expected 3 packets, got %d", len(result2))
+	}
+
+	// Each stream should have its own call control
+	cc1 := binary.BigEndian.Uint32(result1[0][13:17])
+	cc2 := binary.BigEndian.Uint32(result2[0][13:17])
+	if cc1 == cc2 {
+		t.Fatal("expected different call control values for different streams")
+	}
+}
+
+// makeVoiceDMRData builds a 33-byte DMR voice burst (with sync pattern) that
+// round-trips through layer2.Burst Decode/Encode. This allows buildVoiceBurst
+// and buildMMDVMVoiceBurst to work on realistic data.
+func makeVoiceDMRData(syncBurst bool) [33]byte {
+	pos := enums.VoiceBurstB
+	if syncBurst {
+		pos = enums.VoiceBurstA
+	}
+	burst, err := layer2.BuildVoiceBurst([3]vocoder.AMBEFrame{}, pos, pdu.EmbeddedSignalling{}, [4]byte{}, layer2.SyncSourceMS)
+	if err != nil {
+		panic(err)
+	}
+	return burst
+}
+
+func TestBuildVoiceBurstA(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send a header first to establish stream
+	header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Build a voice sync burst (burst A, index 0)
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameVoiceSync, 0)
+	pkt.StreamID = header.StreamID
+	pkt.DMRData = makeVoiceDMRData(true)
+
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 voice burst packet, got %d", len(result))
+	}
+
+	// Burst A should be 52 bytes
+	if len(result[0]) != 52 {
+		t.Fatalf("expected burst A to be 52 bytes, got %d", len(result[0]))
+	}
+
+	// Check the slot type byte
+	slotByte := result[0][30]
+	if slotByte != ipscBurstSlot1 {
+		t.Fatalf("expected slot1 burst type 0x%02X, got 0x%02X", ipscBurstSlot1, slotByte)
+	}
+
+	// Check length byte
+	if result[0][31] != 0x14 {
+		t.Fatalf("expected length byte 0x14, got 0x%02X", result[0][31])
+	}
+
+	// Unknown field byte
+	if result[0][32] != 0x40 {
+		t.Fatalf("expected unknown field 0x40, got 0x%02X", result[0][32])
+	}
+}
+
+func TestBuildVoiceBurstBCDF(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send a header to establish stream state
+	header := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Send burst A to advance burstIndex to 1
+	burstA := makeTestMMDVMPacket(true, true, dmrconst.FrameVoiceSync, 0)
+	burstA.StreamID = header.StreamID
+	burstA.DMRData = makeVoiceDMRData(true)
+	tr.TranslateToIPSC(burstA)
+
+	// Now send burst B (burstIndex=1) — should produce 57-byte packet
+	burstB := makeTestMMDVMPacket(true, true, dmrconst.FrameVoice, 1)
+	burstB.StreamID = header.StreamID
+	burstB.DMRData = makeVoiceDMRData(false)
+
+	result := tr.TranslateToIPSC(burstB)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 voice burst packet, got %d", len(result))
+	}
+
+	// Bursts B,C,D,F should be 57 bytes
+	if len(result[0]) != 57 {
+		t.Fatalf("expected burst B to be 57 bytes, got %d", len(result[0]))
+	}
+
+	// Check slot type byte — TS2
+	slotByte := result[0][30]
+	if slotByte != ipscBurstSlot2 {
+		t.Fatalf("expected slot2 burst type 0x%02X, got 0x%02X", ipscBurstSlot2, slotByte)
+	}
+
+	// Check length byte
+	if result[0][31] != 0x19 {
+		t.Fatalf("expected length byte 0x19, got 0x%02X", result[0][31])
+	}
+
+	// Unknown field
+	if result[0][32] != 0x06 {
+		t.Fatalf("expected unknown field 0x06, got 0x%02X", result[0][32])
+	}
+}
+
+func TestBuildVoiceBurstE(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish stream
+	header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Send bursts A-D to advance burstIndex to 4
+	for i := 0; i < 4; i++ {
+		ft := dmrconst.FrameVoice
+		if i == 0 {
+			ft = dmrconst.FrameVoiceSync
+		}
+		pkt := makeTestMMDVMPacket(true, false, ft, uint(i)) //nolint:gosec // G115: i is in [0,3]
+		pkt.StreamID = header.StreamID
+		pkt.DMRData = makeVoiceDMRData(i == 0)
+		tr.TranslateToIPSC(pkt)
+	}
+
+	// Now send burst E (burstIndex=4) — should produce 66-byte packet
+	burstE := makeTestMMDVMPacket(true, false, dmrconst.FrameVoice, 4)
+	burstE.StreamID = header.StreamID
+	burstE.DMRData = makeVoiceDMRData(false)
+	var emb pdu.EmbeddedSignalling
+	emb.ColorCode, emb.LCSS = 7, enums.LCSSLastFragment
+	built, err := layer2.BuildVoiceBurst([3]vocoder.AMBEFrame{}, enums.VoiceBurstE, emb, [4]byte{}, layer2.SyncSourceMS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	burstE.DMRData = built
+
+	result := tr.TranslateToIPSC(burstE)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 voice burst packet, got %d", len(result))
+	}
+
+	// Burst E should be 66 bytes
+	if len(result[0]) != 66 {
+		t.Fatalf("expected burst E to be 66 bytes, got %d", len(result[0]))
+	}
+
+	// Check length byte
+	if result[0][31] != 0x22 {
+		t.Fatalf("expected length byte 0x22 for burst E, got 0x%02X", result[0][31])
+	}
+
+	// Unknown field
+	if result[0][32] != 0x16 {
+		t.Fatalf("expected unknown field 0x16 for burst E, got 0x%02X", result[0][32])
+	}
+
+	// Bytes 56-64 carry the Full LC of the call: group voice, dst, src
+	if lc := result[0][56:65]; lc[0] != 0x00 || !bytes.Equal(lc[3:9], []byte{0, 0, 200, 0, 0, 100}) {
+		t.Fatalf("expected the call LC at bytes 56-64, got % X", lc)
+	}
+
+	// Byte 65 is the EMB of the burst: CC 7, last fragment
+	if result[0][65] != 0x74 {
+		t.Fatalf("expected EMB 0x74, got 0x%02X", result[0][65])
+	}
+}
+
+func TestBuildVoiceBurstSkipsDataBurst(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish stream
+	header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Build a DMR data burst (not voice) — the burst decodes as IsData=true
+	dataDMR := dataBurst([12]byte{}, enums.DataTypeVoiceLCHeader)
+
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameVoice, 0)
+	pkt.StreamID = header.StreamID
+	pkt.DMRData = dataDMR
+
+	result := tr.TranslateToIPSC(pkt)
+	if result != nil {
+		t.Fatalf("expected nil for data burst in voice stream, got %d packets", len(result))
+	}
+}
+
+func TestBuildVoiceBurstWrapsAfterF(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish stream
+	header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Send 6 bursts (A-F) to complete one superframe
+	for i := 0; i < 6; i++ {
+		ft := dmrconst.FrameVoice
+		if i == 0 {
+			ft = dmrconst.FrameVoiceSync
+		}
+		pkt := makeTestMMDVMPacket(true, false, ft, uint(i)) //nolint:gosec // G115: i is in [0,5]
+		pkt.StreamID = header.StreamID
+		pkt.DMRData = makeVoiceDMRData(i == 0)
+		tr.TranslateToIPSC(pkt)
+	}
+
+	// The 7th burst should wrap to index 0 (burst A again) → 52 bytes
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameVoiceSync, 0)
+	pkt.StreamID = header.StreamID
+	pkt.DMRData = makeVoiceDMRData(true)
+
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if len(result[0]) != 52 {
+		t.Fatalf("expected 52 bytes (burst A after wrap), got %d", len(result[0]))
+	}
+}
+
+func TestBuildMMDVMVoiceBurstFromSlot1(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send header to establish reverse stream
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	tr.TranslateToMMDVM(0x80, header)
+
+	// Build an IPSC voice burst (slot1 = burst A, 52 bytes)
+	burstData := ipscVoiceTestPacket(header, 0xAAAA, 0)
+
+	result := tr.TranslateToMMDVM(0x80, burstData)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 MMDVM packet for voice burst, got %d", len(result))
+	}
+
+	pkt := result[0]
+	if pkt.Signature != "DMRD" {
+		t.Fatalf("expected DMRD signature, got %q", pkt.Signature)
+	}
+	if pkt.Src != 100 {
+		t.Fatalf("expected src 100, got %d", pkt.Src)
+	}
+	if pkt.Dst != 200 {
+		t.Fatalf("expected dst 200, got %d", pkt.Dst)
+	}
+	if !pkt.GroupCall {
+		t.Fatal("expected GroupCall=true")
+	}
+	if pkt.Slot {
+		t.Fatal("expected Slot=false for TS1")
+	}
+	// First voice burst (burstIndex=0) should be voice sync
+	if pkt.FrameType != dmrconst.FrameVoiceSync {
+		t.Fatalf("expected frame type %d (voice sync), got %d", dmrconst.FrameVoiceSync, pkt.FrameType)
+	}
+	if pkt.DTypeOrVSeq != 0 {
+		t.Fatalf("expected DTypeOrVSeq 0 (burst A), got %d", pkt.DTypeOrVSeq)
+	}
+}
+
+func TestBuildMMDVMVoiceBurstSequencing(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish reverse stream with a header
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	binary.BigEndian.PutUint32(header[13:17], 0xEEEE)
+	tr.TranslateToMMDVM(0x80, header)
+
+	// Send 3 voice bursts and verify sequencing
+	for i := 0; i < 3; i++ {
+		burstData := ipscVoiceTestPacket(header, 0xEEEE, i)
+
+		result := tr.TranslateToMMDVM(0x80, burstData)
+		if len(result) != 1 {
+			t.Fatalf("burst %d: expected 1 packet, got %d", i, len(result))
+		}
+
+		pkt := result[0]
+		if pkt.DTypeOrVSeq != uint(i) {
+			t.Fatalf("burst %d: expected DTypeOrVSeq %d, got %d", i, i, pkt.DTypeOrVSeq)
+		}
+		// Burst 0 = voice sync, rest = voice
+		if i == 0 {
+			if pkt.FrameType != dmrconst.FrameVoiceSync {
+				t.Fatalf("burst 0: expected voice sync frame type, got %d", pkt.FrameType)
+			}
+		} else {
+			if pkt.FrameType != dmrconst.FrameVoice {
+				t.Fatalf("burst %d: expected voice frame type, got %d", i, pkt.FrameType)
+			}
+		}
+		if pkt.Seq != uint(i+1) { //nolint:gosec // G115: i is in [0,2]; seq starts at 1 after header consumed seq=0
+			t.Fatalf("burst %d: expected seq %d, got %d", i, i+1, pkt.Seq)
+		}
+	}
+}
+
+func TestBuildMMDVMVoiceBurstWrapsAt6(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	binary.BigEndian.PutUint32(header[13:17], 0xFFFF)
+	tr.TranslateToMMDVM(0x80, header)
+
+	// Send 7 voice bursts — the 7th should wrap to burstIndex 0 (voice sync again)
+	for i := 0; i < 7; i++ {
+		burstData := ipscVoiceTestPacket(header, 0xFFFF, i)
+
+		result := tr.TranslateToMMDVM(0x80, burstData)
+		if len(result) != 1 {
+			t.Fatalf("burst %d: expected 1 packet, got %d", i, len(result))
+		}
+
+		pkt := result[0]
+		expectedIdx := i % 6
+		//nolint:gosec // G115: i is in [0,6], expectedIdx fits in uint
+		if pkt.DTypeOrVSeq != uint(expectedIdx) {
+			t.Fatalf("burst %d: expected DTypeOrVSeq %d, got %d", i, expectedIdx, pkt.DTypeOrVSeq)
+		}
+	}
+}
+
+func TestBuildMMDVMVoiceBurstSlot2(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, true)
+	binary.BigEndian.PutUint32(header[13:17], 0x1111)
+	tr.TranslateToMMDVM(0x80, header)
+
+	burstData := ipscVoiceTestPacket(header, 0x1111, 0)
+
+	result := tr.TranslateToMMDVM(0x80, burstData)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if !result[0].Slot {
+		t.Fatal("expected Slot=true for TS2 voice burst")
+	}
+}
+
+func TestBuildMMDVMVoiceBurstSyncLost(t *testing.T) {
+	t.Parallel()
+	for _, slot2 := range []bool{false, true} {
+		tr := newTestTranslator(t)
+		header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, slot2)
+		binary.BigEndian.PutUint32(header[13:17], 0x2222)
+		tr.TranslateToMMDVM(0x80, header)
+		for i := range 2 {
+			if got := tr.TranslateToMMDVM(0x80, ipscVoiceTestPacket(header, 0x2222, i)); len(got) != 1 {
+				t.Fatalf("slot 2 %v, burst %d: %d packets, want 1", slot2, i, len(got))
+			}
+		}
+		// A BurstSyncLost packet has no body, as an XPR 8400 sends it
+		lost := ipscVoiceTestPacket(header, 0x2222, 2)[:34]
+		lost[30], lost[31], lost[32], lost[33] = 0x13, 0x80, 0, 0
+		if slot2 {
+			lost[30] |= 0x80
+		}
+		rss := tr.reverseStreams[reverseKey{peer: binary.BigEndian.Uint32(header[1:5]), callControl: 0x2222}]
+		if rss == nil || rss.rx.State() == voice.StateIdle {
+			t.Fatalf("slot 2 %v: no call before the lost burst", slot2)
+		}
+		tr.TranslateToMMDVM(0x80, lost)
+		if s := rss.rx.State(); s != voice.StateIdle {
+			t.Fatalf("slot 2 %v: receiver state %v after the lost burst, want idle", slot2, s)
+		}
+	}
+}
+
+func TestBuildMMDVMVoiceBurstTooShort(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish reverse stream
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	binary.BigEndian.PutUint32(header[13:17], 0x2222)
+	tr.TranslateToMMDVM(0x80, header)
+
+	// Send a voice burst packet that is too short (< 52 bytes)
+	burstData := make([]byte, 40)
+	copy(burstData[:18], header[:18])
+	binary.BigEndian.PutUint32(burstData[13:17], 0x2222)
+	burstData[30] = ipscBurstSlot1
+
+	result := tr.TranslateToMMDVM(0x80, burstData)
+	if result != nil {
+		t.Fatalf("expected nil for too-short voice burst, got %d packets", len(result))
+	}
+}
+
+func TestBuildMMDVMVoiceBurstPrivateCall(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	header := makeTestIPSCPacket(0x81, ipscBurstVoiceHead, false, false)
+	binary.BigEndian.PutUint32(header[13:17], 0x3333)
+	tr.TranslateToMMDVM(0x81, header)
+
+	burstData := ipscVoiceTestPacket(header, 0x3333, 0)
+
+	result := tr.TranslateToMMDVM(0x81, burstData)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if result[0].GroupCall {
+		t.Fatal("expected GroupCall=false for private call voice burst")
+	}
+}
+
+// --- Fuzz tests ---
+
+func FuzzTranslateToIPSC(f *testing.F) {
+	// Seed with a voice LC header packet
+	f.Add("DMRD", uint(1), uint(1000001), uint(1), uint(307201), true, true,
+		uint(dmrconst.FrameDataSync), uint(enums.DataTypeVoiceLCHeader), uint(5001),
+		byte(1), byte(2), byte(3))
+	// Voice burst
+	f.Add("DMRD", uint(2), uint(1000001), uint(1), uint(307201), false, true,
+		uint(dmrconst.FrameVoice), uint(0), uint(5001),
+		byte(0xAA), byte(0xBB), byte(0xCC))
+	// Terminator
+	f.Add("DMRD", uint(3), uint(1000001), uint(1), uint(307201), false, true,
+		uint(dmrconst.FrameDataSync), uint(enums.DataTypeTerminatorWithLC), uint(5001),
+		byte(0), byte(0), byte(0))
+
+	f.Fuzz(func(t *testing.T, sig string, seq, src, dst, repeater uint, slot, groupCall bool,
+		frameType, dtypeOrVSeq, streamID uint, d0, d1, d2 byte) {
+		t.Parallel()
+		tr := NewIPSCTranslator(300860)
+		var dmrData [33]byte
+		dmrData[0] = d0
+		dmrData[1] = d1
+		dmrData[2] = d2
+		pkt := models.Packet{
+			Signature:   sig,
+			Seq:         seq,
+			Src:         src,
+			Dst:         dst,
+			Repeater:    repeater,
+			Slot:        slot,
+			GroupCall:   groupCall,
+			FrameType:   dmrconst.FrameType(frameType),
+			DTypeOrVSeq: dtypeOrVSeq,
+			StreamID:    streamID,
+			DMRData:     dmrData,
+		}
+		_ = tr.TranslateToIPSC(pkt)
+	})
+}
+
+func FuzzTranslateToMMDVM(f *testing.F) {
+	// Build a seed IPSC voice header packet (54 bytes)
+	seed := make([]byte, 54)
+	seed[0] = 0x80 // GROUP_VOICE
+	binary.BigEndian.PutUint32(seed[1:5], 300860)
+	// src (bytes 6-8)
+	seed[6] = 0x0F
+	seed[7] = 0x42
+	seed[8] = 0x41
+	// dst (bytes 9-11)
+	seed[9] = 0x00
+	seed[10] = 0x00
+	seed[11] = 0x01
+	// call control (bytes 13-16)
+	binary.BigEndian.PutUint32(seed[13:17], 1)
+	// call info (byte 17)
+	seed[17] = 0x00
+	// burst type: voice header
+	seed[30] = 0x01
+	f.Add(byte(0x80), seed)
+
+	// Voice burst (57 bytes)
+	burst := make([]byte, 57)
+	burst[0] = 0x80
+	binary.BigEndian.PutUint32(burst[1:5], 300860)
+	burst[6] = 0x0F
+	burst[7] = 0x42
+	burst[8] = 0x41
+	burst[9] = 0x00
+	burst[10] = 0x00
+	burst[11] = 0x01
+	binary.BigEndian.PutUint32(burst[13:17], 1)
+	burst[30] = 0x0A // ipscBurstSlot1
+	f.Add(byte(0x80), burst)
+
+	// Short packet
+	f.Add(byte(0x80), make([]byte, 10))
+	// Empty
+	f.Add(byte(0x80), []byte{})
+	// Unsupported type
+	f.Add(byte(0xFF), make([]byte, 60))
+
+	f.Fuzz(func(t *testing.T, packetType byte, data []byte) {
+		t.Parallel()
+		tr := NewIPSCTranslator(300860)
+		_ = tr.TranslateToMMDVM(packetType, data)
+	})
+}
+
+func FuzzTranslatorRoundTrip(f *testing.F) {
+	// Seed with a voice LC header packet
+	f.Add(uint(1), uint(1000001), uint(1), uint(307201), true, true,
+		uint(dmrconst.FrameDataSync), uint(enums.DataTypeVoiceLCHeader), uint(5001))
+
+	f.Fuzz(func(t *testing.T, seq, src, dst, repeater uint,
+		slot, groupCall bool, frameType, dtypeOrVSeq, streamID uint) {
+		t.Parallel()
+		tr := NewIPSCTranslator(300860)
+		pkt := models.Packet{
+			Signature:   "DMRD",
+			Seq:         seq,
+			Src:         src,
+			Dst:         dst,
+			Repeater:    repeater,
+			Slot:        slot,
+			GroupCall:   groupCall,
+			FrameType:   dmrconst.FrameType(frameType),
+			DTypeOrVSeq: dtypeOrVSeq,
+			StreamID:    streamID,
+		}
+		ipscPackets := tr.TranslateToIPSC(pkt)
+		// Now translate each IPSC packet back — must not panic
+		for _, ipscPkt := range ipscPackets {
+			if len(ipscPkt) < 1 {
+				continue
+			}
+			_ = tr.TranslateToMMDVM(ipscPkt[0], ipscPkt)
+		}
+	})
+}
+
+// --- Benchmarks ---
+
+func BenchmarkTranslateToIPSCVoiceHeader(b *testing.B) {
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, uint(enums.DataTypeVoiceLCHeader))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tr := NewIPSCTranslator(12345)
+		tr.TranslateToIPSC(pkt)
+	}
+}
+
+func BenchmarkTranslateToIPSCVoiceBurst(b *testing.B) {
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameVoice, 0)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Send a header first to establish stream state, then benchmark burst
+		tr := NewIPSCTranslator(12345)
+		header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, uint(enums.DataTypeVoiceLCHeader))
+		header.StreamID = pkt.StreamID
+		tr.TranslateToIPSC(header)
+		tr.TranslateToIPSC(pkt)
+	}
+}
+
+func BenchmarkTranslateToIPSCTerminator(b *testing.B) {
+	pkt := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, uint(enums.DataTypeTerminatorWithLC))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tr := NewIPSCTranslator(12345)
+		header := makeTestMMDVMPacket(true, false, dmrconst.FrameDataSync, uint(enums.DataTypeVoiceLCHeader))
+		header.StreamID = pkt.StreamID
+		tr.TranslateToIPSC(header)
+		tr.TranslateToIPSC(pkt)
+	}
+}
+
+// --- Regression tests for unbounded stream state maps (memory leak fix) ---
+
+func TestCleanupStaleStreams_RemovesOldForwardStreams(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Create a forward stream by translating a voice header
+	pkt := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1) // VoiceLCHeader
+	tr.TranslateToIPSC(pkt)
+
+	fwd, rev := tr.StreamCount()
+	if fwd != 1 {
+		t.Fatalf("expected 1 forward stream, got %d", fwd)
+	}
+	if rev != 0 {
+		t.Fatalf("expected 0 reverse streams, got %d", rev)
+	}
+
+	// Manually age the stream by setting lastActivity in the past
+	streamID := uint32(pkt.StreamID) //nolint:gosec // test value is within uint32 range
+	tr.mu.Lock()
+	ss := tr.streams[streamID]
+	ss.lastActivity = time.Now().Add(-60 * time.Second)
+	tr.mu.Unlock()
+
+	// Cleanup with 30s timeout should remove the stale stream
+	cleaned := tr.CleanupStaleStreams(30 * time.Second)
+	if cleaned != 1 {
+		t.Fatalf("expected 1 stale stream cleaned, got %d", cleaned)
+	}
+
+	fwd, _ = tr.StreamCount()
+	if fwd != 0 {
+		t.Fatalf("expected 0 forward streams after cleanup, got %d", fwd)
+	}
+}
+
+func TestCleanupStaleStreams_RemovesOldReverseStreams(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Create a reverse stream by translating an IPSC voice header
+	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	tr.TranslateToMMDVM(0x80, data)
+
+	_, rev := tr.StreamCount()
+	if rev != 1 {
+		t.Fatalf("expected 1 reverse stream, got %d", rev)
+	}
+
+	// Age the reverse stream
+	tr.mu.Lock()
+	for _, rss := range tr.reverseStreams {
+		rss.lastActivity = time.Now().Add(-60 * time.Second)
+	}
+	tr.mu.Unlock()
+
+	cleaned := tr.CleanupStaleStreams(30 * time.Second)
+	if cleaned != 1 {
+		t.Fatalf("expected 1 stale reverse stream cleaned, got %d", cleaned)
+	}
+
+	_, rev = tr.StreamCount()
+	if rev != 0 {
+		t.Fatalf("expected 0 reverse streams after cleanup, got %d", rev)
+	}
+}
+
+func TestCleanupStaleStreams_PreservesActiveStreams(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Create a forward stream
+	pkt := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(pkt)
+
+	fwd, _ := tr.StreamCount()
+	if fwd != 1 {
+		t.Fatalf("expected 1 forward stream, got %d", fwd)
+	}
+
+	// Don't age the stream — it was just created
+	cleaned := tr.CleanupStaleStreams(30 * time.Second)
+	if cleaned != 0 {
+		t.Fatalf("expected 0 stale streams cleaned, got %d", cleaned)
+	}
+
+	fwd, _ = tr.StreamCount()
+	if fwd != 1 {
+		t.Fatalf("expected 1 forward stream still present, got %d", fwd)
+	}
+}
+
+func TestCleanupReverseStream(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Create a reverse stream
+	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	tr.TranslateToMMDVM(0x80, data)
+
+	_, rev := tr.StreamCount()
+	if rev != 1 {
+		t.Fatalf("expected 1 reverse stream, got %d", rev)
+	}
+
+	// The call control value is at bytes 13-16 of the IPSC packet
+	callControl := binary.BigEndian.Uint32(data[13:17])
+	tr.CleanupReverseStream(binary.BigEndian.Uint32(data[1:5]), callControl)
+
+	_, rev = tr.StreamCount()
+	if rev != 0 {
+		t.Fatalf("expected 0 reverse streams after cleanup, got %d", rev)
+	}
+}
+
+func TestStreamCountEmpty(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+	fwd, rev := tr.StreamCount()
+	if fwd != 0 || rev != 0 {
+		t.Fatalf("expected (0, 0) for empty translator, got (%d, %d)", fwd, rev)
+	}
+}
+
+func TestTerminatorCleansUpForwardStream(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Create a stream with a voice header
+	pkt := makeTestMMDVMPacket(true, true, dmrconst.FrameDataSync, 1)
+	tr.TranslateToIPSC(pkt)
+
+	fwd, _ := tr.StreamCount()
+	if fwd != 1 {
+		t.Fatalf("expected 1 forward stream after header, got %d", fwd)
+	}
+
+	// Send a terminator for the same stream
+	termPkt := pkt
+	termPkt.DTypeOrVSeq = uint(enums.DataTypeTerminatorWithLC)
+	tr.TranslateToIPSC(termPkt)
+
+	fwd, _ = tr.StreamCount()
+	if fwd != 0 {
+		t.Fatalf("expected 0 forward streams after terminator, got %d", fwd)
+	}
+}
+
+func BenchmarkTranslateToMMDVMVoiceHeader(b *testing.B) {
+	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tr := NewIPSCTranslator(12345)
+		tr.TranslateToMMDVM(0x80, data)
+	}
+}
+
+func BenchmarkTranslateToMMDVMVoiceBurst(b *testing.B) {
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	burst := make([]byte, 57)
+	copy(burst, header)
+	burst[30] = ipscBurstSlot1
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tr := NewIPSCTranslator(12345)
+		tr.TranslateToMMDVM(0x80, header)
+		tr.TranslateToMMDVM(0x80, burst)
+	}
+}
+
+func BenchmarkTranslateToMMDVMTerminator(b *testing.B) {
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	term := makeTestIPSCPacket(0x80, ipscBurstVoiceTerm, true, false)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tr := NewIPSCTranslator(12345)
+		tr.TranslateToMMDVM(0x80, header)
+		tr.TranslateToMMDVM(0x80, term)
+	}
+}

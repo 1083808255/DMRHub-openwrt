@@ -1,0 +1,625 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <div class="space-y-6">
+    <!-- Loading skeleton -->
+    <div v-if="loading" class="space-y-6">
+      <Card>
+        <CardHeader>
+          <Skeleton class="h-8 w-64" />
+        </CardHeader>
+        <CardContent>
+          <div class="grid gap-4 md:grid-cols-2">
+            <Skeleton v-for="n in 4" :key="n" class="h-16" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Error state -->
+    <Card v-else-if="error">
+      <CardHeader>
+        <CardTitle>{{ $t("Error") }}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p class="text-destructive">{{ error }}</p>
+      </CardContent>
+    </Card>
+
+    <!-- Talkgroup details -->
+    <template v-else-if="talkgroup">
+      <!-- Header card -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <div>
+              <CardTitle>TG {{ talkgroup.id }} — {{ talkgroup.name }}</CardTitle>
+              <CardDescription v-if="talkgroup.description">{{ talkgroup.description }}</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <!-- Info grid -->
+      <div class="grid gap-6 md:grid-cols-2">
+        <!-- Talkgroup Information -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("Talkgroup Information") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="detail-list">
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Channel") }}</dt>
+                <dd class="detail-value">{{ talkgroup.id }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Name") }}</dt>
+                <dd class="detail-value">{{ talkgroup.name }}</dd>
+              </div>
+              <div v-if="talkgroup.description" class="detail-row">
+                <dt class="detail-label">{{ $t("Description") }}</dt>
+                <dd class="detail-value">{{ talkgroup.description }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Created") }}</dt>
+                <dd class="detail-value">
+                  <RelativeTimestamp :time="talkgroup.created_at" />
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <!-- Admins & NCOs -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("Management") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="space-y-4">
+              <div>
+                <h4 class="text-sm font-semibold mb-2">{{ $t("Admins") }}</h4>
+                <div v-if="talkgroup.admins && talkgroup.admins.length > 0" class="flex flex-wrap gap-2">
+                  <User v-for="admin in talkgroup.admins" :key="admin.id" :user="admin" />
+                </div>
+                <p v-else class="text-sm text-muted-foreground">{{ $t("None") }}</p>
+              </div>
+              <Separator />
+              <div>
+                <h4 class="text-sm font-semibold mb-2">{{ $t("Net Control Operators") }}</h4>
+                <div v-if="talkgroup.ncos && talkgroup.ncos.length > 0" class="flex flex-wrap gap-2">
+                  <User v-for="nco in talkgroup.ncos" :key="nco.id" :user="nco" />
+                </div>
+                <p v-else class="text-sm text-muted-foreground">{{ $t("None") }}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <TalkgroupAccessCard v-if="canManage" :talkgroup-id="talkgroup.id" />
+      <TalkgroupListenCard v-if="canManage" :talkgroup-id="talkgroup.id" :no-listen="talkgroup.no_listen" />
+
+      <!-- Net Control -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <CardTitle>{{ $t("Net Control") }}</CardTitle>
+            <div class="flex gap-2">
+              <RouterLink v-if="canRunNets && !activeNet" :to="`/nets/scheduled/new?talkgroup_id=${talkgroupID}`">
+                <ShadButton variant="outline" size="sm">{{ $t("Schedule Net") }}</ShadButton>
+              </RouterLink>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <!-- Active Net -->
+          <div v-if="activeNet" class="space-y-3">
+            <div class="flex items-center gap-2">
+              <span class="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <span class="text-sm font-semibold text-green-600">{{ $t("Active Net") }}</span>
+            </div>
+            <p v-if="activeNet.description" class="text-sm text-muted-foreground">{{ activeNet.description }}</p>
+            <div class="flex items-center gap-4 text-sm">
+              <span>{{ $t("Started by") }} {{ activeNet.started_by_user.callsign }}</span>
+              <span>{{ activeNet.check_in_count + recentCheckIns.length }} check-ins</span>
+            </div>
+
+            <!-- Recent check-ins panel -->
+            <div v-if="recentCheckIns.length > 0" class="mt-2 rounded-md border p-3 space-y-1">
+              <h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{{ $t("Recent Check-Ins") }}</h4>
+              <div
+                v-for="ci in recentCheckIns.slice(0, 5)"
+                :key="ci.call_id"
+                class="flex items-center justify-between text-sm"
+              >
+                <User :user="ci.user" />
+                <span class="text-xs text-muted-foreground">
+                  {{ formatDuration(ci.duration) }}
+                </span>
+              </div>
+              <div v-if="recentCheckIns.length > 5" class="text-xs text-muted-foreground pt-1">
+                and {{ recentCheckIns.length - 5 }} more...
+              </div>
+            </div>
+
+            <div class="flex gap-2">
+              <RouterLink :to="`/nets/${activeNet.id}`">
+                <ShadButton variant="outline" size="sm">{{ $t("View Check-Ins") }}</ShadButton>
+              </RouterLink>
+              <ShadButton v-if="canRunNets" variant="destructive" size="sm" @click="handleStopNet">{{ $t("Stop Net") }}</ShadButton>
+            </div>
+          </div>
+
+          <!-- No active net -->
+          <div v-else class="space-y-3">
+            <p class="text-sm text-muted-foreground">{{ $t("No active net on this talkgroup.") }}</p>
+            <div v-if="canRunNets" class="flex gap-2">
+              <ShadButton variant="outline" size="sm" @click="showStartNet = !showStartNet">
+                {{ showStartNet ? 'Cancel' : 'Start Net' }}
+              </ShadButton>
+            </div>
+            <!-- Inline start form -->
+            <div v-if="canRunNets && showStartNet" class="space-y-2 pt-2">
+              <ShadInput
+                type="text"
+                v-model="netDescription"
+                :placeholder="$t('Net description (optional)')"
+              />
+              <ShadInput
+                type="number"
+                v-model="netDuration"
+                :placeholder="$t('Duration in minutes (optional)')"
+                min="1"
+                max="1440"
+              />
+              <ShadButton variant="outline" size="sm" @click="handleStartNet">{{ $t("Start") }}</ShadButton>
+            </div>
+          </div>
+
+          <!-- Scheduled Nets -->
+          <div v-if="scheduledNets.length > 0" class="mt-4 pt-4 border-t">
+            <h4 class="text-sm font-semibold mb-2">{{ $t("Scheduled Nets") }}</h4>
+            <ul class="space-y-1">
+              <li v-for="sn in scheduledNets" :key="sn.id" class="text-sm flex items-center justify-between">
+                <span>
+                  <strong>{{ sn.name }}</strong> —
+                  {{ netSchedule(sn.day_of_week, sn.time_of_day, sn.timezone) }}
+                  <span v-if="sn.duration_minutes">({{ sn.duration_minutes }}m)</span>
+                  <span v-if="!sn.enabled" class="text-muted-foreground"> (disabled)</span>
+                </span>
+                <span v-if="canRunNets">
+                  <RouterLink :to="`/nets/scheduled/${sn.id}/edit`">
+                    <ShadButton variant="ghost" size="sm">{{ $t("Edit") }}</ShadButton>
+                  </RouterLink>
+                  <ShadButton variant="destructive" size="sm" @click="handleDeleteScheduledNet(sn)">{{ $t("Delete") }}</ShadButton>
+                </span>
+              </li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- Last Heard -->
+      <Card>
+        <CardHeader>
+          <CardTitle>{{ $t("Last Heard") }}</CardTitle>
+          <CardDescription>{{ $t("Recent calls on this talkgroup") }}</CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-4">
+          <TypeFilter v-model="filter" />
+          <DataTable
+            :columns="columns"
+            :data="lastheard"
+            :loading="lastheardLoading"
+            :loading-text="'Loading...'"
+            :empty-text="'No transmissions match these types'"
+            :manual-pagination="true"
+            :page-index="page - 1"
+            :page-size="rows"
+            :page-count="totalPages"
+            @update:page-index="handlePageIndexUpdate"
+            @update:page-size="handlePageSizeUpdate"
+          />
+        </CardContent>
+      </Card>
+    </template>
+  </div>
+</template>
+
+<script lang="ts">
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { DataTable } from '@/components/ui/data-table';
+import TypeFilter from '@/components/TypeFilter.vue';
+import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
+import TalkgroupAccessCard from '@/components/TalkgroupAccessCard.vue';
+import TalkgroupListenCard from '@/components/TalkgroupListenCard.vue';
+import User from '@/components/User.vue';
+import { lastHeardColumns } from '@/lib/lastHeardColumns';
+import {
+  cleanCalls,
+  defaultFilter,
+  filterQuery,
+  matchesFilter,
+  type CallRow,
+  type TypeFilterValue,
+} from '@/lib/transmissions';
+import { Button as ShadButton } from '@/components/ui/button';
+import { Input as ShadInput } from '@/components/ui/input';
+
+import API from '@/services/API';
+import {
+  getNets,
+  startNet,
+  stopNet as stopNetAPI,
+  getScheduledNets,
+  deleteScheduledNet,
+  type Net,
+  type ScheduledNet,
+} from '@/services/net';
+import { getWebsocketURI } from '@/services/util';
+import { netSchedule } from '@/lib/timeConversion';
+import ws from '@/services/ws';
+import { useUserStore } from '@/store';
+
+type UserRef = {
+  id: number;
+  callsign: string;
+};
+
+type TalkgroupData = {
+  id: number;
+  name: string;
+  description: string;
+  admins: UserRef[];
+  ncos: UserRef[];
+  no_listen: boolean;
+  created_at: string;
+};
+
+export default {
+  components: {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+    Separator,
+    Skeleton,
+    DataTable,
+    TypeFilter,
+    ShadButton,
+    ShadInput,
+    RelativeTimestamp,
+    TalkgroupAccessCard,
+    TalkgroupListenCard,
+    User,
+  },
+  head: {
+    title: 'Talkgroup Details',
+  },
+  created() {},
+  mounted() {
+    const id = this.$route.params.id;
+    if (id) {
+      this.talkgroupID = Number(id);
+      this.fetchTalkgroup();
+      this.fetchLastheard();
+      this.fetchActiveNet();
+      this.fetchScheduledNets();
+      this.connectSocket();
+      this.netSocket = ws.connect(getWebsocketURI() + '/nets', this.onNetWebsocketMessage);
+      this.timeInterval = setInterval(() => { this.now = Date.now(); }, 30000);
+    }
+  },
+  unmounted() {
+    if (this.timeInterval !== null) {
+      clearInterval(this.timeInterval);
+    }
+    if (this.socket) {
+      this.socket.close();
+    }
+    if (this.netSocket) {
+      this.netSocket.close();
+    }
+  },
+  data: function() {
+    return {
+      talkgroupID: 0,
+      talkgroup: null as TalkgroupData | null,
+      loading: true,
+      error: '',
+      lastheard: [] as CallRow[],
+      lastheardLoading: false,
+      filter: defaultFilter() as TypeFilterValue,
+      totalRecords: 0,
+      page: 1,
+      rows: 30,
+      socket: null as { close(): void } | null,
+      netSocket: null as { close(): void } | null,
+      now: Date.now(),
+      timeInterval: null as ReturnType<typeof setInterval> | null,
+      activeNet: null as Net | null,
+      recentCheckIns: [] as { call_id: number; user: { id: number; callsign: string }; start_time: string; duration: number }[],
+      scheduledNets: [] as ScheduledNet[],
+      showStartNet: false,
+      netDescription: '',
+      netDuration: '' as string | number,
+    };
+  },
+  watch: {
+    loggedIn() {
+      if (this.talkgroupID) {
+        this.connectSocket();
+      }
+    },
+    filter: {
+      deep: true,
+      handler() {
+        this.page = 1;
+        this.fetchLastheard(this.page, this.rows);
+      },
+    },
+  },
+  computed: {
+    loggedIn(): boolean {
+      return useUserStore().loggedIn;
+    },
+    canRunNets(): boolean {
+      const user = useUserStore();
+      if (!user.loggedIn) return false;
+      if (user.admin) return true;
+      const tg = this.talkgroup;
+      return !!tg && [...(tg.admins ?? []), ...(tg.ncos ?? [])].some((u) => u.id === user.id);
+    },
+    canManage(): boolean {
+      const user = useUserStore();
+      if (!user.loggedIn) return false;
+      if (user.admin) return true;
+      return !!this.talkgroup && (this.talkgroup.admins ?? []).some((u) => u.id === user.id);
+    },
+    columns() {
+      void this.now;
+      return lastHeardColumns({ destination: false });
+    },
+    totalPages(): number {
+      if (!this.totalRecords || this.totalRecords <= 0) {
+        return 1;
+      }
+      return Math.max(1, Math.ceil(this.totalRecords / this.rows));
+    },
+  },
+  methods: {
+    netSchedule,
+    fetchTalkgroup() {
+      this.loading = true;
+      API.get(`/talkgroups/${this.talkgroupID}`)
+        .then((res) => {
+          this.talkgroup = res.data;
+          this.loading = false;
+        })
+        .catch((err) => {
+          console.error(err);
+          this.error = 'Failed to load talkgroup details.';
+          this.loading = false;
+        });
+    },
+    fetchLastheard(page = 1, limit = 30) {
+      if (this.filter.types.length === 0) {
+        this.lastheard = [];
+        this.totalRecords = 0;
+        return;
+      }
+      this.lastheardLoading = true;
+      API.get(`/lastheard/talkgroup/${this.talkgroupID}?page=${page}&limit=${limit}&${filterQuery(this.filter)}`)
+        .then((res) => {
+          this.totalRecords = res.data.total;
+          this.lastheard = cleanCalls(res.data.calls);
+          this.lastheardLoading = false;
+        })
+        .catch((err) => {
+          console.error(err);
+          this.lastheardLoading = false;
+        });
+    },
+    handlePageIndexUpdate(pageIndex: number) {
+      const nextPage = pageIndex + 1;
+      if (nextPage === this.page || nextPage < 1) {
+        return;
+      }
+      this.page = nextPage;
+      this.fetchLastheard(this.page, this.rows);
+    },
+    handlePageSizeUpdate(pageSize: number) {
+      if (pageSize === this.rows || pageSize <= 0) {
+        return;
+      }
+      this.rows = pageSize;
+      this.page = 1;
+      this.fetchLastheard(this.page, this.rows);
+    },
+    connectSocket() {
+      if (this.socket) {
+        this.socket.close();
+      }
+      const path = this.loggedIn ? '/calls' : '/lastheard';
+      this.socket = ws.connect(getWebsocketURI() + path, this.onWebsocketMessage);
+    },
+    onWebsocketMessage(event: MessageEvent) {
+      const call = JSON.parse(event.data);
+      if (!matchesFilter(call, this.filter) && !this.lastheard.some((c) => c.id === call.id)) {
+        return;
+      }
+      // Only process calls to this talkgroup
+      if (!call.is_to_talkgroup || call.to_talkgroup?.id !== this.talkgroupID) {
+        return;
+      }
+      let found = false;
+      const copyLastheard = JSON.parse(JSON.stringify(this.lastheard));
+      for (let i = 0; i < copyLastheard.length; i++) {
+        if (copyLastheard[i].id == call.id) {
+          found = true;
+          copyLastheard[i] = call;
+          break;
+        }
+      }
+      if (!found && copyLastheard.length === this.rows) {
+        copyLastheard.pop();
+      }
+      if (!found && copyLastheard.length < this.rows) {
+        copyLastheard.unshift(call);
+      }
+      this.lastheard = cleanCalls(copyLastheard);
+    },
+    onNetWebsocketMessage(event: MessageEvent) {
+      const data = JSON.parse(event.data);
+
+      // Check-in event (from net:checkins:{id} topic)
+      if (data.call_id && data.user) {
+        const exists = this.recentCheckIns.some((ci: { call_id: number }) => ci.call_id === data.call_id);
+        if (!exists) {
+          this.recentCheckIns = [data, ...this.recentCheckIns];
+        }
+        return;
+      }
+
+      // Net lifecycle event
+      if (data.talkgroup_id === this.talkgroupID) {
+        this.fetchActiveNet();
+        if (data.event === 'stopped') {
+          this.recentCheckIns = [];
+        }
+      }
+    },
+    fetchActiveNet() {
+      getNets({ talkgroup_id: this.talkgroupID, active: true, limit: 1 })
+        .then((res) => {
+          const nets = res.data.nets || [];
+          const previousNetID = this.activeNet?.id;
+          this.activeNet = (nets.length > 0 ? nets[0] : null) ?? null;
+
+          // If we have an active net and its ID changed (or first load),
+          // reconnect the net websocket with the net_id for live check-ins.
+          if (this.activeNet && this.activeNet.id !== previousNetID) {
+            this.recentCheckIns = [];
+            if (this.netSocket) {
+              this.netSocket.close();
+            }
+            this.netSocket = ws.connect(
+              getWebsocketURI() + '/nets?net_id=' + this.activeNet.id,
+              this.onNetWebsocketMessage,
+            );
+          } else if (!this.activeNet && previousNetID) {
+            // Net ended — reconnect without net_id.
+            this.recentCheckIns = [];
+            if (this.netSocket) {
+              this.netSocket.close();
+            }
+            this.netSocket = ws.connect(getWebsocketURI() + '/nets', this.onNetWebsocketMessage);
+          }
+        })
+        .catch((err) => console.error(err));
+    },
+    fetchScheduledNets() {
+      getScheduledNets({ talkgroup_id: this.talkgroupID })
+        .then((res) => {
+          this.scheduledNets = res.data.scheduled_nets || [];
+        })
+        .catch((err) => console.error(err));
+    },
+    handleStartNet() {
+      const dur = this.netDuration !== '' ? Number(this.netDuration) : undefined;
+      startNet({
+        talkgroup_id: this.talkgroupID,
+        description: this.netDescription.trim() || undefined,
+        duration_minutes: dur,
+      })
+        .then((res) => {
+          this.activeNet = res.data;
+          this.showStartNet = false;
+          this.netDescription = '';
+          this.netDuration = '';
+          this.recentCheckIns = [];
+          // Reconnect WS with the new net_id.
+          if (this.netSocket) {
+            this.netSocket.close();
+          }
+          this.netSocket = ws.connect(
+            getWebsocketURI() + '/nets?net_id=' + res.data.id,
+            this.onNetWebsocketMessage,
+          );
+        })
+        .catch((err) => console.error(err));
+    },
+    handleStopNet() {
+      if (!this.activeNet) return;
+      stopNetAPI(this.activeNet.id)
+        .then(() => {
+          this.activeNet = null;
+          this.recentCheckIns = [];
+        })
+        .catch((err) => console.error(err));
+    },
+    handleDeleteScheduledNet(sn: ScheduledNet) {
+      if (!window.confirm(`Delete scheduled net "${sn.name}"?`)) return;
+      deleteScheduledNet(sn.id)
+        .then(() => {
+          this.scheduledNets = this.scheduledNets.filter((s) => s.id !== sn.id);
+        })
+        .catch((err) => console.error(err));
+    },
+    formatDuration(ns: number): string {
+      return (ns / 1000000000).toFixed(1) + 's';
+    },
+  },
+};
+</script>
+
+<style scoped>
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.detail-label {
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: right;
+}
+</style>

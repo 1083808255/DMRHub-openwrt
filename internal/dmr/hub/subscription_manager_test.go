@@ -1,0 +1,1239 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package hub_test
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/hub"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils/bubble"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+// TestActivateRepeaterWithDynamicTG verifies that starting the hub with a
+// repeater that has a dynamic talkgroup correctly subscribes to that TG.
+func TestActivateRepeaterWithDynamicTG(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source — no TGs
+		seedRepeater(t, database, 100002, 1000001)
+		seedTalkgroup(t, database, 7, "TG7")
+
+		// Set a dynamic talkgroup on the destination repeater before Start
+		tgID := uint(7)
+		require.NoError(t, database.Model(&models.Repeater{
+			RepeaterConfiguration: models.RepeaterConfiguration{ID: 100002},
+		}).Updates(map[string]interface{}{
+			"TS1DynamicTalkgroupID": tgID,
+		}).Error)
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		pkt := makeVoicePacket(7, 70001, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(7), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for dynamic TG delivery")
+		}
+	})
+}
+
+// TestActivateRepeaterReceivesAtOnce verifies that a repeater receives
+// traffic routed right after ActivateRepeater returns, however long the
+// pubsub subscription takes to set up.
+func TestActivateRepeaterReceivesAtOnce(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database, _ := makeTestHubWrapping(t, func(ps pubsub.PubSub) pubsub.PubSub {
+			return slowSubscribe{PubSub: ps, delay: 300 * time.Millisecond}
+		})
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100002, 1000001)
+		seedTalkgroup(t, database, 60, "TG60")
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 60}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		knowTalkgroups(t, h)
+		h.ActivateRepeater(context.Background(), 100002)
+		h.RoutePacket(context.Background(), makeVoicePacket(60, 60001, true, false), models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+		case <-time.After(failAfter):
+			t.Fatal("a burst routed right after ActivateRepeater was lost")
+		}
+	})
+}
+
+type slowSubscribe struct {
+	pubsub.PubSub
+	delay time.Duration
+}
+
+func (s slowSubscribe) Subscribe(topic string) pubsub.Subscription {
+	time.Sleep(s.delay)
+	return s.PubSub.Subscribe(topic)
+}
+
+func (s slowSubscribe) Feed() pubsub.Feed {
+	return slowFeed{Feed: s.PubSub.Feed(), delay: s.delay}
+}
+
+type slowFeed struct {
+	pubsub.Feed
+	delay time.Duration
+}
+
+func (f slowFeed) Add(topic string) {
+	time.Sleep(f.delay)
+	f.Feed.Add(topic)
+}
+
+// TestActivateRepeaterBothTimeslotStaticTGs verifies that subscriptions are set
+// up for static talkgroups assigned to both TS1 and TS2.
+func TestActivateRepeaterBothTimeslotStaticTGs(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001)
+		seedTalkgroup(t, database, 20, "TG20")
+		seedTalkgroup(t, database, 21, "TG21")
+
+		// Assign TG20 to TS1 and TG21 to TS2 on repeater 100002
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 20}))
+		require.NoError(t, database.Model(&rpt).Association("TS2StaticTalkgroups").Append(&models.Talkgroup{ID: 21}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Send group call on TS1 TG20
+		pkt := makeVoicePacket(20, 70002, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(20), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for TS1 static TG delivery")
+		}
+
+		// Send group call on TS2 TG21
+		pkt2 := makeVoicePacket(21, 70003, true, true)
+		h.RoutePacket(context.Background(), pkt2, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(21), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for TS2 static TG delivery")
+		}
+	})
+}
+
+// TestDynamicTGOnBothTimeslots verifies that dynamic talkgroups on both TS1 and
+// TS2 are subscribed to simultaneously during activation.
+func TestDynamicTGOnBothTimeslots(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001)
+		seedTalkgroup(t, database, 25, "TG25")
+		seedTalkgroup(t, database, 26, "TG26")
+
+		// Set dynamic talkgroups on both timeslots
+		ts1TGID := uint(25)
+		ts2TGID := uint(26)
+		require.NoError(t, database.Model(&models.Repeater{
+			RepeaterConfiguration: models.RepeaterConfiguration{ID: 100002},
+		}).Updates(map[string]interface{}{
+			"TS1DynamicTalkgroupID": ts1TGID,
+			"TS2DynamicTalkgroupID": ts2TGID,
+		}).Error)
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Verify TS1 dynamic TG
+		pkt := makeVoicePacket(25, 70010, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(25), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for TS1 dynamic TG delivery")
+		}
+
+		// Verify TS2 dynamic TG
+		pkt2 := makeVoicePacket(26, 70011, true, true)
+		h.RoutePacket(context.Background(), pkt2, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(26), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for TS2 dynamic TG delivery")
+		}
+	})
+}
+
+// TestSubscribeTGIgnoresEchoFromSameRepeater verifies that subscribeTG filters
+// out packets that originate from the subscribed repeater itself.
+func TestSubscribeTGIgnoresEchoFromSameRepeater(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedTalkgroup(t, database, 30, "TG30")
+
+		// Repeater 100001 subscribes to TG30 via static assignment
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100001).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 30}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		knowTalkgroups(t, h)
+
+		// Repeater 100001 sends to TG30 — it should NOT receive its own packet back
+		pkt := makeVoicePacket(30, 70004, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		assert.Empty(t, flush(t, h, srvHandle, pkt, 100001), "subscribeTG should not echo packets back to the originating repeater")
+	})
+}
+
+// TestSimplexRepeaterCrossTimeslotEcho verifies that a simplex repeater
+// receives its own talkgroup traffic back on the opposite timeslot.
+func TestSimplexRepeaterCrossTimeslotEcho(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedTalkgroup(t, database, 31, "TG31")
+
+		// Enable simplex mode and assign TG31 to TS1
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100001).Error)
+		require.NoError(t, database.Model(&rpt).Update("simplex_repeater", true).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 31}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		knowTalkgroups(t, h)
+
+		// Repeater 100001 sends on TS1 (slot=false) to TG31 — simplex should echo back on TS2 (slot=true)
+		pkt := makeVoicePacket(31, 70020, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100001), rp.RepeaterID)
+			assert.Equal(t, uint(31), rp.Packet.Dst)
+			assert.True(t, rp.Packet.Slot, "Simplex echo should deliver on opposite timeslot (TS2)")
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for simplex cross-timeslot echo")
+		}
+	})
+}
+
+// TestSimplexRepeaterTS2ToTS1 verifies that a simplex repeater echoes
+// traffic sent on TS2 back on TS1.
+func TestSimplexRepeaterTS2ToTS1(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedTalkgroup(t, database, 32, "TG32")
+
+		// Enable simplex mode and assign TG32 to TS2
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100001).Error)
+		require.NoError(t, database.Model(&rpt).Update("simplex_repeater", true).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS2StaticTalkgroups").Append(&models.Talkgroup{ID: 32}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		knowTalkgroups(t, h)
+
+		// Repeater 100001 sends on TS2 (slot=true) to TG32 — simplex should echo back on TS1 (slot=false)
+		pkt := makeVoicePacket(32, 70021, true, true)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100001), rp.RepeaterID)
+			assert.Equal(t, uint(32), rp.Packet.Dst)
+			assert.False(t, rp.Packet.Slot, "Simplex echo should deliver on opposite timeslot (TS1)")
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for simplex TS2→TS1 echo")
+		}
+	})
+}
+
+// TestNonSimplexRepeaterDoesNotEcho verifies that a repeater without
+// simplex mode enabled does NOT echo its own packets.
+func TestNonSimplexRepeaterDoesNotEcho(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedTalkgroup(t, database, 33, "TG33")
+
+		// SimplexRepeater is false (default), assign TG33 to TS1
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100001).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 33}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		knowTalkgroups(t, h)
+
+		pkt := makeVoicePacket(33, 70022, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		assert.Empty(t, flush(t, h, srvHandle, pkt, 100001), "Non-simplex repeater should not echo packets back to itself")
+	})
+}
+
+// TestReloadRepeaterPicksUpNewStaticTG verifies that reloading a repeater after
+// adding a new static talkgroup subscribes to the new TG.
+func TestReloadRepeaterPicksUpNewStaticTG(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001) // destination — initially no TGs
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Create TG40 and assign it to repeater 100002 after Start
+		seedTalkgroup(t, database, 40, "TG40")
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 40}))
+
+		// Reload so the subscription manager picks up the new static TG
+		h.ReloadRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		pkt := makeVoicePacket(40, 70005, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(40), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for delivery after reload with new static TG")
+		}
+	})
+}
+
+// TestReloadNonexistentRepeater verifies that reloading a repeater that does not
+// exist in the database does not panic.
+func TestReloadNonexistentRepeater(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, _ := makeTestHub(t)
+
+		assert.NotPanics(t, func() {
+			h.ReloadRepeater(context.Background(), 999999)
+		})
+	})
+}
+
+// TestActivateRepeaterIdempotent verifies that calling ActivateRepeater
+// multiple times does not create duplicate subscriptions — only one packet
+// should be delivered per publish.
+func TestActivateRepeaterIdempotent(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001)
+		seedTalkgroup(t, database, 60, "TG60")
+
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 60}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		// ActivateRepeater twice — should not panic or duplicate subscriptions
+		assert.NotPanics(t, func() {
+			h.ActivateRepeater(context.Background(), 100001)
+			h.ActivateRepeater(context.Background(), 100002)
+			h.ActivateRepeater(context.Background(), 100001)
+			h.ActivateRepeater(context.Background(), 100002)
+		})
+		knowTalkgroups(t, h)
+
+		// Verify only ONE packet is delivered (no duplicate subscription)
+		pkt := makeVoicePacket(60, 70008, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for delivery")
+		}
+
+		// No second packet should arrive
+		assert.Empty(t, flush(t, h, srvHandle, pkt, 100002), "Duplicate subscription detected — received extra packet")
+	})
+}
+
+// TestDeactivateRepeaterStopsDelivery verifies that deactivating a repeater
+// cancels its subscriptions so packets are no longer delivered.
+func TestDeactivateRepeaterStopsDelivery(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001) // destination
+		seedTalkgroup(t, database, 70, "TG70")
+
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 70}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Verify delivery works before deactivation
+		pkt := makeVoicePacket(70, 70050, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for delivery before deactivation")
+		}
+
+		// Deactivate the destination repeater
+		h.DeactivateRepeater(context.Background(), 100002)
+
+		// Packets should no longer be delivered
+		pkt2 := makeVoicePacket(70, 70051, true, false)
+		h.RoutePacket(context.Background(), pkt2, models.RepeaterTypeMMDVM)
+
+		assert.Empty(t, flush(t, h, srvHandle, pkt2, 100001), "Deactivated repeater should not receive packets")
+	})
+}
+
+// TestDeleteTalkgroupAndReloadClearsSubscription verifies that after deleting
+// a talkgroup and reloading affected repeaters, those repeaters no longer
+// receive packets for the deleted talkgroup.
+func TestDeleteTalkgroupAndReloadClearsSubscription(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001) // destination
+		seedTalkgroup(t, database, 80, "TG80")
+
+		// Assign TG80 as a static talkgroup on repeater 100002
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 80}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Verify delivery works before deletion
+		pkt := makeVoicePacket(80, 70060, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(80), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for delivery before talkgroup deletion")
+		}
+
+		// Delete the talkgroup — this returns affected repeater IDs
+		affectedIDs, err := models.DeleteTalkgroup(database, 80)
+		require.NoError(t, err)
+		assert.Contains(t, affectedIDs, uint(100002), "repeater 100002 should be in the affected list")
+
+		// Reload affected repeaters (simulating what the API handler does)
+		for _, rid := range affectedIDs {
+			h.ReloadRepeater(context.Background(), rid)
+		}
+		knowTalkgroups(t, h)
+
+		// Packets to the deleted talkgroup should no longer be delivered
+		pkt2 := makeVoicePacket(80, 70061, true, false)
+		h.RoutePacket(context.Background(), pkt2, models.RepeaterTypeMMDVM)
+
+		assert.Empty(t, flush(t, h, srvHandle, pkt2, 100002), "Repeater should not receive packets for a deleted talkgroup")
+	})
+}
+
+// TestDeleteTalkgroupWithDynamicTGReturnsAffectedRepeaters verifies that
+// deleting a talkgroup that is dynamically linked returns the affected repeater ID.
+func TestDeleteTalkgroupWithDynamicTGReturnsAffectedRepeaters(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001) // destination
+		seedTalkgroup(t, database, 90, "TG90")
+
+		// Dynamically link TG90 to TS2 on repeater 100002
+		tgID := uint(90)
+		require.NoError(t, database.Model(&models.Repeater{
+			RepeaterConfiguration: models.RepeaterConfiguration{ID: 100002},
+		}).Updates(map[string]interface{}{
+			"TS2DynamicTalkgroupID": tgID,
+		}).Error)
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Verify delivery works
+		pkt := makeVoicePacket(90, 70070, true, true)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for dynamic TG delivery")
+		}
+
+		// Delete the talkgroup
+		affectedIDs, err := models.DeleteTalkgroup(database, 90)
+		require.NoError(t, err)
+		assert.Contains(t, affectedIDs, uint(100002))
+
+		// Reload and verify no more delivery
+		for _, rid := range affectedIDs {
+			h.ReloadRepeater(context.Background(), rid)
+		}
+		knowTalkgroups(t, h)
+
+		pkt2 := makeVoicePacket(90, 70071, true, true)
+		h.RoutePacket(context.Background(), pkt2, models.RepeaterTypeMMDVM)
+
+		assert.Empty(t, flush(t, h, srvHandle, pkt2, 100002), "Repeater should not receive packets for deleted dynamic talkgroup")
+	})
+}
+
+// TestReloadRepeaterNoOpForNonConnected verifies that calling ReloadRepeater
+// for a repeater that was never activated (i.e. not connected) does NOT create
+// any subscriptions. This prevents leaking goroutines when admins edit talkgroup
+// assignments for offline repeaters via the API.
+func TestReloadRepeaterNoOpForNonConnected(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source (will be activated)
+		seedRepeater(t, database, 100002, 1000001) // target (will NOT be activated)
+		seedTalkgroup(t, database, 95, "TG95")
+
+		// Assign TG95 as a static talkgroup on the non-connected repeater
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 95}))
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		// Only activate the source — leave 100002 disconnected
+		h.ActivateRepeater(context.Background(), 100001)
+		knowTalkgroups(t, h)
+
+		// Reload the non-connected repeater (simulates admin API call)
+		h.ReloadRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Send a packet on TG95 — should NOT be delivered to non-connected 100002
+		pkt := makeVoicePacket(95, 70080, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		assert.Empty(t, flush(t, h, srvHandle, pkt, 100001), "Non-connected repeater should not receive packets")
+	})
+}
+
+// TestSubscribeTGWantRXFalseCleansUpSubscription verifies that when subscribeTG
+// receives a packet the repeater no longer wants (WantRX returns false), the
+// subscription map entry and context are properly cleaned up. This is a
+// regression test: previously the context was leaked and the stale map entry
+// prevented re-subscription when the talkgroup was reassigned.
+func TestSubscribeTGWantRXFalseCleansUpSubscription(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001) // source
+		seedRepeater(t, database, 100002, 1000001) // destination
+		seedTalkgroup(t, database, 50, "TG50")
+
+		// Set TG50 as dynamic talkgroup on TS1 for repeater 100002
+		tgID := uint(50)
+		require.NoError(t, database.Model(&models.Repeater{
+			RepeaterConfiguration: models.RepeaterConfiguration{ID: 100002},
+		}).Updates(map[string]interface{}{
+			"TS1DynamicTalkgroupID": tgID,
+		}).Error)
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Verify delivery works initially
+		pkt := makeVoicePacket(50, 80001, true, false)
+		h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(50), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for initial TG50 delivery")
+		}
+
+		// Remove the dynamic talkgroup from the DB so WantRX will return false
+		require.NoError(t, database.Model(&models.Repeater{
+			RepeaterConfiguration: models.RepeaterConfiguration{ID: 100002},
+		}).Updates(map[string]interface{}{
+			"TS1DynamicTalkgroupID": nil,
+		}).Error)
+
+		// Send another packet — subscribeTG will call WantRX, get false, and exit.
+		// Before the fix this leaked the context and left a stale map entry.
+		pkt2 := makeVoicePacket(50, 80002, true, false)
+		h.RoutePacket(context.Background(), pkt2, models.RepeaterTypeMMDVM)
+
+		// Drain any delivery (shouldn't arrive, but don't let it block)
+		flush(t, h, srvHandle, pkt2, 100002)
+
+		// Re-assign the dynamic talkgroup
+		require.NoError(t, database.Model(&models.Repeater{
+			RepeaterConfiguration: models.RepeaterConfiguration{ID: 100002},
+		}).Updates(map[string]interface{}{
+			"TS1DynamicTalkgroupID": tgID,
+		}).Error)
+
+		// Re-activate the repeater. If the stale map entry was not cleaned up,
+		// activateRepeaterLocked will see it and skip creating a new subscription,
+		// meaning this packet will never be delivered.
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		pkt3 := makeVoicePacket(50, 80003, true, false)
+		h.RoutePacket(context.Background(), pkt3, models.RepeaterTypeMMDVM)
+
+		select {
+		case rp := <-srvHandle.Packets:
+			assert.Equal(t, uint(100002), rp.RepeaterID)
+			assert.Equal(t, uint(50), rp.Packet.Dst)
+		case <-time.After(failAfter):
+			t.Fatal("Timed out waiting for TG50 delivery after re-subscription — stale map entry was not cleaned up")
+		}
+	})
+}
+
+// TestStopAllRepeatersDeactivatesEveryRepeater verifies that once Stop
+// returns no repeater receives anything, even a burst that each subscription
+// was already handling when Stop began.
+func TestStopAllRepeatersDeactivatesEveryRepeater(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedTalkgroup(t, database, 200, "TG200")
+
+		const firstID, numRepeaters = uint(200001), 20
+		for id := firstID; id < firstID+numRepeaters; id++ {
+			seedRepeater(t, database, id, 1000001)
+			var rpt models.Repeater
+			require.NoError(t, database.First(&rpt, id).Error)
+			require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 200}))
+		}
+
+		gate := gateRepeaterLookups(t, database, firstID, firstID+numRepeaters-1)
+
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		for id := firstID; id < firstID+numRepeaters; id++ {
+			h.ActivateRepeater(context.Background(), id)
+		}
+		knowTalkgroups(t, h)
+		waitAllReceive(t, h, srvHandle, 200, numRepeaters, 90000)
+
+		for id := firstID; id < firstID+numRepeaters; id++ {
+			h.ForgetCachedRepeater(id)
+		}
+		gate.armed.Store(true)
+		h.RoutePacket(context.Background(), makeVoicePacket(200, 90100, true, false), models.RepeaterTypeMMDVM)
+		gate.waitHeld(t, numRepeaters)
+		for len(srvHandle.Packets) > 0 {
+			<-srvHandle.Packets
+		}
+
+		h.Stop(context.Background())
+		t.Logf("Stop returned with %d subscriptions holding a burst in their repeater lookup", numRepeaters)
+		gate.release()
+
+		select {
+		case rp := <-srvHandle.Packets:
+			t.Fatalf("repeater %d received stream %d after Stop returned", rp.RepeaterID, rp.Packet.StreamID)
+		case <-time.After(time.Second):
+		}
+	})
+}
+
+// waitAllReceive routes a burst to tg and waits until each of want
+// repeaters has received it.
+func waitAllReceive(t *testing.T, h *hub.Hub, srv *hub.ServerHandle, tg uint, want int, stream uint) {
+	t.Helper()
+	h.RoutePacket(context.Background(), makeVoicePacket(tg, stream, true, false), models.RepeaterTypeMMDVM)
+	seen := map[uint]bool{}
+	for len(seen) < want {
+		seen[bubble.Receive(t, srv.Packets, failAfter, "only %d of %d repeaters received the burst", len(seen), want).RepeaterID] = true
+	}
+}
+
+type lookupGate struct {
+	armed   atomic.Bool
+	held    chan uint
+	passed  chan uint
+	open    chan struct{}
+	release func()
+}
+
+// gateRepeaterLookups holds every query for a repeater with an ID in
+// [lo, hi], once armed, until release is called or the context of the
+// query ends, which then fails as a driver aborts it, and reports each
+// held ID on held and, once it ends, on passed. It must be set up before
+// the database is used concurrently, because gorm callbacks cannot be
+// registered while queries run.
+func gateRepeaterLookups(t *testing.T, database *gorm.DB, lo, hi uint) *lookupGate {
+	t.Helper()
+	g := &lookupGate{held: make(chan uint, 1000), passed: make(chan uint, 1000), open: make(chan struct{})}
+	var once sync.Once
+	g.release = func() { once.Do(func() { close(g.open) }) }
+	t.Cleanup(g.release)
+	require.NoError(t, database.Callback().Query().After("gorm:query").Register("test:gate_repeaters", func(tx *gorm.DB) {
+		if !g.armed.Load() || tx.Statement.Table != "repeaters" {
+			return
+		}
+		for _, v := range tx.Statement.Vars {
+			if id, ok := v.(uint); ok && id >= lo && id <= hi {
+				g.held <- id
+				select {
+				case <-g.open:
+				case <-tx.Statement.Context.Done():
+					_ = tx.AddError(tx.Statement.Context.Err())
+				}
+				g.passed <- id
+				return
+			}
+		}
+	}))
+	return g
+}
+
+func (g *lookupGate) waitHeld(t *testing.T, want int) {
+	t.Helper()
+	g.wait(t, g.held, want)
+}
+
+func (g *lookupGate) waitPassed(t *testing.T, want int) {
+	t.Helper()
+	g.wait(t, g.passed, want)
+}
+
+func (g *lookupGate) wait(t *testing.T, ch <-chan uint, want int) {
+	t.Helper()
+	ids := map[uint]bool{}
+	for len(ids) < want {
+		ids[bubble.Receive(t, ch, failAfter, "only %d of %d repeater lookups reached the gate", len(ids), want)] = true
+	}
+}
+
+// TestDeliverToServerUnblocksOnStop is a regression test for a bug where
+// deliverToServer did a bare blocking send on the server channel. If the
+// channel was full (slow consumer), the subscription goroutine would block
+// indefinitely, stalling all packet delivery on that topic with no way to
+// recover even during shutdown. The fix adds a select on the hub's done
+// channel so the send is interruptible at shutdown.
+func TestDeliverToServerUnblocksOnStop(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database := makeTestHub(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedRepeater(t, database, 100002, 1000001)
+		seedTalkgroup(t, database, 50, "TG50")
+
+		// Assign TG50 to the destination repeater
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100002).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 50}))
+
+		// Register a server but NEVER consume from its channel — this simulates
+		// a slow/stuck consumer that lets the channel fill up.
+		srvHandle := h.RegisterServer(hub.ServerConfig{Name: models.RepeaterTypeMMDVM, Role: hub.RoleRepeater})
+		defer h.UnregisterServer(models.RepeaterTypeMMDVM)
+
+		h.ActivateRepeater(context.Background(), 100001)
+		h.ActivateRepeater(context.Background(), 100002)
+		knowTalkgroups(t, h)
+
+		// Flood the channel with more packets than its buffer (500).
+		// Each RoutePacket publishes asynchronously via pubsub, so we send many
+		// and give them time to be delivered to the server channel.
+		for i := uint(0); i < 600; i++ {
+			pkt := makeVoicePacket(50, 80000+i, true, false)
+			h.RoutePacket(context.Background(), pkt, models.RepeaterTypeMMDVM)
+		}
+		next := uint(80600)
+		bubble.Eventually(t, func() bool {
+			if len(srvHandle.Packets) == cap(srvHandle.Packets) {
+				return true
+			}
+			h.RoutePacket(context.Background(), makeVoicePacket(50, next, true, false), models.RepeaterTypeMMDVM)
+			next++
+			return false
+		}, failAfter, time.Millisecond, "the bursts did not fill the channel of the server")
+
+		// Stop must complete promptly even though the server channel is full.
+		// Before the fix, Stop() would hang because stopAllRepeaters cancels
+		// subscription contexts, but the goroutine blocked in deliverToServer
+		// never checked its context and couldn't exit.
+		done := make(chan struct{})
+		go func() {
+			h.Stop(context.Background())
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Stop completed — the blocked deliverToServer send was interrupted.
+		case <-time.After(failAfter):
+			t.Fatal("Hub.Stop() did not complete — deliverToServer is likely blocked on a full channel")
+		}
+	})
+}
+
+// TestListenForWebsocketNonExistentUserExitsImmediately verifies that
+// ListenForWebsocket returns immediately when called with a user ID that
+// doesn't exist in the database. Previously it would loop forever, querying
+// the DB on every pubsub message.
+func TestListenForWebsocketNonExistentUserExitsImmediately(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, _ := makeTestHub(t)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		done := make(chan struct{})
+		go func() {
+			h.ListenForWebsocket(ctx, 99999) // non-existent user
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Expected: ListenForWebsocket exits immediately for non-existent user.
+		case <-time.After(2 * time.Second):
+			t.Fatal("ListenForWebsocket did not exit for non-existent user — should return immediately")
+			cancel()
+		}
+	})
+}
+
+// TestListenForWebsocketForwardsMatchingCalls verifies that
+// ListenForWebsocket correctly forwards call events that match the user's
+// repeater subscriptions using cached user data (no DB query per message),
+// however long its first user lookup takes.
+func TestListenForWebsocketForwardsMatchingCalls(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database, ps, listening := makeTestHubWatching(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+
+		var slowed atomic.Bool
+		require.NoError(t, database.Callback().Query().After("gorm:query").Register("test:slow_user", func(tx *gorm.DB) {
+			if tx.Statement.Table == "users" && slowed.CompareAndSwap(false, true) {
+				time.Sleep(300 * time.Millisecond)
+			}
+		}))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		userSub := ps.Subscribe("calls:1000001")
+		defer func() { _ = userSub.Close() }()
+		userCh := userSub.Channel()
+
+		go h.ListenForWebsocket(ctx, 1000001)
+		select {
+		case <-listening:
+		case <-time.After(10 * time.Second):
+			t.Fatal("ListenForWebsocket never subscribed to calls")
+		}
+
+		// Publish a call event where DestinationID matches the repeater's OwnerID (1000001).
+		// This triggers the `call.DestinationID == p.OwnerID` branch in ListenForWebsocket.
+		call := models.Call{
+			ID:            1,
+			DestinationID: 1000001,
+			GroupCall:     false,
+			User:          models.User{ID: 2000001},
+		}
+		callJSON, err := json.Marshal(call)
+		require.NoError(t, err)
+		require.NoError(t, ps.Publish("calls", callJSON))
+
+		select {
+		case msg := <-userCh:
+			assert.NotNil(t, msg)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timed out waiting for call to be forwarded to user websocket channel")
+		}
+
+		// Send a second call — verifies caching works across multiple messages
+		call2 := models.Call{
+			ID:            2,
+			DestinationID: 1000001,
+			GroupCall:     false,
+			User:          models.User{ID: 2000002},
+		}
+		callJSON2, err := json.Marshal(call2)
+		require.NoError(t, err)
+		require.NoError(t, ps.Publish("calls", callJSON2))
+
+		select {
+		case msg := <-userCh:
+			assert.NotNil(t, msg)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timed out waiting for second call — cache may not be working")
+		}
+	})
+}
+
+// TestListenForWebsocketDoesNotForwardUnrelatedCalls verifies that
+// ListenForWebsocket does NOT forward calls that don't match any of the
+// user's repeater subscriptions.
+func TestListenForWebsocketDoesNotForwardUnrelatedCalls(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database, ps, listening := makeTestHubWatching(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		// No talkgroups assigned — nothing should match
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		userSub := ps.Subscribe("calls:1000001")
+		defer func() { _ = userSub.Close() }()
+		userCh := userSub.Channel()
+
+		go h.ListenForWebsocket(ctx, 1000001)
+		select {
+		case <-listening:
+		case <-time.After(10 * time.Second):
+			t.Fatal("ListenForWebsocket never subscribed to calls")
+		}
+
+		// Publish a call to an unrelated talkgroup
+		call := models.Call{
+			ID:            1,
+			DestinationID: 999,
+			GroupCall:     true,
+			IsToTalkgroup: true,
+			User:          models.User{ID: 2000001},
+		}
+		callJSON, err := json.Marshal(call)
+		require.NoError(t, err)
+		require.NoError(t, ps.Publish("calls", callJSON))
+
+		select {
+		case <-userCh:
+			t.Fatal("User should not receive calls for unsubscribed talkgroups")
+		case <-time.After(500 * time.Millisecond):
+			// Expected: no forwarding
+		}
+	})
+}
+
+func TestListenForWebsocketPicksUpTalkgroupsOfTheUsersRepeaters(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database, ps, listening := makeTestHubWatching(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedTalkgroup(t, database, 40, "TG40")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		userSub := ps.Subscribe("calls:1000001")
+		defer func() { _ = userSub.Close() }()
+		userCh := userSub.Channel()
+
+		go h.ListenForWebsocket(ctx, 1000001)
+		select {
+		case <-listening:
+		case <-time.After(10 * time.Second):
+			t.Fatal("ListenForWebsocket never subscribed to calls")
+		}
+
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100001).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS1StaticTalkgroups").Append(&models.Talkgroup{ID: 40}))
+		h.ReloadRepeater(context.Background(), 100001)
+
+		callJSON, err := json.Marshal(models.Call{
+			ID:            1,
+			DestinationID: 40,
+			GroupCall:     true,
+			IsToTalkgroup: true,
+			User:          models.User{ID: 2000001},
+		})
+		require.NoError(t, err)
+		deadline := time.After(3 * time.Second)
+		for {
+			require.NoError(t, ps.Publish("calls", callJSON))
+			select {
+			case <-userCh:
+				return
+			case <-time.After(100 * time.Millisecond):
+			case <-deadline:
+				t.Fatal("a call to a talkgroup newly linked to the user's repeater was not forwarded")
+			}
+		}
+	})
+}
+
+func TestListenForWebsocketForwardsCallsToStaticTalkgroupsOfTheUsersRepeaters(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database, ps, listening := makeTestHubWatching(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedRepeater(t, database, 100001, 1000001)
+		seedTalkgroup(t, database, 40, "TG40")
+		var rpt models.Repeater
+		require.NoError(t, database.First(&rpt, 100001).Error)
+		require.NoError(t, database.Model(&rpt).Association("TS2StaticTalkgroups").Append(&models.Talkgroup{ID: 40}))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		userSub := ps.Subscribe("calls:1000001")
+		defer func() { _ = userSub.Close() }()
+		userCh := userSub.Channel()
+
+		go h.ListenForWebsocket(ctx, 1000001)
+		select {
+		case <-listening:
+		case <-time.After(10 * time.Second):
+			t.Fatal("ListenForWebsocket never subscribed to calls")
+		}
+
+		callJSON, err := json.Marshal(models.Call{
+			ID:            1,
+			DestinationID: 40,
+			GroupCall:     true,
+			IsToTalkgroup: true,
+			TimeSlot:      true,
+			User:          models.User{ID: 2000001},
+		})
+		require.NoError(t, err)
+		require.NoError(t, ps.Publish("calls", callJSON))
+
+		select {
+		case <-userCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("a call to a static talkgroup of the user's repeater was not forwarded")
+		}
+	})
+}
+
+func TestListenForWebsocketFollowsSMSStorage(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, database, ps, listening := makeTestHubWatching(t)
+
+		seedUser(t, database, 1000001, "TESTUSER")
+		seedUser(t, database, 1000002, "OTHER")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		userSub := ps.Subscribe("calls:1000001")
+		defer func() { _ = userSub.Close() }()
+		userCh := userSub.Channel()
+
+		go h.ListenForWebsocket(ctx, 1000001)
+		select {
+		case <-listening:
+		case <-time.After(10 * time.Second):
+			t.Fatal("ListenForWebsocket never subscribed to calls")
+		}
+
+		var user models.User
+		require.NoError(t, database.First(&user, 1000001).Error)
+		require.NoError(t, models.SetSMSStorage(database, &user, true, time.Now().Add(-time.Hour)))
+
+		toUser := uint(1000001)
+		call := models.Call{
+			StreamID: 1, StartTime: time.Now(), Kind: models.CallKindData, SubKind: models.SubKindSMS,
+			DataFormat: "ip", Octets: 44, SourceID: 1000002, DestinationID: 1000001, IsToUser: true, ToUserID: &toUser,
+		}
+		require.NoError(t, database.Create(&call).Error)
+		require.NoError(t, database.Create(&models.Message{
+			ReceivedAt: time.Now(), TransmissionID: &call.ID, SourceID: 1000002, DestinationID: 1000001,
+			Format: models.MessageFormatIP, Octets: 44,
+		}).Error)
+		callJSON, err := json.Marshal(call)
+		require.NoError(t, err)
+		require.NoError(t, ps.Publish("calls", callJSON))
+
+		select {
+		case msg := <-userCh:
+			var row struct {
+				SubKind string `json:"sub_kind"`
+				Octets  uint   `json:"octets"`
+			}
+			require.NoError(t, json.Unmarshal(msg, &row))
+			assert.Equal(t, models.SubKindSMS, row.SubKind, "an SMS after SMS Storage was turned on")
+			assert.Equal(t, uint(44), row.Octets)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the SMS was not forwarded")
+		}
+	})
+}

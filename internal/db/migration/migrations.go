@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package migration
+
+import (
+	"fmt"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/go-gormigrate/gormigrate/v2"
+	"gorm.io/gorm"
+)
+
+func Migrate(db *gorm.DB, cfg *config.Config) error {
+	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations(db, cfg))
+
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("could not migrate: %w", err)
+	}
+
+	return nil
+}
+
+// MigrateSchema runs the migrations that need the tables that AutoMigrate
+// makes, on a new database too.
+func MigrateSchema(db *gorm.DB, cfg *config.Config) error {
+	m := gormigrate.New(db, gormigrate.DefaultOptions, schemaMigrations(db, cfg))
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("could not migrate: %w", err)
+	}
+	return nil
+}
+
+func schemaMigrations(db *gorm.DB, cfg *config.Config) []*gormigrate.Migration {
+	return []*gormigrate.Migration{
+		case_insensitive_usernames_migration_202610270200(db, cfg),
+		username_callsign_clashes_migration_202610271200(db, cfg),
+	}
+}
+
+func migrations(db *gorm.DB, cfg *config.Config) []*gormigrate.Migration {
+	return []*gormigrate.Migration{
+		repeater_radio_id_migration_202302242025(db, cfg),
+		drop_join_table_migration_202311190252(db, cfg),
+		fix_call_data_migration_202602100435(db, cfg),
+
+		fix_call_data_migration_202602100457(db, cfg),
+		add_repeater_type_column_migration_202506150100(db, cfg),
+		add_simplex_repeater_column_migration_202602130100(db, cfg),
+		split_location_migration_202602160100(db, cfg),
+		fix_ipsc_repeater_data_migration_202602160200(db, cfg),
+		add_peer_ip_port_migration_202602170100(db, cfg),
+		add_nets_tables_migration_202602160300(db, cfg),
+		add_net_showcase_column_migration_202602170200(db, cfg),
+		add_scheduled_net_showcase_column_migration_202602170300(db, cfg),
+		add_repeater_trusted_column_migration_202610221900(db, cfg),
+		add_call_kind_columns_migration_202610221910(db, cfg),
+		add_messages_migration_202610222000(db, cfg),
+		add_peer_enhanced_column_migration_202610230000(db, cfg),
+		add_repeater_dialect_column_migration_202610231200(db, cfg),
+		add_positions_migration_202610232100(db, cfg),
+		add_plugins_migration_202610240100(db, cfg),
+		remove_builtin_services_migration_202610240200(db, cfg),
+		add_codec_columns_migration_202610241000(db, cfg),
+		add_must_change_password_migration_202610242000(db, cfg),
+		add_password_resets_migration_202610242100(db, cfg),
+		clear_deleted_net_users_migration_202610251000(db, cfg),
+		delete_deleted_user_access_migration_202610251010(db, cfg),
+		add_plugin_kinds_migration_202610251100(db, cfg),
+		drop_app_settings_has_seeded_migration_202610261000(db, cfg),
+		drop_app_settings_migration_202610261100(db, cfg),
+		undeliverable_sentences_migration_202610261200(db, cfg),
+		builtin_plugin_names_migration_202610261300(db, cfg),
+		add_setup_settings_migration_202610261500(db, cfg),
+		add_generated_secrets_migration_202610261600(db, cfg),
+		mysql_portability_migration_202610262000(db, cfg),
+		add_email_verified_migration_202610270100(db, cfg),
+		add_callsign_override_migration_202610271300(db, cfg),
+		add_peer_rule_match_migration_202610271400(db, cfg),
+		add_peer_private_calls_migration_202610271410(db, cfg),
+		add_login_failures_migration_202610272100(db, cfg),
+		add_invites_migration_202610272110(db, cfg),
+		add_message_accesses_migration_202610272120(db, cfg),
+		add_call_parts_migration_202610311900(db, cfg),
+		add_personal_tokens_migration_202611011647(db, cfg),
+		add_repeater_cosysops_migration_202611011701(db, cfg),
+		add_repeater_events_migration_202611011702(db, cfg),
+		add_offline_alerts_migration_202611011703(db, cfg),
+		add_message_rate_migration_202611011800(db, cfg),
+		add_store_forward_migration_202611011810(db, cfg),
+		add_repeater_link_epochs_migration_202611012200(db, cfg),
+		add_local_groups_migration_202611020100(db, cfg),
+		keep_network_local_numbers_migration_202611020110(db, cfg),
+		add_plugin_sdk_migration_202611020200(db, cfg),
+		add_totp_secret_migration_202611020300(db, cfg),
+		add_prompt_voice_migration_202611030000(db, cfg),
+		add_talkgroup_no_listen_migration_202611032200(db, cfg),
+	}
+}

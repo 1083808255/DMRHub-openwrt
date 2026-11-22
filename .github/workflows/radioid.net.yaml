@@ -1,0 +1,87 @@
+name: RadioID Database Update
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Once a week at 00:16
+    - cron: "16 0 * * */7"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Import bot's GPG key for signing commits
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.BOT_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.BOT_GPG_PASSPHRASE }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: Install dependencies
+        run: |
+          sudo apt-get update 
+          sudo apt-get install -y make wget xz-utils git
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check the live RadioID.net format
+        run: |
+          go test -count=1 -tags live,codec2wasm -run TestLiveUpdate -v ./internal/repeaterdb/... ./internal/userdb/...
+      - name: Update databases
+        run: |
+          make update-dbs
+      - name: Check Repeaterdb size
+        run: |
+          check=`du -s internal/repeaterdb/repeaters.json.xz | awk '{print $1}'`
+          if [ "$check" -lt 250 ]
+          then
+          exit 2
+          fi
+      - name: Check Userdb size
+        run: |
+          check=`du -s internal/userdb/users.json.xz | awk '{print $1}'`
+          if [ "$check" -lt 3700 ]
+          then
+          exit 2
+          fi
+      - name: Decode the refreshed databases
+        run: |
+          go test -count=1 -tags codec2wasm ./internal/repeaterdb/... ./internal/userdb/...
+      - name: Commit changes to databases
+        run: |
+          git commit --signoff -m "Automated update of RadioID.net Databases" internal/repeaterdb internal/userdb
+        env:
+          GIT_AUTHOR_NAME: ${{ steps.import-gpg.outputs.name }}
+          GIT_AUTHOR_EMAIL: ${{ steps.import-gpg.outputs.email }}
+          GIT_COMMITTER_NAME: ${{ steps.import-gpg.outputs.name }}
+          GIT_COMMITTER_EMAIL: ${{ steps.import-gpg.outputs.email }}
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        id: cpr
+        with:
+          token: ${{ secrets.PAT }}
+          branch: automated/radioid-update
+          delete-branch: true
+          title: Update RadioID.net Databases
+          body: Automated update to the RadioID.net DMR users and repeaters databases
+          labels: |
+            update
+            chore
+            automated pr
+            autorebase:opt-in
+      - name: Automerge Pull Request
+        if: steps.cpr.outputs.pull-request-operation == 'created' || steps.cpr.outputs.pull-request-operation == 'updated'
+        run: gh pr merge --rebase --auto "$PR_NUMBER"
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+          PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}

@@ -1,0 +1,22 @@
+{
+  "source": "dmrgo internal/appcapture TMS: the AnyTone M-SMS text MOTO TEST",
+  "transmissions": [
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    }
+  ],
+  "messages": [
+    {
+      "format": "tms",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": "MOTO TEST"
+    }
+  ]
+}

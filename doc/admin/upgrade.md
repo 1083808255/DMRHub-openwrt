@@ -1,0 +1,83 @@
+# Upgrade DMRHub
+
+This page tells how to upgrade DMRHub, what DMRHub does to the database when it starts, and how to roll back.
+
+## Before you upgrade
+
+1. Read the release notes of each release between your version and the new one, on [GitHub Releases](https://github.com/USA-RedDragon/DMRHub/releases). To see your version, look at the first line of the log, for example `DMRHub - 1.3.16 (77d9c9f9...)`, or open `<siteurl>/api/v1/version`.
+2. Make a backup. See [Back up and restore](backups.md).
+
+## Changes in behavior
+
+- Dynamic talkgroups now expire. A dynamic talkgroup that has no call from its repeater for 15 minutes unlinks from its timeslot. Before, it stayed linked until another call or talkgroup 4000. To keep the old behavior, set the timeout to 0 on the **Routing** tab of the Setup page, or set `dmr.routing.dynamic-timeout` to `0s`. See [Routing settings](routing.md).
+
+## Docker
+
+1. Pull the new image:
+
+   ```bash
+   docker pull ghcr.io/usa-reddragon/dmrhub:v1
+   ```
+
+2. Stop and remove the old container. The data stays in the volume:
+
+   ```bash
+   docker stop dmrhub
+   docker rm dmrhub
+   ```
+
+3. Start a new container with the same `docker run` command as before, with the same volume and the same environment variables (see [Install DMRHub](install.md#docker)).
+4. Check the log with `docker logs dmrhub`, then log in.
+
+To go to one exact release, use its tag, for example `ghcr.io/usa-reddragon/dmrhub:v1.3.16`.
+
+## Binary with systemd
+
+1. Download the new `.tar.gz` file and unpack `DMRHub` from it.
+2. Stop DMRHub, replace the program, and start DMRHub:
+
+   ```bash
+   sudo systemctl stop dmrhub.service
+   sudo install -m 0755 DMRHub /usr/local/bin/DMRHub
+   sudo systemctl start dmrhub.service
+   ```
+
+3. Check the log with `journalctl -u dmrhub.service`, then log in.
+
+## What DMRHub does when it starts
+
+At each start, before it opens the network, DMRHub brings the database up to date:
+
+1. It runs each migration that the database did not get yet, in order. The `migrations` table lists the IDs of the migrations that ran. A migration can add or drop tables and columns, and change data. For example, the migrations from v1.3.0 to v1.3.16 add the plugin tables and the password reset table, drop the `app_settings` table, and delete the parrot user and talkgroup 9990 that older releases made, because the parrot is now a plugin.
+2. It adds the tables and the columns that the current release needs and that are not in the database yet. This step does not drop anything.
+3. It runs the migrations that need those tables. One of them makes usernames the same in any case: `Alice` and `alice` are one username. If two users have usernames that differ only by case, this migration changes nothing and DMRHub exits with an error that lists each group, for example `usernames differ only by case: "Alice" (user 3000001), "alice" (user 3000002)`. Rename or delete all but one user of each group in the database, then start DMRHub again.
+4. Once, it logs each username that is the callsign of another user, in any case, at WARN: `A username is the callsign of another user. Rename one of them`, with `userID` and `callsignUserID`. A login by that name goes to the user with the username, not to the user with the callsign. This step changes no data and does not stop DMRHub. Rename one of the two users in **Admin**, then **Users**.
+
+With PostgreSQL or MySQL, DMRHub takes a lock in the database for these steps, so only one replica migrates at a time. If a migration fails, DMRHub exits with `failed to connect to database: failed to migrate database: ...`. Restore your backup and report the error.
+
+## Several replicas
+
+Upgrade one replica at a time. Each replica that stops hands its repeaters, peers, browser radios and plugins over to the other replicas within `dmr.drain-timeout`, and then waits for its calls to end. See [Replicas and scaling](replicas.md#stop-a-replica).
+
+The first replica of the new release migrates the database. The replicas of the old release keep running on the migrated database until you upgrade them. Read the release notes for changes that the old release cannot run with.
+
+## Hotspots log in again once
+
+With `redis.enabled`, DMRHub keeps the session of each MMDVM hotspot in Redis, with a salted check of the hotspot password, so that another replica, or the same one after a restart, resumes the session. v1.3.17 and older keep no check. This release does not resume a session without a check, so after you upgrade from v1.3.17 or older, each MMDVM hotspot logs in again once. This takes a few seconds and needs no action.
+
+## Roll back
+
+DMRHub has no command to undo a migration. An older release ignores the migrations that it does not know, so it can start on a database that a newer release migrated. But the database is not as the older release left it, and some changes stay. For example, after an upgrade from v1.3.0 and a downgrade to v1.3.0 on the same database, v1.3.0 made the parrot user and talkgroup 9990 again. When we upgraded again, the migration that deletes them did not run a second time, so they stayed.
+
+To roll back, restore the backup that you made before the upgrade, then start the older release. You lose the changes and the traffic records since the backup.
+
+## What we tested
+
+We tested these upgrades with Docker and SQLite on 2026-10-26, with the commands on this page and on [Back up and restore](backups.md):
+
+| From | To | Data before the upgrade | Result |
+| ---- | -- | ----------------------- | ------ |
+| v1.3.15 (`ghcr.io/usa-reddragon/dmrhub:v1.3.15`) | main at `4b12a3d8`, built locally | An admin and a second user, talkgroup 91, an MMDVM repeater, one voice call in Last Heard | All data stayed. Both users logged in. A new call from the repeater showed in Last Heard. v1.3.15 and this main have the same 29 migrations, so no migration ran. |
+| v1.3.0 (`ghcr.io/usa-reddragon/dmrhub:v1.3.0`) | main at `d7608e17`, built locally | The same data | 11 migrations ran (18 to 29 in the `migrations` table). All data stayed, and the parrot user and talkgroup 9990 of v1.3.0 were deleted. Both users logged in, and a new call showed in Last Heard. |
+| main at `d7608e17` | v1.3.0, on the migrated database | The data above | v1.3.0 started, and all data showed. It made the parrot user and talkgroup 9990 again, and they stayed after the next upgrade. |
+| main at `d7608e17` | v1.3.0, from the backup | The backup from before the upgrade | v1.3.0 started with the data of the backup, without the call made after the upgrade. |

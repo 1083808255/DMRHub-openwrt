@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package apimodels
+
+import "time"
+
+type PeerPost struct {
+	ID      uint   `json:"id" binding:"required"`
+	OwnerID uint   `json:"owner" binding:"required"`
+	IP      string `json:"ip" binding:"required"`
+	Port    int    `json:"port"`
+	Ingress bool   `json:"ingress"`
+	Egress  bool   `json:"egress"`
+	// IngressPrivate and EgressPrivate let private calls past the
+	// destination rules of each direction.
+	IngressPrivate bool `json:"ingress_private"`
+	EgressPrivate  bool `json:"egress_private"`
+	Enhanced       bool `json:"enhanced"`
+	Codec2         bool `json:"codec2"`
+}
+
+type PeerPatch struct {
+	IP      *string `json:"ip"`
+	Port    *int    `json:"port"`
+	Ingress *bool   `json:"ingress"`
+	Egress  *bool   `json:"egress"`
+	// IngressPrivate and EgressPrivate let private calls past the
+	// destination rules of each direction.
+	IngressPrivate *bool `json:"ingress_private"`
+	EgressPrivate  *bool `json:"egress_private"`
+	Enhanced       *bool `json:"enhanced"`
+	Codec2         *bool `json:"codec2"`
+}
+
+// PeerRotatePasswordResponse is the answer to a rotation of the password
+// of an OpenBridge peer: the new password, and when the old one stopped
+// working.
+type PeerRotatePasswordResponse struct {
+	Password  string    `json:"password"`
+	RotatedAt time.Time `json:"rotated_at"`
+}
+
+type PeerRulePost struct {
+	Direction    bool   `json:"direction"`
+	Match        string `json:"match"`
+	SubjectIDMin uint   `json:"subject_id_min"`
+	SubjectIDMax uint   `json:"subject_id_max" binding:"required"`
+}

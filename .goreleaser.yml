@@ -1,0 +1,156 @@
+---
+version: 2
+
+project_name: DMRHub
+
+before:
+  hooks:
+    - sh hack/carry/frontend.sh
+
+release:
+  extra_files:
+    - glob: ./LICENSE
+    - glob: ./artifacts/frontend-assets.tar.zst
+  github:
+    owner: USA-RedDragon
+    name: DMRHub
+
+dockers_v2:
+  - images:
+      - "ghcr.io/usa-reddragon/dmrhub"
+      - "docker.io/jamcswain/dmrhub"
+    tags:
+      - "{{ .Tag }}"
+      - "v{{ .Major }}"
+      - "v{{ .Major }}.{{ .Minor }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v6
+      - linux/arm/v7
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.licenses": "MIT"
+      "org.opencontainers.image.url": "https://github.com/USA-RedDragon/{{ .ProjectName }}"
+      "org.opencontainers.image.source": "https://github.com/USA-RedDragon/{{ .ProjectName }}"
+
+builds:
+  - id: dmrhub
+    main: .
+    binary: DMRHub
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - riscv64
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goarch: arm
+        goos: windows
+      - goarch: riscv64
+        goos: windows
+      - goarch: arm
+        goos: darwin
+      - goarch: riscv64
+        goos: darwin
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+  - id: parrot
+    main: ./plugins/parrot/cmd/parrot
+    binary: dmrhub-parrot
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - riscv64
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goarch: arm
+        goos: windows
+      - goarch: riscv64
+        goos: windows
+      - goarch: arm
+        goos: darwin
+      - goarch: riscv64
+        goos: darwin
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+  - id: locator
+    main: ./plugins/locator/cmd/locator
+    binary: dmrhub-locator
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - riscv64
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goarch: arm
+        goos: windows
+      - goarch: riscv64
+        goos: windows
+      - goarch: arm
+        goos: darwin
+      - goarch: riscv64
+        goos: darwin
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+  - id: aprstext
+    main: ./plugins/aprstext/cmd/aprstext
+    binary: dmrhub-aprstext
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - riscv64
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goarch: arm
+        goos: windows
+      - goarch: riscv64
+        goos: windows
+      - goarch: arm
+        goos: darwin
+      - goarch: riscv64
+        goos: darwin
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+
+milestones:
+  - close: true

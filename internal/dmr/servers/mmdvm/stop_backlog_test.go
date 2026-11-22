@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package mmdvm
+
+import (
+	"context"
+	"net"
+	"testing"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/hub"
+	"github.com/USA-RedDragon/DMRHub/internal/kv"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils/memdb"
+	"github.com/USA-RedDragon/configulator/v2"
+	"github.com/stretchr/testify/require"
+)
+
+// TestStopWithFullIngressQueue stops the server while its ingress queue is
+// full, as when a busy hub falls behind. The reader of the socket must
+// not stay blocked on the queue after the listener has stopped, or Stop
+// waits forever.
+func TestStopWithFullIngressQueue(t *testing.T) {
+	t.Parallel()
+	cfg, err := configulator.New(config.ConfigSchema()).Default()
+	require.NoError(t, err)
+	memdb.Use(t, &cfg)
+	cfg.DMR.MMDVM.Bind = "127.0.0.1"
+	cfg.DMR.MMDVM.Port = 0
+	database, err := db.MakeDB(&cfg)
+	require.NoError(t, err)
+	memdb.CloseAtCleanup(t, database)
+	kvStore, err := kv.MakeKV(context.Background(), &cfg, kv.WithoutCallBound())
+	require.NoError(t, err)
+	ps, err := pubsub.MakePubSub(context.Background(), &cfg)
+	require.NoError(t, err)
+	h := hub.NewHub(database, kvStore, ps, nil)
+	t.Cleanup(func() { h.Stop(context.Background()) })
+
+	s, err := MakeServer(&cfg, h, database, ps, kvStore, "test", "test")
+	require.NoError(t, err)
+	require.NoError(t, s.Start(context.Background()))
+
+	s.mu.Lock()
+	addr, ok := s.Server.LocalAddr().(*net.UDPAddr)
+	require.True(t, ok)
+	conn, err := net.DialUDP("udp", nil, addr)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	for range 4 * channelBufferSize {
+		_, _ = conn.Write([]byte("RPTPING\x00\x00\x00\x01"))
+	}
+	fillIngress(&s)
+
+	stopped := make(chan struct{})
+	go func() {
+		_ = s.Stop(context.Background())
+		close(stopped)
+	}()
+	<-s.done
+	s.mu.Unlock()
+	awaitClosed(t, stopped, "Stop did not return with a full ingress queue")
+}

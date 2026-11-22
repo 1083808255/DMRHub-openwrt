@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package dmr_test
+
+import (
+	"fmt"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/dmrconst"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/hub"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// forAllBackendsWith is forAllBackends with more settings for the stack.
+func forAllBackendsWith(t *testing.T, more []testutils.Backend, f func(t *testing.T, stack *testutils.IntegrationStack)) {
+	t.Helper()
+	for _, be := range allBackends() {
+		t.Run(be.Name, func(t *testing.T) {
+			t.Parallel()
+			f(t, testutils.SetupIntegrationStack(t, append([]testutils.Backend{be}, more...)...))
+		})
+	}
+}
+
+// sendCall sends a voice call of n bursts, one each rotationInterval.
+func sendCall(t *testing.T, send func(models.Packet) error, src, tg, stream uint, n int) {
+	t.Helper()
+	next := time.Now()
+	for i := range n {
+		p := makeGroupVoicePacket(src, tg, stream, false)
+		p.Seq = uint(i)
+		p.DTypeOrVSeq = dmrconst.VoiceA + uint(i%6)
+		if i%6 == 0 {
+			p.FrameType = dmrconst.FrameVoiceSync
+		}
+		require.NoError(t, send(p))
+		next = next.Add(rotationInterval)
+		time.Sleep(time.Until(next))
+	}
+}
+
+// TestWebTransportSessionLivesOnThroughAnotherReplica drains the replica
+// of a browser hotspot behind a UDPFront, which then sends the QUIC packets
+// of the browser to the other replica. The other replica must forward them
+// to the replica that holds the QUIC connection and send its answers, so
+// that the session goes on: the hotspot keeps its login and gets the calls
+// to its talkgroup. The front drops what the replica sent on the old path
+// until the replica learns of the new one, so the replica must send that
+// again.
+func TestWebTransportSessionLivesOnThroughAnotherReplica(t *testing.T) {
+	t.Parallel()
+	forAllBackendsWith(t, []testutils.Backend{testutils.WebTransportOn()}, func(t *testing.T, stack *testutils.IntegrationStack) {
+		stack.SeedUser(t, 1000001, "N0CALL")
+		stack.SeedTalkgroup(t, 1, "TG1")
+		stack.SeedMMDVMRepeater(t, 100001, 1000001, testPassword)
+		stack.SeedMMDVMRepeater(t, 100004, 1000001, testPassword)
+		stack.AssignTS1StaticTG(t, 100004, 1)
+		regA := testutils.Register(t, stack.Hub, stack.KV)
+		b, _ := stack.SpawnRegisteredReplica(t)
+		stack.StartServers(t)
+
+		front := testutils.NewUDPFront(t)
+		front.Add(t, stack.WebTransportAddr)
+		browser, err := testutils.NewWebTransportPeer(100004, testPassword)
+		require.NoError(t, err)
+		require.NoError(t, browser.Connect(front.Addr()))
+		t.Cleanup(browser.Close)
+		require.NoError(t, browser.WaitReady(handshakeWait))
+		front.Add(t, b.WebTransportAddr)
+		talker := testutils.NewMMDVMClient(100001, "", testPassword)
+		require.NoError(t, talker.Connect(b.MMDVMAddr))
+		t.Cleanup(talker.Close)
+		require.NoError(t, talker.WaitReady(handshakeWait))
+
+		regA.MarkDraining(t.Context())
+		front.Drain(stack.WebTransportAddr)
+		const bursts = 100
+		sendCall(t, talker.SendDMRD, 1000001, 1, 8301, bursts)
+		awaitBursts(browser.Heard, bursts, 8301)
+		browser.Drain(drainWait)
+		heard := browser.Heard()
+		windows := windowsAt(front.Ends(), hub.MoveSlack)
+		checkCopies(t, "the browser hotspot", arrivalsOf(heard, 8301), windows)
+		checkResent(t, "the browser hotspot", firstArrivalsOf(heard, 8301), bursts, windows)
+		assert.Positive(t, front.Moves(), "the front did not move the browser")
+		assert.Zero(t, browser.Downs(), "the browser hotspot lost its session")
+		assert.Equal(t, 1, browser.Ups(), "the browser hotspot logged in again")
+	})
+}
+
+// TestWebTransportPathMoveGetsWhatTheLoadBalancerLost ends the session of
+// a browser hotspot at the load balancer while a call to its talkgroup
+// goes on, as Envoy does when it removes the replica from its endpoints,
+// and holds the hotspot off until 15 more bursts of the call left, longer
+// than hub.MoveSlack. The next packet of the hotspot reaches the other
+// replica, which passes the QUIC connection on to the first one, so only
+// the path of the connection moves. The first replica must ask the
+// hotspot for its anchor and send again what the load balancer dropped:
+// the hotspot must get every burst of the call, and each that it lost
+// once.
+func TestWebTransportPathMoveGetsWhatTheLoadBalancerLost(t *testing.T) {
+	t.Parallel()
+	forAllBackendsWith(t, []testutils.Backend{testutils.WebTransportOn()}, func(t *testing.T, stack *testutils.IntegrationStack) {
+		stack.SeedUser(t, 1000001, "N0CALL")
+		stack.SeedTalkgroup(t, 1, "TG1")
+		stack.SeedMMDVMRepeater(t, 100001, 1000001, testPassword)
+		stack.SeedMMDVMRepeater(t, 100004, 1000001, testPassword)
+		stack.AssignTS1StaticTG(t, 100004, 1)
+		testutils.Register(t, stack.Hub, stack.KV)
+		b, _ := stack.SpawnRegisteredReplica(t)
+		stack.StartServers(t)
+		require.NotEmpty(t, stack.WebTransportAddr)
+
+		front := testutils.NewUDPFront(t)
+		front.Add(t, stack.WebTransportAddr)
+		browser, err := testutils.NewWebTransportPeer(100004, testPassword)
+		require.NoError(t, err)
+		require.NoError(t, browser.Connect(front.Addr()))
+		t.Cleanup(browser.Close)
+		require.NoError(t, browser.WaitReady(handshakeWait))
+		front.Add(t, b.WebTransportAddr)
+
+		talker := testutils.NewMMDVMClient(100001, "", testPassword)
+		require.NoError(t, talker.Connect(b.MMDVMAddr))
+		t.Cleanup(talker.Close)
+		require.NoError(t, talker.WaitReady(handshakeWait))
+
+		const bursts, stream = 60, 8211
+		release := make(chan struct{})
+		sendCall(t, func(p models.Packet) error {
+			if err := talker.SendDMRD(p); err != nil {
+				return fmt.Errorf("sending burst %d: %w", p.Seq, err)
+			}
+			switch p.Seq {
+			case 15:
+				front.CutUntil(stack.WebTransportAddr, release)
+			case 30:
+				close(release)
+			}
+			return nil
+		}, 1000001, 1, stream, bursts)
+		awaitBursts(browser.Heard, bursts, stream)
+		browser.Drain(drainWait)
+		assert.Zero(t, browser.Moves(), "the browser hotspot moved its session")
+		assert.Zero(t, browser.Downs(), "the browser hotspot lost its session")
+		heard := arrivalsOf(browser.Heard(), stream)
+		checkResent(t, "the browser hotspot", firstArrivalsOf(browser.Heard(), stream), bursts, windowsAt(front.Ends(), hub.MoveSlack))
+		checkLostOnce(t, heard)
+	})
+}
+
+// checkLostOnce checks that each packet that a client got first after a
+// later one, as one that the load balancer lost and a replica sent again,
+// came once.
+func checkLostOnce(t *testing.T, got []arrival) {
+	t.Helper()
+	count := map[uint]int{}
+	late := map[uint]bool{}
+	var top uint
+	for i, a := range got {
+		if count[a.n] == 0 && i > 0 && a.n < top {
+			late[a.n] = true
+		}
+		count[a.n]++
+		top = max(top, a.n)
+	}
+	var twice []uint
+	for n := range late {
+		if count[n] > 1 {
+			twice = append(twice, n)
+		}
+	}
+	slices.Sort(twice)
+	assert.Empty(t, twice, "the browser hotspot got packets that it lost more than once")
+}

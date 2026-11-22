@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package consts
+
+import "time"
+
+const ConnsPerCPU = 10
+const MaxIdleTime = 10 * time.Minute
+
+// RedisTimeout bounds each read and each write of a call to Redis. A call
+// also returns at the deadline of its context, when that is sooner.
+const RedisTimeout = time.Second
+
+// RedisCallTimeout bounds a whole call to the Redis key-value store, its
+// retries included. A call also returns at the deadline of its context, when
+// that is sooner.
+const RedisCallTimeout = time.Second
+
+// RedisDialTimeout bounds a new connection to Redis.
+const RedisDialTimeout = 2 * time.Second
+
+// RedisConnectWait is how long DMRHub tries to reach Redis at startup
+// before it fails, so that a Redis that restarts or is slow for some
+// seconds does not stop DMRHub from starting.
+const RedisConnectWait = 30 * time.Second

@@ -1,0 +1,753 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package repeaters_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/apimodels"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const testTimeout = 1 * time.Minute
+
+func TestPOSTRepeaterRequiresLogin(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/repeaters", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestPOSTRepeaterUnauthenticatedSingleResponse is a regression test ensuring
+// that an unauthenticated POST to /api/v1/repeaters returns exactly one JSON
+// response. Previously, missing `return` statements after error responses in
+// the auth checks caused the handler to write multiple JSON responses and
+// continue execution with a zero-value user ID.
+func TestPOSTRepeaterUnauthenticatedSingleResponse(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouter()
+	if err != nil {
+		t.Fatalf("Failed to create test DB router: %v", err)
+	}
+	defer tdb.CloseDB()
+
+	w := httptest.NewRecorder()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	// Send a valid-looking JSON body so that if the handler falls through
+	// past the auth check, it would attempt to process the request.
+	body := map[string]interface{}{
+		"radio_id": 123456,
+	}
+	jsonBytes, err := json.Marshal(body)
+	assert.NoError(t, err)
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/repeaters", bytes.NewBuffer(jsonBytes))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// Verify the response body is valid JSON (a single object, not multiple
+	// concatenated objects which would happen with double-writes).
+	var resp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err, "Response body should be a single valid JSON object, got: %s", w.Body.String())
+	assert.Contains(t, resp, "error")
+}
+
+func TestPOSTRepeaterMMDVM(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	// Use a hotspot-style ID (user DMR ID + 2 digits) to bypass repeaterdb validation
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206801,
+	}
+
+	resp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Repeater created", resp.Message)
+	assert.NotEmpty(t, resp.Password)
+	assert.Empty(t, resp.Error)
+
+	// Verify the repeater was created correctly
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "mmdvm", rpt.Type)
+	assert.Equal(t, repeaterPost.RadioID, rpt.ID)
+}
+
+func TestPOSTRepeaterIPSC(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206802,
+		Type:    "ipsc",
+	}
+
+	resp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Repeater created", resp.Message)
+	assert.NotEmpty(t, resp.Password)
+	assert.Len(t, resp.Password, 40, "IPSC password should be 40-char hex string")
+	assert.Empty(t, resp.Error)
+
+	// Verify the repeater was created correctly
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ipsc", rpt.Type)
+}
+
+func TestPATCHRepeaterPreservesType(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	// Create an IPSC repeater
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206803,
+		Type:    "ipsc",
+	}
+
+	resp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, resp.Error)
+
+	// PATCH simplex_repeater
+	simplexTrue := true
+	patchResp, w := testutils.PatchRepeater(t, router, repeaterPost.RadioID, userJar, apimodels.RepeaterPatch{
+		SimplexRepeater: &simplexTrue,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Repeater updated", patchResp.Message)
+
+	// GET the repeater and verify type is still "ipsc"
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ipsc", rpt.Type, "PATCH should not change repeater type")
+	assert.True(t, rpt.SimplexRepeater)
+}
+
+func TestPATCHRepeaterPreservesPassword(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206804,
+		Type:    "ipsc",
+	}
+
+	createResp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+	originalPassword := createResp.Password
+	assert.NotEmpty(t, originalPassword)
+
+	// PATCH the repeater
+	simplexTrue := true
+	_, w = testutils.PatchRepeater(t, router, repeaterPost.RadioID, userJar, apimodels.RepeaterPatch{
+		SimplexRepeater: &simplexTrue,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify password hasn't changed via direct DB query (password is json:"-")
+	var dbRepeater models.Repeater
+	err = tdb.DB().First(&dbRepeater, repeaterPost.RadioID).Error
+	require.NoError(t, err)
+	assert.Equal(t, originalPassword, dbRepeater.Password, "PATCH should not change repeater password")
+}
+
+func TestPATCHRepeaterPreservesOwner(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206806,
+		Type:    "ipsc",
+	}
+
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Admin PATCHes the repeater
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	simplexTrue := true
+	_, w = testutils.PatchRepeater(t, router, repeaterPost.RadioID, adminJar, apimodels.RepeaterPatch{
+		SimplexRepeater: &simplexTrue,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify owner is still the original user
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, user.DMRId, rpt.Owner.ID, "PATCH should not change repeater owner")
+}
+
+func TestPOSTRepeaterTalkgroupsPreservesType(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	// Create an IPSC repeater
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206807,
+		Type:    "ipsc",
+	}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Create a talkgroup (as admin)
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	tgResp, w := testutils.CreateTalkgroup(t, router, adminJar, apimodels.TalkgroupPost{
+		ID:          50001,
+		Name:        "Test TG",
+		Description: "Test talkgroup",
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, tgResp.Error)
+
+	// POST talkgroups to the repeater
+	tgPost := apimodels.RepeaterTalkgroupsPost{
+		TS1StaticTalkgroups: []models.Talkgroup{{ID: 50001}},
+	}
+	resp, w := testutils.SetRepeaterTalkgroups(t, router, repeaterPost.RadioID, userJar, tgPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Repeater talkgroups updated", resp.Message)
+
+	// GET the repeater and verify type is still "ipsc"
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ipsc", rpt.Type, "POST talkgroups should not change repeater type")
+}
+
+func TestPOSTRepeaterTalkgroupsPreservesPassword(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206808,
+		Type:    "ipsc",
+	}
+	createResp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+	originalPassword := createResp.Password
+
+	// Create a talkgroup (as admin)
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	_, w = testutils.CreateTalkgroup(t, router, adminJar, apimodels.TalkgroupPost{
+		ID:          50002,
+		Name:        "Test TG 2",
+		Description: "Test talkgroup 2",
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// POST talkgroups to the repeater
+	tgPost := apimodels.RepeaterTalkgroupsPost{
+		TS1StaticTalkgroups: []models.Talkgroup{{ID: 50002}},
+	}
+	_, w = testutils.SetRepeaterTalkgroups(t, router, repeaterPost.RadioID, userJar, tgPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify password hasn't changed via direct DB query
+	var dbRepeater models.Repeater
+	err = tdb.DB().First(&dbRepeater, repeaterPost.RadioID).Error
+	require.NoError(t, err)
+	assert.Equal(t, originalPassword, dbRepeater.Password, "POST talkgroups should not change repeater password")
+}
+
+func TestPOSTRepeaterLinkPreservesType(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	// Create an IPSC repeater
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206809,
+		Type:    "ipsc",
+	}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Create a talkgroup (as admin)
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	_, w = testutils.CreateTalkgroup(t, router, adminJar, apimodels.TalkgroupPost{
+		ID:          50003,
+		Name:        "Link Test TG",
+		Description: "Link test talkgroup",
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Link the talkgroup dynamically
+	_, w = testutils.LinkRepeater(t, router, repeaterPost.RadioID, "dynamic", "1", 50003, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// GET and verify type
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ipsc", rpt.Type, "Link should not change repeater type")
+}
+
+func TestPOSTRepeaterUnlinkPreservesType(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	// Create an IPSC repeater
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206810,
+		Type:    "ipsc",
+	}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Create a talkgroup (as admin)
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	_, w = testutils.CreateTalkgroup(t, router, adminJar, apimodels.TalkgroupPost{
+		ID:          50004,
+		Name:        "Unlink Test TG",
+		Description: "Unlink test talkgroup",
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Link then unlink
+	_, w = testutils.LinkRepeater(t, router, repeaterPost.RadioID, "dynamic", "2", 50004, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	unlinkResp, w := testutils.UnlinkRepeater(t, router, repeaterPost.RadioID, "dynamic", "2", 50004, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Timeslot unlinked", unlinkResp.Message)
+
+	// GET and verify type
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ipsc", rpt.Type, "Unlink should not change repeater type")
+}
+
+func TestDELETERepeater(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206811,
+	}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Delete the repeater
+	delResp, w := testutils.DeleteRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Repeater deleted", delResp.Message)
+
+	// Verify it's gone
+	_, w = testutils.GetRepeater(t, router, repeaterPost.RadioID, userJar)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPATCHRepeaterNonexistent(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+
+	simplexTrue := true
+	resp, w := testutils.PatchRepeater(t, router, 9999999, adminJar, apimodels.RepeaterPatch{
+		SimplexRepeater: &simplexTrue,
+	})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "repeater does not exist", resp.Error)
+}
+
+func TestPOSTRepeaterIPSCDisabledRejects(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithOptions(func(cfg *config.Config) {
+		cfg.DMR.IPSC.Enabled = false
+	})
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206803,
+		Type:    "ipsc",
+	}
+
+	resp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "IPSC is not enabled on this server", resp.Error)
+}
+
+func TestPOSTRepeaterIPSCDisabledAllowsMMDVM(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithOptions(func(cfg *config.Config) {
+		cfg.DMR.IPSC.Enabled = false
+	})
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+
+	repeaterPost := apimodels.RepeaterPost{
+		RadioID: 300206804,
+	}
+
+	resp, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Repeater created", resp.Message)
+	assert.NotEmpty(t, resp.Password)
+}
+
+func TestPATCHRepeaterTrustedNeedsAdmin(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+	repeaterPost := apimodels.RepeaterPost{RadioID: 300206807}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	trusted := true
+	_, w = testutils.PatchRepeater(t, router, repeaterPost.RadioID, userJar, apimodels.RepeaterPatch{Trusted: &trusted})
+	assert.Equal(t, http.StatusForbidden, w.Code, "an owner must not mark their own repeater trusted")
+	var dbRepeater models.Repeater
+	require.NoError(t, tdb.DB().First(&dbRepeater, repeaterPost.RadioID).Error)
+	assert.False(t, dbRepeater.Trusted)
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	_, w = testutils.PatchRepeater(t, router, repeaterPost.RadioID, adminJar, apimodels.RepeaterPatch{Trusted: &trusted})
+	assert.Equal(t, http.StatusOK, w.Code)
+	rpt, w := testutils.GetRepeater(t, router, repeaterPost.RadioID, adminJar)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, rpt.Trusted)
+
+	simplex := true
+	_, w = testutils.PatchRepeater(t, router, repeaterPost.RadioID, userJar, apimodels.RepeaterPatch{SimplexRepeater: &simplex})
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, tdb.DB().First(&dbRepeater, repeaterPost.RadioID).Error)
+	assert.True(t, dbRepeater.Trusted, "an owner's PATCH must keep the admin's trust")
+}
+
+func TestStaleRepeaterSaveKeepsTrust(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+	repeaterPost := apimodels.RepeaterPost{RadioID: 300206808}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	stale, err := models.FindRepeaterByID(tdb.DB(), repeaterPost.RadioID)
+	require.NoError(t, err)
+
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	trusted := true
+	_, w = testutils.PatchRepeater(t, router, repeaterPost.RadioID, adminJar, apimodels.RepeaterPatch{Trusted: &trusted})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	stale.SimplexRepeater = true
+	require.NoError(t, tdb.DB().Save(&stale).Error)
+	fresh, err := models.FindRepeaterByID(tdb.DB(), repeaterPost.RadioID)
+	require.NoError(t, err)
+	assert.True(t, fresh.SimplexRepeater)
+	assert.True(t, fresh.Trusted, "a save of a stale repeater must not undo the admin's trust")
+}
+
+func TestPOSTRepeaterTalkgroupsRejectsUnknownTalkgroup(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	user := apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	}
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, user)
+	repeaterPost := apimodels.RepeaterPost{RadioID: 300206807, Type: "mmdvm"}
+	_, w := testutils.CreateRepeater(t, router, userJar, repeaterPost)
+	require.Equal(t, http.StatusOK, w.Code)
+	_, _, adminJar := testutils.LoginAdmin(t, router)
+	for _, id := range []uint{50001, 50002} {
+		_, w = testutils.CreateTalkgroup(t, router, adminJar, apimodels.TalkgroupPost{ID: id, Name: "Test TG", Description: "Test talkgroup"})
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	before := apimodels.RepeaterTalkgroupsPost{
+		TS1StaticTalkgroups: []models.Talkgroup{{ID: 50001}},
+		TS2StaticTalkgroups: []models.Talkgroup{{ID: 50002}},
+		TS1DynamicTalkgroup: models.Talkgroup{ID: 50002},
+	}
+	resp, w := testutils.SetRepeaterTalkgroups(t, router, repeaterPost.RadioID, userJar, before)
+	require.Equal(t, http.StatusOK, w.Code, resp.Error)
+
+	const unknown = 777
+	for _, tc := range []struct {
+		name string
+		post apimodels.RepeaterTalkgroupsPost
+	}{
+		{name: "ts1 static", post: apimodels.RepeaterTalkgroupsPost{TS1StaticTalkgroups: []models.Talkgroup{{ID: 50002}, {ID: unknown}}}},
+		{name: "ts2 static", post: apimodels.RepeaterTalkgroupsPost{TS2StaticTalkgroups: []models.Talkgroup{{ID: unknown}}}},
+		{name: "ts1 dynamic", post: apimodels.RepeaterTalkgroupsPost{TS1DynamicTalkgroup: models.Talkgroup{ID: unknown}}},
+		{name: "ts2 dynamic", post: apimodels.RepeaterTalkgroupsPost{TS2DynamicTalkgroup: models.Talkgroup{ID: unknown}}},
+	} {
+		resp, w := testutils.SetRepeaterTalkgroups(t, router, repeaterPost.RadioID, userJar, tc.post)
+		assert.Equal(t, http.StatusBadRequest, w.Code, tc.name)
+		assert.Equal(t, "talkgroup 777 does not exist", resp.Error, tc.name)
+
+		exists, err := models.TalkgroupIDExists(tdb.DB(), unknown)
+		require.NoError(t, err)
+		assert.False(t, exists, "%s: no talkgroup may be created", tc.name)
+		rpt, err := models.FindRepeaterByID(tdb.DB(), repeaterPost.RadioID)
+		require.NoError(t, err)
+		require.Len(t, rpt.TS1StaticTalkgroups, 1, tc.name)
+		assert.Equal(t, uint(50001), rpt.TS1StaticTalkgroups[0].ID, "%s: nothing may change", tc.name)
+		require.Len(t, rpt.TS2StaticTalkgroups, 1, tc.name)
+		assert.Equal(t, uint(50002), rpt.TS2StaticTalkgroups[0].ID, "%s: nothing may change", tc.name)
+		require.NotNil(t, rpt.TS1DynamicTalkgroupID, tc.name)
+		assert.Equal(t, uint(50002), *rpt.TS1DynamicTalkgroupID, "%s: nothing may change", tc.name)
+		assert.Nil(t, rpt.TS2DynamicTalkgroupID, "%s: nothing may change", tc.name)
+	}
+}
+
+func TestRepeaterEditsChangeRoutingAtOnce(t *testing.T) {
+	t.Parallel()
+
+	router, tdb, err := testutils.CreateTestDBRouterWithHub()
+	require.NoError(t, err)
+	defer tdb.CloseDB()
+
+	_, _, userJar := testutils.CreateAndLoginUser(t, router, apimodels.UserRegistration{
+		DMRId:    3002068,
+		Callsign: "N6CALL",
+		Username: "testuser",
+		Password: "password",
+	})
+	const id = uint(300206811)
+	_, w := testutils.CreateRepeater(t, router, userJar, apimodels.RepeaterPost{RadioID: id})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, tdb.DB().Create(&models.Talkgroup{ID: 91, Name: "TG91"}).Error)
+	require.NoError(t, tdb.DB().Create(&models.Talkgroup{ID: 92, Name: "TG92"}).Error)
+
+	delivery := testutils.NewHubDelivery(t, tdb.Hub())
+	tdb.Hub().ActivateRepeater(context.Background(), id)
+
+	_, w = testutils.SetRepeaterTalkgroups(t, router, id, userJar, apimodels.RepeaterTalkgroupsPost{
+		TS1StaticTalkgroups: []models.Talkgroup{{ID: 91}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	delivery.RequireGroupBurst(t, 91, id)
+
+	_, w = testutils.SetRepeaterTalkgroups(t, router, id, userJar, apimodels.RepeaterTalkgroupsPost{
+		TS1StaticTalkgroups: []models.Talkgroup{{ID: 92}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, delivery.GroupBurstReaches(t, 91, id), "removed static talkgroup")
+	delivery.RequireGroupBurst(t, 92, id)
+
+	_, w = testutils.DeleteRepeater(t, router, id, userJar)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, delivery.GroupBurstReaches(t, 92, id), "deleted repeater")
+}

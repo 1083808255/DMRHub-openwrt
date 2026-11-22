@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DMRHub 汉化预览 · i18n Preview</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-2: #f0f2f5;
+      --border: #e3e6ea;
+      --text: #1c2026;
+      --muted: #667085;
+      --primary: #2563eb;
+      --primary-soft: #eaf1ff;
+      --success: #0f9d58;
+      --success-soft: #e8f7ef;
+      --danger: #d64545;
+      --danger-soft: #fdecec;
+      --amber: #b7791f;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 8px 24px rgba(16, 24, 40, .06);
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171c;
+        --surface: #1c2026;
+        --surface-2: #242932;
+        --border: #323944;
+        --text: #e8eaed;
+        --muted: #9aa3af;
+        --primary: #6ea8fe;
+        --primary-soft: #1c2a44;
+        --success: #56d19a;
+        --success-soft: #16332a;
+        --danger: #ff8a8a;
+        --danger-soft: #3a2020;
+        --amber: #e3b341;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 32px 20px 64px; }
+    .hero {
+      background: linear-gradient(135deg, var(--primary-soft), transparent 70%), var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: var(--shadow);
+    }
+    .hero-top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 20px; }
+    .eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--primary); font-weight: 700; }
+    h1 { margin: 8px 0 6px; font-size: clamp(26px, 4vw, 38px); line-height: 1.2; }
+    .subtitle { color: var(--muted); margin: 0; font-size: 15px; }
+    .switcher { display: inline-flex; padding: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; gap: 4px; }
+    .switcher button {
+      border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px;
+      padding: 7px 16px; border-radius: 999px; cursor: pointer; font-weight: 600;
+    }
+    .switcher button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(16,24,40,.12); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 28px; }
+    .stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .stat b { display: block; font-size: 24px; line-height: 1.2; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .section { margin-top: 32px; }
+    .section-title { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; }
+    .section-title h2 { font-size: 19px; margin: 0; }
+    .section-title small { color: var(--muted); font-size: 12px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; }
+    .card h3 { margin: 0 0 16px; font-size: 15px; display: flex; align-items: center; gap: 9px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); display: inline-block; }
+    .mock-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .pill { border: 1px solid var(--border); background: var(--surface-2); border-radius: 999px; padding: 5px 12px; font-size: 12px; color: var(--muted); }
+    .pill.primary { background: var(--primary-soft); color: var(--primary); border-color: transparent; font-weight: 600; }
+    label.field { display: block; font-size: 12px; font-weight: 600; margin: 14px 0 6px; }
+    .input {
+      width: 100%; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2);
+      padding: 10px 12px; color: var(--text); font: inherit; font-size: 13px;
+    }
+    .input.invalid { border-color: var(--danger); }
+    .hint { color: var(--muted); font-size: 12px; margin: 12px 0 16px; }
+    .hint a { color: var(--primary); text-decoration: none; font-weight: 600; }
+    .btn { border: 0; border-radius: 9px; background: var(--primary); color: #fff; font: inherit; font-size: 13px; font-weight: 600; padding: 9px 18px; cursor: pointer; }
+    .btn.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .link { color: var(--primary); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+    .error-box { margin-top: 14px; background: var(--danger-soft); color: var(--danger); border-radius: 9px; padding: 10px 12px; font-size: 12px; }
+    .error-box b { display: block; margin-bottom: 2px; }
+    .validation { color: var(--danger); font-size: 11px; margin-top: 5px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    tr:last-child td { border-bottom: 0; }
+    td.key { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--muted); font-size: 12px; }
+    td.zh { color: var(--text); font-weight: 600; }
+    td.scene { color: var(--muted); font-size: 12px; }
+    .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .check { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; font-size: 13px; }
+    .check .ok { width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; background: var(--success-soft); color: var(--success); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+    .check code { color: var(--muted); font-size: 11px; margin-left: auto; }
+    .notes { margin: 0; padding-left: 20px; font-size: 13px; color: var(--muted); }
+    .notes li { margin-bottom: 7px; }
+    .files { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px 20px; margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+    .files code { color: var(--text); font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+    .footer { margin-top: 34px; text-align: center; color: var(--muted); font-size: 12px; }
+    @media (max-width: 640px) {
+      .wrap { padding: 18px 12px 40px; }
+      .hero { padding: 22px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">DMRHub · Localization Preview</div>
+          <h1 data-i18n="__title">DMRHub 汉化预览</h1>
+          <p class="subtitle" data-i18n="__subtitle">基于 vue-i18n 的完整汉化成果 · 可切换语言查看真实文案</p>
+        </div>
+        <div class="switcher" role="group" aria-label="Language">
+          <button id="btn-zh" class="active" type="button" onclick="setLang('zh')">简体中文</button>
+          <button id="btn-en" type="button" onclick="setLang('en')">English</button>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>940</b><span data-i18n="__s1">中英对齐词条</span></div>
+        <div class="stat"><b>90</b><span data-i18n="__s2">模板转换的 Vue 文件</span></div>
+        <div class="stat"><b>52</b><span data-i18n="__s3">脚本调用 t() 的文件</span></div>
+        <div class="stat"><b>714</b><span data-i18n="__s4">通过的单元测试</span></div>
+        <div class="stat"><b>6410</b><span data-i18n="__s5">构建产物中的中文字符</span></div>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-title"><h2 data-i18n="__h2ui">界面效果模拟</h2><small data-i18n="__h2uiSub">文案取自实际 locale 文件与组件</small></div>
+      <div class="grid-2">
+        <article class="card">
+          <h3><span class="dot"></span><span data-i18n="__loginCard">登录页 · LoginPage.vue</span></h3>
+          <div class="mock-nav">
+            <span class="pill primary" data-i18n="Log in">登录</span>
+            <span class="pill" data-i18n="Account">账户</span>
+            <span class="pill" data-i18n="Settings">设置</span>
+          </div>
+          <label class="field" for="demo-user" data-i18n="Username or callsign">用户名或呼号</label>
+          <input id="demo-user" class="input invalid" type="text" value="" placeholder="Username or callsign" readonly />
+          <div class="validation" data-i18n="Username or callsign is required">请填写用户名或呼号</div>
+          <label class="field" for="demo-pass" data-i18n="Password">密码</label>
+          <input id="demo-pass" class="input" type="password" value="demo" readonly />
+          <p class="hint">
+            <span data-i18n="If you don't have an account,">还没有账号？</span>
+            <a href="#" onclick="return false" data-i18n="Register here">在此注册</a>
+            &nbsp;·&nbsp;
+            <a class="link" href="#" onclick="return false" data-i18n="Forgot your password?">忘记密码？</a>
+          </p>
+          <button class="btn" type="button" data-i18n="Log in">登录</button>
+          <div class="error-box">
+            <b data-i18n="Error">错误</b>
+            <span data-i18n="Authentication failed">认证失败，请检查用户名或密码</span>
+          </div>
+        </article>
+
+        <article class="card">
+          <h3><span class="dot"></span><span data-i18n="__adminCard">管理后台 · 导航与操作</span></h3>
+          <div class="mock-nav">
+            <span class="pill primary" data-i18n="Active Net">进行中的通联</span>
+            <span class="pill" data-i18n="Repeater">中继台</span>
+            <span class="pill" data-i18n="Talkgroup">通话组</span>
+            <span class="pill" data-i18n="Admin Setup">管理员设置</span>
+          </div>
+          <label class="field" for="demo-search" data-i18n="Search">搜索</label>
+          <input id="demo-search" class="input" type="text" placeholder="Search" readonly />
+          <div class="mock-nav" style="margin-top:16px">
+            <button class="btn ghost" type="button" data-i18n="Add repeater">添加中继台</button>
+            <button class="btn ghost" type="button" data-i18n="Add talkgroup">添加通话组</button>
+            <button class="btn ghost" type="button" data-i18n="Edit">编辑</button>
+            <button class="btn ghost" type="button" data-i18n="Delete">删除</button>
+            <button class="btn" type="button" data-i18n="Save">保存</button>
+          </div>
+          <div class="error-box" style="background:var(--success-soft);color:var(--success)">
+            <b data-i18n="__readyTitle">汉化状态</b>
+            <span data-i18n="__readyText">界面文案、表单校验、Toast 与页面标题均已接入 i18n。</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2 data-i18n="__h2dict">词条对照</h2><small data-i18n="__h2dictSub">英文原文作为 key，中文译文在 zh-CN.json</small></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th data-i18n="__thKey">Key (en.json)</th><th data-i18n="__thZh">中文译文</th><th data-i18n="__thScene">出现位置</th></tr></thead>
+          <tbody id="dict-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2 data-i18n="__h2check">验证结果</h2><small data-i18n="__h2checkSub">全部通过 · 本地执行</small></div>
+      <div class="checks">
+        <div class="check"><span class="ok">✓</span><span data-i18n="__c1">词条 key 对齐 / 无漏翻</span><code>i18n:check</code></div>
+        <div class="check"><span class="ok">✓</span><span data-i18n="__c2">TypeScript 类型检查</span><code>build:tsc</code></div>
+        <div class="check"><span class="ok">✓</span><span data-i18n="__c3">代码规范检查</span><code>lint</code></div>
+        <div class="check"><span class="ok">✓</span><span data-i18n="__c4">生产构建</span><code>build</code></div>
+        <div class="check"><span class="ok">✓</span><span data-i18n="__c5">84 文件 / 714 用例</span><code>test:unit</code></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2 data-i18n="__h2impl">实现要点</h2></div>
+      <ul class="notes" id="notes">
+        <li data-i18n="__n1">使用 vue-i18n@11.4.23；英文原文直接作为 key，fallbackLocale 为 en，未翻译项自动回退英文。</li>
+        <li data-i18n="__n2">默认语言读取 localStorage，其次 navigator.language，最后回退 en；切换后同步写入 html lang。</li>
+        <li data-i18n="__n3">模板使用 $t()，脚本使用全局 t()；Vuelidate 的校验消息通过 helpers.withMessage 接入翻译。</li>
+        <li data-i18n="__n4">测试环境强制英文，原有英文断言无需改动；另有 i18n-full.test.ts 校验中文输出与语言切换。</li>
+        <li data-i18n="__n5">提供 check-i18n.mjs 与 check-hardcoded.mjs；上游更新后主要维护 JSON 词条并运行检查脚本。</li>
+        <li data-i18n="__n6">不在本次范围：语音提示音频、Go 后端错误文案、doc/ 文档站。</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2 data-i18n="__h2files">主要改动文件</h2></div>
+      <ul class="files">
+        <li><code>internal/http/frontend/package.json</code></li>
+        <li><code>src/i18n/index.ts</code></li>
+        <li><code>src/i18n/locales/en.json</code></li>
+        <li><code>src/i18n/locales/zh-CN.json</code></li>
+        <li><code>src/main.ts</code> · <code>index.html</code> · <code>src/App.vue</code></li>
+        <li><code>src/components/LocaleSwitcher.vue</code></li>
+        <li><code>src/components/AppHeader.vue</code></li>
+        <li><code>src/views/auth/LoginPage.vue</code></li>
+        <li><code>tests/unit/setup.ts</code> · <code>tests/unit/i18n-full.test.ts</code></li>
+        <li><code>scripts/check-i18n.mjs</code> · <code>scripts/check-hardcoded.mjs</code></li>
+        <li><code>scripts/i18n/</code>（codemod 与词条清单）</li>
+        <li><code>env.d.ts</code>（$t 类型声明）</li>
+      </ul>
+    </section>
+
+    <div class="footer" data-i18n="__footer">DMRHub 汉化方案预览 · 单文件静态页面，无需后端即可查看</div>
+  </div>
+
+  <script>
+    const dict = {
+      zh: {
+        __title: 'DMRHub 汉化预览',
+        __subtitle: '基于 vue-i18n 的完整汉化成果 · 可切换语言查看真实文案',
+        __s1: '中英对齐词条', __s2: '模板转换的 Vue 文件', __s3: '脚本调用 t() 的文件',
+        __s4: '通过的单元测试', __s5: '构建产物中的中文字符',
+        __h2ui: '界面效果模拟', __h2uiSub: '文案取自实际 locale 文件与组件',
+        __loginCard: '登录页 · LoginPage.vue', __adminCard: '管理后台 · 导航与操作',
+        __readyTitle: '汉化状态', __readyText: '界面文案、表单校验、Toast 与页面标题均已接入 i18n。',
+        __h2dict: '词条对照', __h2dictSub: '英文原文作为 key，中文译文在 zh-CN.json',
+        __thKey: 'Key (en.json)', __thZh: '中文译文', __thScene: '出现位置',
+        __h2check: '验证结果', __h2checkSub: '全部通过 · 本地执行',
+        __c1: '词条 key 对齐 / 无漏翻', __c2: 'TypeScript 类型检查', __c3: '代码规范检查',
+        __c4: '生产构建', __c5: '84 文件 / 714 用例',
+        __h2impl: '实现要点', __h2files: '主要改动文件',
+        __n1: '使用 vue-i18n@11.4.23；英文原文直接作为 key，fallbackLocale 为 en，未翻译项自动回退英文。',
+        __n2: '默认语言读取 localStorage，其次 navigator.language，最后回退 en；切换后同步写入 html lang。',
+        __n3: '模板使用 $t()，脚本使用全局 t()；Vuelidate 的校验消息通过 helpers.withMessage 接入翻译。',
+        __n4: '测试环境强制英文，原有英文断言无需改动；另有 i18n-full.test.ts 校验中文输出与语言切换。',
+        __n5: '提供 check-i18n.mjs 与 check-hardcoded.mjs；上游更新后主要维护 JSON 词条并运行检查脚本。',
+        __n6: '不在本次范围：语音提示音频、Go 后端错误文案、doc/ 文档站。',
+        __footer: 'DMRHub 汉化方案预览 · 单文件静态页面，无需后端即可查看',
+        'Log in': '登录', 'Account': '账户', 'Settings': '设置',
+        'Username or callsign': '用户名或呼号', 'Username or callsign is required': '请填写用户名或呼号',
+        'Password': '密码', 'If you don\'t have an account,': '还没有账号？',
+        'Register here': '在此注册', 'Forgot your password?': '忘记密码？',
+        'Error': '错误', 'Authentication failed': '认证失败，请检查用户名或密码',
+        'Active Net': '进行中的通联', 'Repeater': '中继台', 'Talkgroup': '通话组',
+        'Admin Setup': '管理员设置', 'Search': '搜索', 'Add repeater': '添加中继台',
+        'Add talkgroup': '添加通话组', 'Edit': '编辑', 'Delete': '删除', 'Save': '保存'
+      },
+      en: {
+        __title: 'DMRHub Localization Preview',
+        __subtitle: 'Full vue-i18n localization · switch language to compare real strings',
+        __s1: 'aligned translation keys', __s2: 'Vue files converted in templates', __s3: 'files calling t() in scripts',
+        __s4: 'unit tests passing', __s5: 'Chinese chars in built bundle',
+        __h2ui: 'UI simulation', __h2uiSub: 'strings taken from real locale files and components',
+        __loginCard: 'Login page · LoginPage.vue', __adminCard: 'Admin UI · navigation and actions',
+        __readyTitle: 'Localization status', __readyText: 'UI copy, validation, toasts and page titles are i18n-driven.',
+        __h2dict: 'String pairs', __h2dictSub: 'English source text as key, Chinese in zh-CN.json',
+        __thKey: 'Key (en.json)', __thZh: 'Chinese', __thScene: 'Location',
+        __h2check: 'Verification', __h2checkSub: 'all checks passed locally',
+        __c1: 'keys aligned / no untranslated', __c2: 'TypeScript check', __c3: 'lint check',
+        __c4: 'production build', __c5: '84 files / 714 cases',
+        __h2impl: 'Implementation notes', __h2files: 'Key changed files',
+        __n1: 'vue-i18n@11.4.23 is used; English source text is the key, fallbackLocale is en, missing translations fall back to English.',
+        __n2: 'Default locale reads localStorage, then navigator.language, then en; switching also updates html lang.',
+        __n3: 'Templates use $t(), scripts use the global t(); Vuelidate messages go through helpers.withMessage.',
+        __n4: 'Tests force English so existing assertions stay valid; i18n-full.test.ts checks Chinese output and locale switching.',
+        __n5: 'check-i18n.mjs and check-hardcoded.mjs are provided; after upstream sync, maintain JSON entries and run the checks.',
+        __n6: 'Out of scope: voice prompt audio, Go backend error strings, and the doc/ documentation site.',
+        __footer: 'DMRHub localization preview · self-contained static page, no backend required',
+        'Log in': 'Log in', 'Account': 'Account', 'Settings': 'Settings',
+        'Username or callsign': 'Username or callsign', 'Username or callsign is required': 'Username or callsign is required',
+        'Password': 'Password', 'If you don\'t have an account,': 'If you don\'t have an account,',
+        'Register here': 'Register here', 'Forgot your password?': 'Forgot your password?',
+        'Error': 'Error', 'Authentication failed': 'Authentication failed',
+        'Active Net': 'Active Net', 'Repeater': 'Repeater', 'Talkgroup': 'Talkgroup',
+        'Admin Setup': 'Admin Setup', 'Search': 'Search', 'Add repeater': 'Add repeater',
+        'Add talkgroup': 'Add talkgroup', 'Edit': 'Edit', 'Delete': 'Delete', 'Save': 'Save'
+      }
+    };
+
+    const pairs = [
+      ['Log in', '登录', '登录按钮 / 页面标题'],
+      ['Username or callsign', '用户名或呼号', '登录表单标签'],
+      ['Username or callsign is required', '请填写用户名或呼号', 'Vuelidate 校验消息'],
+      ['Authentication failed', '认证失败，请检查用户名或密码', '登录失败 Toast'],
+      ['Error logging in', '登录失败，请稍后重试', '后端错误兜底'],
+      ['Forgot your password?', '忘记密码？', '登录页链接'],
+      ['Active Net', '进行中的通联', '通联会话标题'],
+      ['Repeater', '中继台', '导航 / 列表'],
+      ['Talkgroup', '通话组', '导航 / 列表'],
+      ['Admin Setup', '管理员设置', '管理后台导航'],
+      ['Add repeater', '添加中继台', '操作按钮'],
+      ['Save', '保存', '表单提交按钮'],
+      ['Language', '语言', '顶部语言切换器']
+    ];
+
+    function renderTable(lang) {
+      const body = document.getElementById('dict-body');
+      body.innerHTML = pairs.map(function(row) {
+        return '<tr><td class="key">' + row[0] + '</td><td class="zh">' + row[1] + '</td><td class="scene">' + row[2] + '</td></tr>';
+      }).join('');
+    }
+
+    function setLang(lang) {
+      const d = dict[lang];
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach(function(el) {
+        const key = el.getAttribute('data-i18n');
+        if (Object.prototype.hasOwnProperty.call(d, key)) el.textContent = d[key];
+      });
+      document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+      document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+      renderTable(lang);
+      try { localStorage.setItem('locale-preview', lang); } catch (e) {}
+    }
+
+    let initial = 'zh';
+    try { initial = localStorage.getItem('locale-preview') || 'zh'; } catch (e) {}
+    setLang(initial === 'en' ? 'en' : 'zh');
+  </script>
+</body>
+</html>

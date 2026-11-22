@@ -1,0 +1,222 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package hub
+
+import (
+	"log/slog"
+	"strconv"
+	"sync"
+
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+)
+
+const (
+	talkgroupChangedTopic = "hub:talkgroups:changed"
+	userChangedTopic      = "hub:users:changed"
+	radioChangedTopic     = "hub:radios:changed"
+	peerChangedTopic      = "hub:peers:changed"
+	repeaterRekeyTopic    = "hub:repeaters:rekey"
+	rulesChangedTopic     = "hub:rules:changed"
+)
+
+type watchers struct {
+	mu   sync.Mutex
+	next int
+	fns  map[int]watcher
+}
+
+type watcher struct {
+	topic string
+	fn    func(uint)
+}
+
+func (w *watchers) add(topic string, fn func(uint)) func() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fns == nil {
+		w.fns = map[int]watcher{}
+	}
+	id := w.next
+	w.next++
+	w.fns[id] = watcher{topic: topic, fn: fn}
+	return func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		delete(w.fns, id)
+	}
+}
+
+func (w *watchers) call(topic string, id uint) {
+	w.mu.Lock()
+	var fns []func(uint)
+	for _, x := range w.fns {
+		if x.topic == topic {
+			fns = append(fns, x.fn)
+		}
+	}
+	w.mu.Unlock()
+	for _, fn := range fns {
+		fn(id)
+	}
+}
+
+// OnPeerChange calls fn with the ID of a peer after a change of the peer or
+// of its rules on any replica. The returned func stops the calls.
+func (h *Hub) OnPeerChange(fn func(peerID uint)) (stop func()) {
+	return h.watchers.add(peerChangedTopic, fn)
+}
+
+// OnRepeaterChange calls fn with the ID of a repeater after ReloadRepeater
+// on any replica. The returned func stops the calls.
+func (h *Hub) OnRepeaterChange(fn func(repeaterID uint)) (stop func()) {
+	return h.watchers.add(repeaterChangedTopic, fn)
+}
+
+// OnRepeaterSecretChange calls fn with the ID of a repeater after
+// RepeaterSecretChanged on any replica. The returned func stops the calls.
+func (h *Hub) OnRepeaterSecretChange(fn func(repeaterID uint)) (stop func()) {
+	return h.watchers.add(repeaterRekeyTopic, fn)
+}
+
+// RepeaterSecretChanged tells every replica that the password or auth key
+// of the repeater id changed, so that its servers end the sessions that
+// logged in with the old one. Call it after the new secret is saved.
+func (h *Hub) RepeaterSecretChanged(id uint) {
+	h.announce(repeaterRekeyTopic, id)
+}
+
+// OnRulesChange calls fn with the repeater, talkgroup or user ID of each
+// change of the routing rules that this replica took, after it read them
+// again. The returned func stops the calls.
+func (h *Hub) OnRulesChange(fn func(id uint)) (stop func()) {
+	return h.watchers.add(rulesChangedTopic, fn)
+}
+
+// RulesChanged makes every replica read the routing rules again after a
+// change of the rules of the repeater or talkgroup id, or after the delete
+// of the user, repeater or talkgroup id.
+func (h *Hub) RulesChanged(id uint) {
+	h.announce(rulesChangedTopic, id)
+}
+
+// OnTalkgroupChange calls fn with the ID of a talkgroup after this replica
+// reads it again for a TalkgroupChanged on any replica. The returned func
+// stops the calls.
+func (h *Hub) OnTalkgroupChange(fn func(talkgroupID uint)) (stop func()) {
+	return h.watchers.add(talkgroupChangedTopic, fn)
+}
+
+// OnUserChange calls fn with the ID of a user after this replica reads it
+// again for a UserChanged on any replica. The returned func stops the
+// calls.
+func (h *Hub) OnUserChange(fn func(userID uint)) (stop func()) {
+	return h.watchers.add(userChangedTopic, fn)
+}
+
+// TalkgroupChanged makes every replica read the talkgroup id again. Call it
+// after the talkgroup is made, changed or deleted.
+func (h *Hub) TalkgroupChanged(id uint) {
+	h.announce(talkgroupChangedTopic, id)
+}
+
+// UserChanged makes every replica read the user id again. Call it after the
+// user is made, changed or deleted.
+func (h *Hub) UserChanged(id uint) {
+	h.announce(userChangedTopic, id)
+}
+
+// RadioChanged makes every replica read the owner of the radio ID id
+// again. Call it after a user adds the ID to their list or removes it.
+func (h *Hub) RadioChanged(id uint) {
+	h.announce(radioChangedTopic, id)
+}
+
+// PeerChanged makes every replica read the OpenBridge peer id and its rules
+// again. Call it after the peer or one of its rules is made, changed or
+// deleted.
+func (h *Hub) PeerChanged(id uint) {
+	h.announce(peerChangedTopic, id)
+}
+
+func (h *Hub) announce(topic string, id uint) {
+	h.applyChange(topic, id)
+	if h.pubsub == nil {
+		return
+	}
+	msg := h.origin + ":" + strconv.FormatUint(uint64(id), 10)
+	if err := h.pubsub.Publish(topic, []byte(msg)); err != nil {
+		slog.Error("Failed to announce a change", "topic", topic, "id", id, "error", err)
+	}
+}
+
+func (h *Hub) applyChange(topic string, id uint) {
+	switch topic {
+	case talkgroupChangedTopic:
+		h.noteTalkgroup(id)
+		h.watchers.call(talkgroupChangedTopic, id)
+	case userChangedTopic:
+		h.loadOnAirRadios()
+		h.radioOwners.Reload(id)
+		h.radioCalls.Drop(id)
+		h.watchers.call(userChangedTopic, id)
+	case radioChangedTopic:
+		h.radioOwners.Reload(id)
+		h.radioCalls.Drop(id)
+		h.loadOnAirRadios()
+		h.unlockGrants.Reload(id)
+	case unlockChangedTopic:
+		h.unlockGrants.Reload(id)
+		h.watchers.call(unlockChangedTopic, id)
+	case peerChangedTopic:
+		h.egressTable.Reload(struct{}{})
+		h.watchers.call(peerChangedTopic, id)
+	case rulesChangedTopic:
+		h.loadRules()
+		h.watchers.call(rulesChangedTopic, id)
+	case repeaterRekeyTopic:
+		h.watchers.call(repeaterRekeyTopic, id)
+	case repeaterResetTopic:
+		h.watchers.call(repeaterResetTopic, id)
+	}
+}
+
+func (h *Hub) listenChanges(topic string, sub pubsub.Subscription) {
+	defer func() {
+		if err := sub.Close(); err != nil {
+			slog.Error("Error closing a change subscription", "topic", topic, "error", err)
+		}
+	}()
+	ch := sub.Channel()
+	for {
+		select {
+		case <-h.done:
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			origin, id, valid := parseRepeaterChange(msg)
+			if !valid || origin == h.origin {
+				continue
+			}
+			h.applyChange(topic, id)
+		}
+	}
+}

@@ -1,0 +1,227 @@
+{
+  "source": "testdata/anytone-aprs.txt: ten BS_Dwn_Acts and position reports (compressed UDP/IPv4 header, NMEA RMC)",
+  "transmissions": [
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "csbk",
+      "source_id": 3009999,
+      "destination_id": 16777215,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    },
+    {
+      "kind": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "group_call": false,
+      "time_slot": true
+    }
+  ],
+  "messages": [
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    },
+    {
+      "format": "data",
+      "source_id": 3009999,
+      "destination_id": 3009998,
+      "confirmed": false,
+      "is_group": false,
+      "text": ""
+    }
+  ]
+}

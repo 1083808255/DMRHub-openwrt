@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package websocket
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/http/api/apimodels"
+	"github.com/USA-RedDragon/DMRHub/internal/http/websocket"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	coderWebsocket "github.com/coder/websocket"
+)
+
+func forward(ctx context.Context, subscription pubsub.Subscription, w websocket.Writer) {
+	channel := subscription.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-channel:
+			if !ok {
+				return
+			}
+			w.WriteMessage(websocket.Message{
+				Type: int(coderWebsocket.MessageText),
+				Data: msg,
+			})
+		}
+	}
+}
+
+// forwardPublic is forward for a visitor who is not logged in: it drops
+// each call while visibility is login, and drops the names and positions
+// of each call while it is hide-names.
+func forwardPublic(ctx context.Context, subscription pubsub.Subscription, w websocket.Writer, current config.Source) {
+	channel := subscription.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-channel:
+			if !ok {
+				return
+			}
+			switch current.Get().Visibility.Mode() {
+			case config.VisibilityLogin:
+				continue
+			case config.VisibilityHideNames:
+				var call apimodels.WSCallResponse
+				if err := json.Unmarshal(msg, &call); err != nil {
+					slog.Error("Failed to read a public call", "error", err)
+					continue
+				}
+				call.HideNames()
+				b, err := json.Marshal(call)
+				if err != nil {
+					slog.Error("Failed to write a public call", "error", err)
+					continue
+				}
+				msg = b
+			case config.VisibilityPublic:
+			}
+			w.WriteMessage(websocket.Message{
+				Type: int(coderWebsocket.MessageText),
+				Data: msg,
+			})
+		}
+	}
+}
+
+func closeSubscription(subscription pubsub.Subscription, name string) {
+	if err := subscription.Close(); err != nil {
+		slog.Error("Failed to close pubsub subscription", "websocket", name, "error", err)
+	}
+}

@@ -1,0 +1,532 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  frontend:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - run: make build-frontend
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  frontend-eslint:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - run: cd internal/http/frontend && npm ci
+
+      - name: Save Code Linting Report JSON
+        run: cd internal/http/frontend && npm run lint:report
+
+      - name: Annotate Code Linting Results
+        if: always()
+        uses: ataylorme/eslint-annotate-action@v2
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          report-json: "internal/http/frontend/eslint_report.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: frontend-eslint-report
+          if-no-files-found: error
+          retention-days: 30
+          path: internal/http/frontend/eslint_report.json
+
+  # frontend-unit-tests:
+  #   runs-on: ubuntu-26.04
+  #   permissions:
+  #     contents: read
+  #     checks: write
+
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+  #     - name: Set up Go
+  #       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+  #       with:
+  #         go-version-file: go.mod
+
+  #     - name: Use Node.js
+  #       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+  #       with:
+  #         node-version-file: .node-version
+
+  #     - run: cd internal/http/frontend && npm ci
+
+  #     - run: make frontend-unit-test
+
+  #     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+  #       if: always()
+  #       with:
+  #         name: frontend-unit-test-report
+  #         if-no-files-found: error
+  #         retention-days: 30
+  #         path: internal/http/frontend/reports/unit
+
+  #     - name: Publish Test Report
+  #       if: always()
+  #       uses: mikepenz/action-junit-report@b7b80d7ac5b1da46d6aaff9fb57ad50d8453bcb3 # v6.6.0
+  #       with:
+  #         report_paths: "internal/http/frontend/reports/unit/*.xml"
+  #         test_files_prefix: "internal/http/frontend"
+  #         require_tests: true
+  #         check_retries: true
+  #         detailed_summary: true
+  #         fail_on_failure: true
+  #         token: ${{ secrets.GITHUB_TOKEN }}
+  #         check_name: Frontend Unit Tests
+  #         job_name: Tests
+
+  # frontend-unit-tests-coverage:
+  #   runs-on: ubuntu-26.04
+  #   permissions:
+  #     contents: read
+
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+  #     - name: Use Node.js
+  #       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+  #       with:
+  #         node-version-file: .node-version
+
+  #     - run: cd internal/http/frontend && npm ci
+
+  #     - run: make frontend-unit-test-coverage
+
+  #     - uses: USA-RedDragon/reusable-actions/coverage@529a6c6e160b4039d6251284544c13a806f65156 # v2.0.29
+  #       if: always()
+  #       with:
+  #         file: internal/http/frontend/coverage/unit/lcov.info
+  #         badge: .github/badges/frontend-unit-coverage.svg
+  #         baseline: .github/coverage-baseline-frontend-unit.tsv
+  #         label: frontend unit coverage
+  #         marker: frontend-unit-coverage
+
+  #     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+  #       if: always()
+  #       with:
+  #         name: frontend-unit-coverage
+  #         path: internal/http/frontend/coverage/unit
+  #         if-no-files-found: error
+  #         retention-days: 30
+
+  frontend-e2e-tests:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: ["firefox", "chrome", "electron"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - run: cd internal/http/frontend && npm ci
+
+      - run: make frontend-e2e-test-${{ matrix.browser }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: frontend-e2e-test-report-${{ matrix.browser }}
+          if-no-files-found: error
+          retention-days: 30
+          path: internal/http/frontend/reports/e2e
+
+      - name: Publish Test Report
+        if: always()
+        uses: mikepenz/action-junit-report@4a26df3e2ae132254ba12a53f65a388d0961e786 # v6.7.0
+        with:
+          report_paths: "internal/http/frontend/reports/e2e/*.xml"
+          test_files_prefix: "internal/http/frontend"
+          require_tests: true
+          check_retries: true
+          detailed_summary: true
+          fail_on_failure: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          check_name: Frontend E2E Tests (${{ matrix.browser }})
+          job_name: Tests
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: frontend-e2e-screenshots-${{ matrix.browser }}
+          path: internal/http/frontend/cypress/screenshots
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: frontend-e2e-videos-${{ matrix.browser }}
+          path: internal/http/frontend/cypress/videos
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: frontend-e2e-coverage-${{ matrix.browser }}
+          path: internal/http/frontend/coverage/e2e
+          if-no-files-found: ignore
+          retention-days: 30
+
+  frontend-coverage:
+    needs: frontend-e2e-tests
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: USA-RedDragon/reusable-actions/.github/workflows/coverage.yaml@c5ee15922a0ff4229b0f06a8d0551541b5cabfdc # v2.0.34
+    with:
+      artifact: frontend-e2e-coverage-chrome
+      file: lcov.info
+      badge: .github/badges/frontend-coverage.svg
+      baseline: .github/coverage-baseline-frontend.tsv
+      label: frontend coverage
+      marker: frontend-coverage
+      if-no-file: warn
+      app-id: ${{ vars.AUTO_COMMIT_APP_ID }}
+    secrets:
+      app-key: ${{ secrets.AUTO_COMMIT_APP_KEY }}
+
+  backend-benchmark-tests:
+    runs-on: ubuntu-26.04
+    needs: frontend
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Copy built frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+
+      - name: Set up TinyGo
+        run: ./hack/install-tinygo.sh
+
+      - run: go generate ./...
+
+      - run: make benchmark
+
+  backend-race-tests:
+    runs-on: ubuntu-26.04
+    needs: frontend
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Copy built frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+
+      - name: Set up TinyGo
+        run: ./hack/install-tinygo.sh
+
+      - run: go generate ./...
+
+      - name: Pull database images
+        run: for image in postgres:16-alpine redis:7-alpine mysql:8.4 mariadb:12.3; do docker pull -q "$image"; done
+
+      - name: Race tests
+        run: |
+          go test -tags codec2wasm -timeout 30m ./... -race
+
+  backend-mysql-integration-tests:
+    runs-on: ubuntu-26.04
+    needs: frontend
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Copy built frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+
+      - name: Set up TinyGo
+        run: ./hack/install-tinygo.sh
+
+      - run: go generate ./...
+
+      - name: Pull database images
+        run: for image in postgres:16-alpine redis:7-alpine mysql:8.4 mariadb:12.3; do docker pull -q "$image"; done
+
+      - name: MySQL and MariaDB integration tests
+        run: |
+          env CGO_ENABLED=0 DMRHUB_TEST_MYSQL=1 go test -timeout 60m -run '/(mysql|mariadb)$' ./internal/dmr/
+
+  backend-unit-tests:
+    runs-on: ubuntu-26.04
+    needs: frontend
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Copy built frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+
+      - name: Set up TinyGo
+        run: ./hack/install-tinygo.sh
+
+      - run: go generate ./...
+
+      - name: Pull database images
+        run: for image in postgres:16-alpine redis:7-alpine mysql:8.4 mariadb:12.3; do docker pull -q "$image"; done
+
+      - name: Unit tests
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@latest
+          go install github.com/vakenbolt/go-test-report@latest
+          env CGO_ENABLED=0 go test -timeout 30m -v ./... 2>&1 > out.txt || true
+          env CGO_ENABLED=0 go test -timeout 30m -v ./... -json 2>&1 > json-out.txt || true
+          cat out.txt | go-junit-report -out report.xml -iocopy
+          cat json-out.txt | go-test-report -o report.html
+
+      - name: Publish Test Report
+        if: always()
+        uses: mikepenz/action-junit-report@4a26df3e2ae132254ba12a53f65a388d0961e786 # v6.7.0
+        with:
+          report_paths: "report.xml"
+          require_tests: true
+          check_retries: true
+          detailed_summary: true
+          fail_on_failure: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          check_name: Backend Unit Tests
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: backend-test-report-xml
+          path: report.xml
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: backend-test-report-html
+          path: report.html
+          if-no-files-found: error
+          retention-days: 30
+
+  backend-fuzz-tests:
+    runs-on: ubuntu-26.04
+    needs: frontend
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Copy built frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+
+      - name: Set up TinyGo
+        run: ./hack/install-tinygo.sh
+
+      - run: go generate ./...
+
+      - name: Fuzz tests
+        run: |
+          ./hack/fuzz.sh
+
+  backend-unit-tests-coverage:
+    runs-on: ubuntu-26.04
+    needs: frontend
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Copy built frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend
+          path: internal/http/frontend/dist
+
+      - name: Set up TinyGo
+        run: ./hack/install-tinygo.sh
+
+      - run: go generate ./...
+
+      - name: Pull database images
+        run: for image in postgres:16-alpine redis:7-alpine mysql:8.4 mariadb:12.3; do docker pull -q "$image"; done
+
+      - name: Unit tests
+        run: |
+          env CGO_ENABLED=0 go test -timeout 30m -v ./... -coverprofile coverage.raw -coverpkg=./... -covermode atomic
+          grep -v -e '_configulator\.go:' -e '_gen\.go:' -e '_gen_test\.go:' coverage.raw > coverage.out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: backend-coverage
+          path: coverage.out
+          if-no-files-found: error
+          retention-days: 30
+
+  coverage:
+    needs: backend-unit-tests-coverage
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: USA-RedDragon/reusable-actions/.github/workflows/coverage.yaml@c5ee15922a0ff4229b0f06a8d0551541b5cabfdc # v2.0.34
+    with:
+      artifact: backend-coverage
+      file: coverage.out
+      app-id: ${{ vars.AUTO_COMMIT_APP_ID }}
+    secrets:
+      app-key: ${{ secrets.AUTO_COMMIT_APP_KEY }}

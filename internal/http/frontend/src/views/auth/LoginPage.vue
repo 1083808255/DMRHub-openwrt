@@ -1,0 +1,200 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <div>
+    <form @submit.prevent="handleLogin(!v$.$invalid)">
+      <Card>
+        <CardHeader>
+          <CardTitle>{{ $t('Log in') }}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <label class="field-label" for="username">{{ $t('Username or callsign') }}</label>
+          <ShadInput
+            id="username"
+            type="text"
+            v-model="v$.username.$model"
+            :aria-invalid="v$.username.$invalid && submitted"
+          />
+          <span v-if="v$.username.$error && submitted">
+            <span v-for="(error, index) of v$.username.$errors" :key="index">
+              <small class="field-error">{{ error.$message }}</small>
+            </span>
+            <br />
+          </span>
+          <br />
+          <label class="field-label" for="password">{{ $t('Password') }}</label>
+          <ShadInput
+            id="password"
+            type="password"
+            v-model="v$.password.$model"
+            :aria-invalid="v$.password.$invalid && submitted"
+          />
+          <span v-if="v$.password.$error && submitted">
+            <span v-for="(error, index) of v$.password.$errors" :key="index">
+              <small class="field-error">{{ error.$message }}</small>
+            </span>
+            <br />
+          </span>
+          <br />
+          <p>
+            {{ $t("If you don't have an account,") }}
+            <router-link to="/register">{{ $t('Register here') }}</router-link>
+          </p>
+        </CardContent>
+        <CardFooter class="flex-col items-start gap-4">
+          <div class="card-footer">
+            <ShadButton type="submit" variant="outline" size="sm">{{ $t('Log in') }}</ShadButton>
+          </div>
+          <router-link
+            v-if="settingsStore.passwordResetEnabled"
+            to="/forgot-password"
+            class="text-sm text-primary underline underline-offset-[0.2rem]"
+            data-test="forgot-password"
+          >
+            {{ $t('Forgot your password?') }}
+          </router-link>
+        </CardFooter>
+      </Card>
+    </form>
+  </div>
+</template>
+
+<script lang="ts">
+import { computed } from 'vue';
+import { useHead } from '@unhead/vue';
+import { useI18n } from 'vue-i18n';
+import API from '@/services/API';
+import { safeNext } from '@/lib/next';
+import { Button as ShadButton } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input as ShadInput } from '@/components/ui/input';
+
+import { useVuelidate } from '@vuelidate/core';
+import { helpers, required } from '@vuelidate/validators';
+
+import { mapStores } from 'pinia';
+import { useSettingsStore, useUserStore } from '@/store';
+
+export default {
+  components: {
+    ShadButton,
+    Card,
+    CardContent,
+    CardFooter,
+    CardHeader,
+    CardTitle,
+    ShadInput,
+  },
+  setup() {
+    const { t } = useI18n();
+    useHead({ title: computed(() => t('Log in')) });
+    return { v$: useVuelidate() };
+  },
+  created() {},
+  mounted() {
+    this.settingsStore.fetchConfig();
+  },
+  data: function() {
+    return {
+      username: '',
+      password: '',
+      submitted: false,
+    };
+  },
+  validations() {
+    return {
+      username: {
+        required: helpers.withMessage(() => this.$t('Username or callsign is required'), required),
+      },
+      password: {
+        required: helpers.withMessage(() => this.$t('Password is required'), required),
+      },
+    };
+  },
+  methods: {
+    handleLogin(isFormValid: boolean) {
+      this.submitted = true;
+      this.v$.$touch();
+      if (!isFormValid) {
+        return;
+      }
+
+      API.post('/auth/login', {
+        username: this.username.trim(),
+        password: this.password.trim(),
+      })
+        .then(() => {
+          API.get('/users/me').then((res) => {
+            this.userStore.id = res.data.id;
+            this.userStore.callsign = res.data.callsign;
+            this.userStore.username = res.data.username;
+            this.userStore.admin = res.data.admin;
+            this.userStore.superAdmin = res.data.superAdmin;
+            this.userStore.created_at = res.data.created_at;
+            this.userStore.mustChangePassword = res.data.must_change_password === true;
+            this.userStore.loggedIn = true;
+            if (this.userStore.mustChangePassword) {
+              this.$router.push('/settings');
+              return;
+            }
+            this.$router.push(safeNext(this.$route.query.next));
+          });
+        })
+        .catch((err) => {
+          console.error(err);
+          const serverError = err.response && err.response.data && err.response.data.error;
+          const detail = serverError
+            ? this.$te(serverError)
+              ? this.$t(serverError)
+              : serverError
+            : this.$t('Error logging in');
+          this.$toast.add({
+            summary: this.$t('Error'),
+            severity: 'error',
+            detail,
+            life: 3000,
+          });
+        });
+    },
+  },
+  computed: {
+    ...mapStores(useUserStore, useSettingsStore),
+  },
+};
+</script>
+
+<style scoped>
+.field-label {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.field-error {
+  color: var(--primary);
+}
+</style>

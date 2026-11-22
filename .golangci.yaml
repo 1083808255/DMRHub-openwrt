@@ -1,0 +1,97 @@
+version: "2"
+
+run:
+  timeout: 30m
+  # Codec2 runs on its WebAssembly build, also when cgo is on.
+  build-tags:
+    - codec2wasm
+
+linters:
+  exclusions:
+    generated: lax
+    paths:
+      - .*_configulator\.go$
+      - internal/http/frontend/node_modules
+    rules:
+      # The plugin SDK is MIT, and its files have the MIT header.
+      - path: ^sdk/
+        linters:
+          - goheader
+      - path: _test\.go
+        linters:
+          - dogsled
+          - goconst
+          - gosec
+      - path: internal/testutils/.*\.go
+        linters:
+          - dogsled
+          - goconst
+          - gosec
+      - path: ^hack/
+        linters:
+          - goconst
+          - gosec
+      - path: internal/(db/models/packet|dmr/dmrconst/const|dmr/hub/publishing|dmr/servers/ipsc/translator|kv/memory)\.go
+        text: G115
+        linters:
+          - gosec
+      - path: internal/dmr/servers/ipsc/translator\.go
+        text: G602
+        linters:
+          - gosec
+  settings:
+    goheader:
+      template-path: .copyright-header
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - containedctx
+    - contextcheck
+    - decorder
+    - dogsled
+    - dupword
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - godox
+    - goheader
+    - gomoddirectives
+    - gosec
+    - grouper
+    - loggercheck
+    - misspell
+    - nilerr
+    - nilnil
+    - noctx
+    - nosprintfhostport
+    - paralleltest
+    - prealloc
+    - predeclared
+    - reassign
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+    - wrapcheck
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+  exclusions:
+    paths:
+      - .*_configulator\.go$
+      - internal/http/frontend/node_modules
+

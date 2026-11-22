@@ -1,0 +1,429 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <div class="space-y-6">
+    <!-- Loading skeleton -->
+    <div v-if="loading" class="space-y-6">
+      <Card>
+        <CardHeader>
+          <Skeleton class="h-8 w-64" />
+        </CardHeader>
+        <CardContent>
+          <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Skeleton v-for="n in 6" :key="n" class="h-16" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Error state -->
+    <Card v-else-if="error">
+      <CardHeader>
+        <CardTitle>{{ $t("Error") }}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p class="text-destructive">{{ error }}</p>
+      </CardContent>
+    </Card>
+
+    <!-- User details -->
+    <template v-else-if="user">
+      <!-- Header card -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <div>
+              <CardTitle>
+                <span v-if="radioIdData && radioIdData.flag" class="cursor-default text-lg leading-none">{{ radioIdData.flag }}&nbsp;</span>
+                {{ user.callsign }} — {{ user.id }}
+              </CardTitle>
+              <CardDescription v-if="radioIdData">
+                {{ radioIdData.name }} {{ radioIdData.surname }}
+              </CardDescription>
+            </div>
+            <div class="flex items-center gap-2">
+              <span v-if="user.admin"
+                class="inline-flex items-center rounded-md bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-500">
+                {{ $t("Admin") }}
+              </span>
+              <span class="inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-medium"
+                :class="user.approved ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500'">
+                {{ user.approved ? 'Approved' : 'Pending Approval' }}
+              </span>
+              <ShadButton
+                v-if="mayRequirePasswordChange"
+                variant="outline"
+                size="sm"
+                type="button"
+                data-test="user-require-password"
+                @click="requireOpen = true"
+              >
+                {{ $t("Require password change") }}
+              </ShadButton>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <!-- Info grid -->
+      <div class="grid gap-6 md:grid-cols-2">
+        <!-- User Information -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("User Information") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="detail-list">
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("DMR ID") }}</dt>
+                <dd class="detail-value">{{ user.id }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Callsign") }}</dt>
+                <dd class="detail-value">{{ user.callsign }}</dd>
+              </div>
+              <div v-if="radioIdData && radioIdData.name" class="detail-row">
+                <dt class="detail-label">{{ $t("Name") }}</dt>
+                <dd class="detail-value">{{ radioIdData.name }} {{ radioIdData.surname }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Registered") }}</dt>
+                <dd class="detail-value">
+                  <RelativeTimestamp :time="user.created_at" />
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <!-- Location (from RadioID) -->
+        <Card v-if="radioIdData && (radioIdData.city || radioIdData.state || radioIdData.country)">
+          <CardHeader>
+            <CardTitle>{{ $t("Location") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="detail-list">
+              <div v-if="radioIdData.city" class="detail-row">
+                <dt class="detail-label">{{ $t("City") }}</dt>
+                <dd class="detail-value">{{ radioIdData.city }}</dd>
+              </div>
+              <div v-if="radioIdData.state" class="detail-row">
+                <dt class="detail-label">{{ $t("State") }}</dt>
+                <dd class="detail-value">{{ radioIdData.state }}</dd>
+              </div>
+              <div v-if="radioIdData.country" class="detail-row">
+                <dt class="detail-label">{{ $t("Country") }}</dt>
+                <dd class="detail-value">
+                  <span v-if="radioIdData.flag">{{ radioIdData.flag }}&nbsp;</span>{{ radioIdData.country }}
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <!-- Repeaters -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("Repeaters") }}</CardTitle>
+            <CardDescription>{{ $t("Repeaters owned by this user") }}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div v-if="user.repeaters && user.repeaters.length > 0" class="space-y-2">
+              <RouterLink
+                v-for="repeater in user.repeaters"
+                :key="repeater.id"
+                :to="`/repeaters/${repeater.id}`"
+                class="flex items-center justify-between rounded-md border px-4 py-2 text-sm hover:bg-muted transition-colors"
+              >
+                <span class="font-medium">{{ repeater.callsign || repeater.id }}</span>
+                <span class="text-muted-foreground">{{ repeater.id }}</span>
+              </RouterLink>
+            </div>
+            <p v-else class="text-sm text-muted-foreground">{{ $t("No repeaters registered") }}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <!-- Last Heard -->
+      <Card>
+        <CardHeader>
+          <CardTitle>{{ $t("Last Heard") }}</CardTitle>
+          <CardDescription>{{ $t("Recent calls by this user") }}</CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-4">
+          <TypeFilter v-model="filter" />
+          <DataTable
+            :columns="columns"
+            :data="lastheard"
+            :loading="lastheardLoading"
+            :loading-text="'Loading...'"
+            :empty-text="'No transmissions match these types'"
+            :manual-pagination="true"
+            :page-index="page - 1"
+            :page-size="rows"
+            :page-count="totalPages"
+            @update:page-index="handlePageIndexUpdate"
+            @update:page-size="handlePageSizeUpdate"
+          />
+        </CardContent>
+      </Card>
+      <RequirePasswordChangeDialog
+        v-if="mayRequirePasswordChange"
+        v-model:open="requireOpen"
+        :user-id="user.id"
+        :callsign="user.callsign"
+      />
+    </template>
+  </div>
+</template>
+
+<script lang="ts">
+import { RouterLink } from 'vue-router';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button as ShadButton } from '@/components/ui/button';
+import RequirePasswordChangeDialog from '@/components/users/RequirePasswordChangeDialog.vue';
+import { DataTable } from '@/components/ui/data-table';
+import TypeFilter from '@/components/TypeFilter.vue';
+import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
+import { lastHeardColumns } from '@/lib/lastHeardColumns';
+import {
+  cleanCalls,
+  defaultFilter,
+  filterQuery,
+  matchesFilter,
+  type CallRow,
+  type TypeFilterValue,
+} from '@/lib/transmissions';
+
+import API from '@/services/API';
+import { getUserDB, type RadioIdData } from '@/services/userdb';
+import { getWebsocketURI } from '@/services/util';
+import ws from '@/services/ws';
+import { useUserStore } from '@/store';
+
+type RepeaterRef = {
+  id: number;
+  callsign: string;
+};
+
+type UserProfile = {
+  id: number;
+  callsign: string;
+  admin: boolean;
+  superAdmin?: boolean;
+  approved: boolean;
+  repeaters: RepeaterRef[];
+  created_at: string;
+};
+
+export default {
+  components: {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+    Skeleton,
+    ShadButton,
+    RequirePasswordChangeDialog,
+    DataTable,
+    TypeFilter,
+    RouterLink,
+    RelativeTimestamp,
+  },
+  head: {
+    title: 'User Details',
+  },
+  created() {},
+  mounted() {
+    const id = this.$route.params.id;
+    if (id) {
+      this.userID = Number(id);
+      this.fetchUser();
+      this.fetchLastheard();
+      this.socket = ws.connect(getWebsocketURI() + '/calls', this.onWebsocketMessage);
+      this.timeInterval = setInterval(() => { this.now = Date.now(); }, 30000);
+    }
+  },
+  unmounted() {
+    if (this.timeInterval !== null) {
+      clearInterval(this.timeInterval);
+    }
+    if (this.socket) {
+      this.socket.close();
+    }
+  },
+  data: function() {
+    return {
+      userID: 0,
+      user: null as UserProfile | null,
+      radioIdData: null as RadioIdData | null,
+      loading: true,
+      error: '',
+      lastheard: [] as CallRow[],
+      lastheardLoading: false,
+      filter: defaultFilter() as TypeFilterValue,
+      totalRecords: 0,
+      page: 1,
+      rows: 30,
+      socket: null as { close(): void } | null,
+      now: Date.now(),
+      timeInterval: null as ReturnType<typeof setInterval> | null,
+      requireOpen: false,
+    };
+  },
+  watch: {
+    filter: {
+      deep: true,
+      handler() {
+        this.page = 1;
+        this.fetchLastheard(this.page, this.rows);
+      },
+    },
+  },
+  computed: {
+    mayRequirePasswordChange(): boolean {
+      const me = useUserStore();
+      if (!this.user || !me.admin || this.user.id === me.id) {
+        return false;
+      }
+      return me.superAdmin || (!this.user.admin && !this.user.superAdmin);
+    },
+    columns() {
+      void this.now;
+      return lastHeardColumns({ user: false });
+    },
+    totalPages(): number {
+      if (!this.totalRecords || this.totalRecords <= 0) {
+        return 1;
+      }
+      return Math.max(1, Math.ceil(this.totalRecords / this.rows));
+    },
+  },
+  methods: {
+    fetchUser() {
+      this.loading = true;
+      API.get(`/users/${this.userID}/profile`)
+        .then((res) => {
+          this.user = res.data;
+          this.loading = false;
+          getUserDB(this.userID).then((data) => {
+            this.radioIdData = data;
+          });
+        })
+        .catch((err) => {
+          console.error(err);
+          this.error = 'Failed to load user details. You may not have permission to view this user.';
+          this.loading = false;
+        });
+    },
+    fetchLastheard(page = 1, limit = 30) {
+      if (this.filter.types.length === 0) {
+        this.lastheard = [];
+        this.totalRecords = 0;
+        return;
+      }
+      this.lastheardLoading = true;
+      API.get(`/lastheard/user/${this.userID}?page=${page}&limit=${limit}&${filterQuery(this.filter)}`)
+        .then((res) => {
+          this.totalRecords = res.data.total;
+          this.lastheard = cleanCalls(res.data.calls);
+          this.lastheardLoading = false;
+        })
+        .catch((err) => {
+          console.error(err);
+          this.lastheardLoading = false;
+        });
+    },
+    handlePageIndexUpdate(pageIndex: number) {
+      const nextPage = pageIndex + 1;
+      if (nextPage === this.page || nextPage < 1) {
+        return;
+      }
+      this.page = nextPage;
+      this.fetchLastheard(this.page, this.rows);
+    },
+    handlePageSizeUpdate(pageSize: number) {
+      if (pageSize === this.rows || pageSize <= 0) {
+        return;
+      }
+      this.rows = pageSize;
+      this.page = 1;
+      this.fetchLastheard(this.page, this.rows);
+    },
+    onWebsocketMessage(event: MessageEvent) {
+      const call = JSON.parse(event.data);
+      if (!matchesFilter(call, this.filter) && !this.lastheard.some((c) => c.id === call.id)) {
+        return;
+      }
+      // Only process calls from this user
+      if (call.user?.id !== this.userID) {
+        return;
+      }
+      let found = false;
+      const copyLastheard = JSON.parse(JSON.stringify(this.lastheard));
+      for (let i = 0; i < copyLastheard.length; i++) {
+        if (copyLastheard[i].id == call.id) {
+          found = true;
+          copyLastheard[i] = call;
+          break;
+        }
+      }
+      if (!found && copyLastheard.length === this.rows) {
+        copyLastheard.pop();
+      }
+      if (!found && copyLastheard.length < this.rows) {
+        copyLastheard.unshift(call);
+      }
+      this.lastheard = cleanCalls(copyLastheard);
+    },
+  },
+};
+</script>
+
+<style scoped>
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.detail-label {
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: right;
+}
+</style>

@@ -1,0 +1,867 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <!-- Desktop top bar -->
+  <header
+    class="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+  >
+    <div class="flex h-14 items-center px-2">
+      <!-- Mobile hamburger -->
+      <Sheet v-if="!bare" v-model:open="mobileOpen">
+        <SheetTrigger as-child>
+          <ShadButton variant="ghost" size="icon" class="mr-2 md:hidden">
+            <Menu class="h-5 w-5" />
+            <span class="sr-only">{{ $t("Toggle menu") }}</span>
+          </ShadButton>
+        </SheetTrigger>
+        <SheetContent side="left" class="w-72 p-0">
+          <SheetHeader class="border-b border-border px-4 py-4">
+            <SheetTitle>
+              <a
+                href="/"
+                class="text-lg font-bold text-foreground no-underline"
+              >
+                {{ title }}
+              </a>
+            </SheetTitle>
+            <SheetDescription class="sr-only">{{ $t("Navigation menu") }}</SheetDescription>
+          </SheetHeader>
+
+          <nav class="flex flex-col gap-1 px-2 py-3">
+            <router-link
+              to="/lastheard"
+              class="mobile-nav-link"
+              :class="{ active: route.path === '/lastheard' }"
+              @click="mobileOpen = false"
+            >
+              <Radio class="h-4 w-4" />
+              {{ $t("Last Heard") }}
+            </router-link>
+            <router-link
+              v-if="userStore.loggedIn"
+              to="/repeaters"
+              class="mobile-nav-link"
+              :class="{ active: route.path === '/repeaters' || route.path.startsWith('/localgroups/') }"
+              @click="mobileOpen = false"
+            >
+              <Antenna class="h-4 w-4" />
+              {{ $t("Repeaters") }}
+            </router-link>
+            <router-link
+              v-if="userStore.loggedIn"
+              to="/messages"
+              class="mobile-nav-link"
+              :class="{ active: route.path === '/messages' }"
+              @click="mobileOpen = false"
+            >
+              <Mail class="h-4 w-4" />
+              {{ $t("Messages") }}
+            </router-link>
+            <router-link
+              v-if="userStore.loggedIn"
+              to="/positions"
+              class="mobile-nav-link"
+              :class="{ active: route.path.startsWith('/positions') }"
+              @click="mobileOpen = false"
+            >
+              <MapPin class="h-4 w-4" />
+              {{ $t("Positions") }}
+            </router-link>
+
+            <!-- Talkgroups link (anon) -->
+            <template v-if="!userStore.loggedIn">
+              <Separator class="my-1" />
+              <router-link
+                to="/talkgroups"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/talkgroups' }"
+                @click="mobileOpen = false"
+              >
+                <MessageSquare class="h-4 w-4" />
+                {{ $t("Talkgroups") }}
+              </router-link>
+              <router-link
+                to="/nets"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/nets' || route.path.startsWith('/nets/') }"
+                @click="mobileOpen = false"
+              >
+                <RadioTower class="h-4 w-4" />
+                {{ $t("Nets") }}
+              </router-link>
+            </template>
+
+            <!-- Talkgroups section (logged in) -->
+            <template v-if="userStore.loggedIn">
+              <Separator class="my-1" />
+              <span class="px-3 py-1 text-xs font-medium text-muted-foreground">{{ $t("Talkgroups") }}</span>
+              <router-link
+                to="/talkgroups"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/talkgroups' }"
+                @click="mobileOpen = false"
+              >
+                <MessageSquare class="h-4 w-4" />
+                {{ $t("List") }}
+              </router-link>
+              <router-link
+                to="/talkgroups/owned"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/talkgroups/owned' }"
+                @click="mobileOpen = false"
+              >
+                <MessageSquare class="h-4 w-4" />
+                {{ $t("Owned") }}
+              </router-link>
+              <router-link
+                to="/nets"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/nets' || route.path.startsWith('/nets/') }"
+                @click="mobileOpen = false"
+              >
+                <RadioTower class="h-4 w-4" />
+                {{ $t("Nets") }}
+              </router-link>
+            </template>
+
+            <!-- OpenBridge Peers -->
+            <template v-if="userStore.loggedIn && settingsStore.openBridgeEnabled">
+              <Separator class="my-1" />
+              <router-link
+                to="/peers"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/peers' }"
+                @click="mobileOpen = false"
+              >
+                <Globe class="h-4 w-4" />
+                {{ $t("OpenBridge Peers") }}
+              </router-link>
+            </template>
+
+            <!-- Admin section -->
+            <template v-if="userStore.loggedIn && userStore.admin">
+              <Separator class="my-1" />
+              <span class="px-3 py-1 text-xs font-medium text-muted-foreground">{{ $t("Admin") }}</span>
+              <router-link
+                to="/admin/nets"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/nets' }"
+                @click="mobileOpen = false"
+              >
+                <RadioTower class="h-4 w-4" />
+                {{ $t("Nets") }}
+              </router-link>
+              <router-link
+                to="/admin/talkgroups"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/talkgroups' }"
+                @click="mobileOpen = false"
+              >
+                <MessageSquare class="h-4 w-4" />
+                {{ $t("Talkgroups") }}
+              </router-link>
+              <router-link
+                to="/admin/repeaters"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/repeaters' }"
+                @click="mobileOpen = false"
+              >
+                <Antenna class="h-4 w-4" />
+                {{ $t("Repeaters") }}
+              </router-link>
+              <router-link
+                v-if="adminStore.unassignedRepeaters > 0"
+                to="/admin/repeaters/unassigned"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/repeaters/unassigned' }"
+                @click="mobileOpen = false"
+              >
+                <Antenna class="h-4 w-4" />
+                {{ $t("Unassigned") }}
+                <span :class="badgeClass('warn')" data-test="unassigned-count">{{ adminStore.unassignedRepeaters }}</span>
+              </router-link>
+              <router-link
+                v-if="settingsStore.openBridgeEnabled"
+                to="/admin/peers"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/peers' }"
+                @click="mobileOpen = false"
+              >
+                <Globe class="h-4 w-4" />
+                {{ $t("Peers") }}
+              </router-link>
+              <router-link
+                to="/admin/users"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/users' }"
+                @click="mobileOpen = false"
+              >
+                <Users class="h-4 w-4" />
+                {{ $t("Users") }}
+              </router-link>
+              <router-link
+                to="/admin/users/approval"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/users/approval' }"
+                @click="mobileOpen = false"
+              >
+                <UserCheck class="h-4 w-4" />
+                {{ $t("User Approvals") }}
+              </router-link>
+              <router-link
+                v-if="settingsStore.radioIDValidation"
+                to="/admin/users/radio-id-drift"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/users/radio-id-drift' }"
+                @click="mobileOpen = false"
+              >
+                <UserX class="h-4 w-4" />
+                {{ $t("RadioID Drift") }}
+              </router-link>
+              <router-link
+                v-if="settingsStore.registration === 'invite'"
+                to="/admin/invites"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/invites' }"
+                @click="mobileOpen = false"
+              >
+                <UserPlus class="h-4 w-4" />
+                {{ $t("Invites") }}
+              </router-link>
+              <router-link
+                to="/admin/messages"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/messages' }"
+                @click="mobileOpen = false"
+              >
+                <Mail class="h-4 w-4" />
+                {{ $t("Messages") }}
+              </router-link>
+              <router-link
+                to="/admin/message-access"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/message-access' }"
+                @click="mobileOpen = false"
+              >
+                <Mail class="h-4 w-4" />
+                {{ $t("Message access") }}
+              </router-link>
+              <router-link
+                to="/admin/plugins"
+                class="mobile-nav-link"
+                :class="{ active: route.path.startsWith('/admin/plugins') }"
+                @click="mobileOpen = false"
+              >
+                <Puzzle class="h-4 w-4" />
+                {{ $t("Plugins") }}
+              </router-link>
+              <router-link
+                to="/admin/setup"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/admin/setup' }"
+                @click="mobileOpen = false"
+              >
+                <Settings class="h-4 w-4" />
+                {{ $t("Setup") }}
+              </router-link>
+            </template>
+
+            <Separator class="my-1" />
+            <a href="/" class="mobile-nav-link">
+              <BookOpen class="h-4 w-4" />
+              {{ $t("Docs") }}
+            </a>
+            <div class="px-3 py-2">
+              <LocaleSwitcher />
+            </div>
+
+            <!-- Auth -->
+            <Separator class="my-1" />
+            <template v-if="!userStore.loggedIn">
+              <router-link
+                v-if="settingsStore.registration !== 'closed'"
+                to="/register"
+                class="mobile-nav-link"
+                @click="mobileOpen = false"
+              >
+                <UserPlus class="h-4 w-4" />
+                {{ $t("Register") }}
+              </router-link>
+              <router-link
+                to="/login"
+                class="mobile-nav-link"
+                @click="mobileOpen = false"
+              >
+                <LogIn class="h-4 w-4" />
+                {{ $t("Login") }}
+              </router-link>
+            </template>
+            <template v-else>
+              <router-link
+                to="/settings"
+                class="mobile-nav-link"
+                :class="{ active: route.path === '/settings' }"
+                @click="mobileOpen = false"
+              >
+                <Settings class="h-4 w-4" />
+                {{ $t("Settings") }}
+              </router-link>
+              <a
+                href="#"
+                class="mobile-nav-link"
+                @click.prevent="logout(); mobileOpen = false"
+              >
+                <LogOut class="h-4 w-4" />
+                {{ $t("Logout") }}
+              </a>
+            </template>
+          </nav>
+        </SheetContent>
+      </Sheet>
+
+      <!-- Brand -->
+      <a
+        href="/"
+        class="mr-6 text-xl font-bold tracking-tight text-foreground no-underline hover:text-foreground"
+      >
+        {{ title }}
+      </a>
+
+      <!-- Desktop navigation -->
+      <nav v-if="!bare" class="hidden md:flex items-center gap-1">
+        <router-link
+          to="/lastheard"
+          class="desktop-nav-link"
+          :class="{ active: route.path === '/lastheard' }"
+        >
+          {{ $t("Last Heard") }}
+        </router-link>
+        <router-link
+          v-if="userStore.loggedIn"
+          to="/repeaters"
+          class="desktop-nav-link"
+          :class="{ active: route.path === '/repeaters' || route.path.startsWith('/localgroups/') }"
+        >
+          {{ $t("Repeaters") }}
+        </router-link>
+
+        <!-- Talkgroups link (anon) -->
+        <router-link
+          v-if="!userStore.loggedIn"
+          to="/talkgroups"
+          class="desktop-nav-link"
+          :class="{ active: route.path === '/talkgroups' }"
+        >
+          {{ $t("Talkgroups") }}
+        </router-link>
+
+        <!-- Nets link (always visible) -->
+        <router-link
+          to="/nets"
+          class="desktop-nav-link"
+          :class="{ active: route.path === '/nets' || route.path.startsWith('/nets/') }"
+        >
+          {{ $t("Nets") }}
+        </router-link>
+
+        <!-- Talkgroups dropdown (logged in) -->
+        <div
+          v-if="userStore.loggedIn"
+          class="relative"
+          @mouseenter="setMenuOpen('talkgroups', true)"
+          @mouseleave="scheduleCloseMenus"
+        >
+          <DropdownMenuRoot
+            :open="openTalkgroupsMenu"
+            :modal="false"
+            @update:open="setMenuOpen('talkgroups', $event)"
+          >
+            <DropdownMenuTrigger as-child>
+              <router-link
+                to="/talkgroups"
+                class="desktop-nav-link"
+                :class="{ active: route.path.startsWith('/talkgroup') }">
+                {{ $t("Talkgroups") }}
+                <ChevronDown class="h-3 w-3" />
+              </router-link>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              class="min-w-[10rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+              :side-offset="4"
+              align="start"
+            >
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/talkgroups"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("List") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/talkgroups/owned"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Owned") }}
+                </router-link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenuRoot>
+        </div>
+
+        <router-link
+          v-if="userStore.loggedIn"
+          to="/messages"
+          class="desktop-nav-link"
+          :class="{ active: route.path === '/messages' }"
+        >
+          {{ $t("Messages") }}
+        </router-link>
+        <router-link
+          v-if="userStore.loggedIn"
+          to="/positions"
+          class="desktop-nav-link"
+          :class="{ active: route.path.startsWith('/positions') }"
+        >
+          {{ $t("Positions") }}
+        </router-link>
+
+        <!-- OpenBridge Peers -->
+        <router-link
+          v-if="userStore.loggedIn && settingsStore.openBridgeEnabled"
+          to="/peers"
+          class="desktop-nav-link"
+          :class="{ active: route.path === '/peers' }"
+        >
+          {{ $t("OpenBridge Peers") }}
+        </router-link>
+
+        <!-- Admin dropdown -->
+        <div
+          v-if="userStore.loggedIn && userStore.admin"
+          class="relative"
+          @mouseenter="setMenuOpen('admin', true)"
+          @mouseleave="scheduleCloseMenus"
+        >
+          <DropdownMenuRoot
+            :open="openAdminMenu"
+            :modal="false"
+            @update:open="setMenuOpen('admin', $event)"
+          >
+            <DropdownMenuTrigger as-child>
+              <button
+                type="button"
+                class="desktop-nav-link"
+                :class="{ active: route.path.startsWith('/admin') }"
+              >
+                {{ $t("Admin") }}
+                <ChevronDown class="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              class="min-w-[10rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+              :side-offset="4"
+              align="start"
+            >
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/nets"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Nets") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/talkgroups"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Talkgroups") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/repeaters"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Repeaters") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="adminStore.unassignedRepeaters > 0" as-child>
+                <router-link
+                  to="/admin/repeaters/unassigned"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Unassigned") }}
+                  <span :class="badgeClass('warn')">{{ adminStore.unassignedRepeaters }}</span>
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="settingsStore.openBridgeEnabled" as-child>
+                <router-link
+                  to="/admin/peers"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Peers") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/users"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Users") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/users/approval"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("User Approvals") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="settingsStore.radioIDValidation" as-child>
+                <router-link
+                  to="/admin/users/radio-id-drift"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("RadioID Drift") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="settingsStore.registration === 'invite'" as-child>
+                <router-link
+                  to="/admin/invites"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Invites") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/messages"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Messages") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/message-access"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Message access") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/plugins"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Plugins") }}
+                </router-link>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <router-link
+                  to="/admin/setup"
+                  class="dropdown-link"
+                  @click="closeMenus"
+                >
+                  {{ $t("Setup") }}
+                </router-link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenuRoot>
+        </div>
+      </nav>
+
+      <!-- Right side: auth -->
+      <div v-if="!bare" class="ml-auto hidden md:flex items-center gap-2">
+        <LocaleSwitcher />
+        <a href="/" class="desktop-nav-link">{{ $t("Docs") }}</a>
+        <template v-if="!userStore.loggedIn">
+          <router-link v-if="settingsStore.registration !== 'closed'" to="/register" class="desktop-nav-link">
+            {{ $t("Register") }}
+          </router-link>
+          <router-link to="/login" class="desktop-nav-link">
+            {{ $t("Login") }}
+          </router-link>
+        </template>
+        <template v-else>
+          <router-link
+            to="/settings"
+            class="desktop-nav-link"
+            :class="{ active: route.path === '/settings' }"
+          >
+            {{ $t("Settings") }}
+          </router-link>
+          <a
+            href="#"
+            class="desktop-nav-link"
+            @click.prevent="logout()"
+          >
+            {{ $t("Logout") }}
+          </a>
+        </template>
+      </div>
+    </div>
+  </header>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
+} from 'reka-ui';
+import {
+  Antenna,
+  BookOpen,
+  ChevronDown,
+  Globe,
+  LogIn,
+  LogOut,
+  Mail,
+  MapPin,
+  Menu,
+  MessageSquare,
+  Puzzle,
+  Radio,
+  RadioTower,
+  Settings,
+  UserCheck,
+  UserPlus,
+  Users,
+  UserX,
+} from 'lucide-vue-next';
+import { Button as ShadButton } from '@/components/ui/button';
+import LocaleSwitcher from '@/components/LocaleSwitcher.vue';
+import { Separator } from '@/components/ui/separator';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { badgeClass } from '@/lib/badge';
+import API from '@/services/API';
+import { useAdminStore, useUserStore, useSettingsStore } from '@/store';
+
+const userStore = useUserStore();
+const settingsStore = useSettingsStore();
+const adminStore = useAdminStore();
+const route = useRoute();
+const router = useRouter();
+
+const bare = computed(() => route.meta.bare === true);
+const title = ref(localStorage.getItem('title') || 'DMRHub');
+const openTalkgroupsMenu = ref(false);
+const openAdminMenu = ref(false);
+const mobileOpen = ref(false);
+let closeMenuTimer = 0;
+
+const setTitle = (newTitle: string) => {
+  localStorage.setItem('title', newTitle);
+  title.value = newTitle;
+};
+
+const getTitle = () => {
+  API.get('/network/name')
+    .then((response) => {
+      setTitle(response.data);
+    })
+    .catch((error) => {
+      console.log(error);
+    });
+};
+
+const clearCloseMenuTimer = () => {
+  if (closeMenuTimer !== 0) {
+    clearTimeout(closeMenuTimer);
+    closeMenuTimer = 0;
+  }
+};
+
+const closeMenus = () => {
+  clearCloseMenuTimer();
+  openTalkgroupsMenu.value = false;
+  openAdminMenu.value = false;
+};
+
+const setMenuOpen = (menu: 'talkgroups' | 'admin', isOpen: boolean) => {
+  clearCloseMenuTimer();
+
+  if (menu === 'talkgroups') {
+    openTalkgroupsMenu.value = isOpen;
+    if (isOpen) {
+      openAdminMenu.value = false;
+    }
+  } else {
+    openAdminMenu.value = isOpen;
+    if (isOpen) {
+      openTalkgroupsMenu.value = false;
+    }
+  }
+};
+
+const scheduleCloseMenus = () => {
+  clearCloseMenuTimer();
+  closeMenuTimer = window.setTimeout(() => {
+    closeMenus();
+  }, 150);
+};
+
+const handleOutsideClick = (event: MouseEvent) => {
+  const path = event.composedPath();
+  const clickedInHeader = path.some((node: EventTarget) => {
+    return node instanceof HTMLElement && node.tagName === 'HEADER';
+  });
+
+  if (!clickedInHeader) {
+    closeMenus();
+  }
+};
+
+const logout = () => {
+  API.post('/auth/logout')
+    .then(() => {
+      closeMenus();
+      userStore.loggedIn = false;
+      router.push('/login');
+    })
+    .catch((err) => {
+      console.error(err);
+    });
+};
+
+watch(
+  () => userStore.loggedIn && userStore.admin,
+  (admin) => {
+    if (admin) {
+      void adminStore.fetchUnassignedRepeaters();
+    } else {
+      adminStore.unassignedRepeaters = 0;
+    }
+  },
+  { immediate: true },
+);
+
+onMounted(() => {
+  getTitle();
+  settingsStore.fetchConfig();
+  document.addEventListener('click', handleOutsideClick);
+});
+
+onUnmounted(() => {
+  clearCloseMenuTimer();
+  document.removeEventListener('click', handleOutsideClick);
+});
+</script>
+
+<style scoped>
+/* Desktop nav links */
+.desktop-nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.desktop-nav-link:hover {
+  color: var(--foreground);
+  background-color: var(--accent);
+  text-decoration: none;
+}
+
+.desktop-nav-link.active,
+.desktop-nav-link.router-link-exact-active {
+  color: var(--foreground);
+  background-color: var(--accent);
+}
+
+/* Dropdown links */
+.dropdown-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--popover-foreground);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.dropdown-link:hover {
+  background-color: var(--accent);
+  text-decoration: none;
+}
+
+/* Mobile nav links */
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--foreground);
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.mobile-nav-link:hover {
+  background-color: var(--accent);
+  text-decoration: none;
+}
+
+.mobile-nav-link.active,
+.mobile-nav-link.router-link-exact-active {
+  background-color: var(--accent);
+  font-weight: 600;
+}
+</style>

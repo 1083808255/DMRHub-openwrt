@@ -1,0 +1,83 @@
+#!/bin/sh
+# DMRHub application/firmware OTA updater for OpenWrt
+# Sources: Gitee (primary) -> GitHub (backup)
+# Usage:
+#   dmrhub-ota check              # check for updates
+#   dmrhub-ota app                # update application ipk only
+#   dmrhub-ota firmware           # sysupgrade firmware (manual confirmation)
+set -eu
+
+OTA_BASE_GITEE="https://gitee.com/1083808255/DMRHub-ota/raw/main"
+OTA_BASE_GITHUB="https://raw.githubusercontent.com/1083808255/DMRHub-ota/main"
+VERSION_FILE="/opt/dmrhub/version"
+LOCAL_VERSION="none"
+[ -f "$VERSION_FILE" ] && LOCAL_VERSION=$(cat "$VERSION_FILE")
+
+log() { echo "[dmrhub-ota] $*"; }
+die() { echo "[dmrhub-ota] ERROR: $*" >&2; exit 1; }
+
+fetch_version() {
+    for base in "$OTA_BASE_GITEE" "$OTA_BASE_GITHUB"; do
+        log "fetching version.json from $base"
+        if curl -fsSL --connect-timeout 10 --max-time 30 "$base/version.json" -o /tmp/dmrhub-version.json 2>/dev/null; then
+            echo "$base"
+            return 0
+        fi
+    done
+    die "cannot fetch version.json from any source"
+}
+
+BASE=$(fetch_version)
+REMOTE_APP=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
+
+log "local=$LOCAL_VERSION remote=$REMOTE_APP"
+
+update_app() {
+    APP_URL=$(grep -o '"app_url"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
+    APP_SHA=$(grep -o '"app_sha256"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
+    [ -n "$APP_URL" ] || die "no app_url in version.json"
+    IPK=/tmp/dmrhub-app.ipk
+    log "downloading app package"
+    curl -fsSL --retry 3 "$APP_URL" -o "$IPK" || die "download failed"
+    if [ -n "$APP_SHA" ]; then
+        echo "$APP_SHA  $IPK" | sha256sum -c - || die "sha256 mismatch"
+    fi
+    log "installing app package"
+    opkg install --force-reinstall "$IPK" || die "opkg install failed"
+    echo "$REMOTE_APP" > "$VERSION_FILE"
+    /etc/init.d/dmrhub restart
+    log "app updated to $REMOTE_APP"
+}
+
+case "${1:-check}" in
+    check)
+        if [ "$LOCAL_VERSION" = "$REMOTE_APP" ]; then
+            log "already up to date"
+        else
+            log "update available: $LOCAL_VERSION -> $REMOTE_APP"
+        fi
+        ;;
+    app)
+        update_app
+        ;;
+    firmware)
+        FW_URL=$(grep -o '"firmware_url"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
+        FW_SHA=$(grep -o '"firmware_sha256"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
+        [ -n "$FW_URL" ] || die "no firmware_url in version.json"
+        log "WARNING: firmware sysupgrade will reboot the device"
+        printf "Type 'yes' to continue: "
+        read -r ans
+        [ "$ans" = "yes" ] || die "aborted"
+        IMG=/tmp/dmrhub-fw.img.gz
+        curl -fsSL --retry 3 "$FW_URL" -o "$IMG" || die "download failed"
+        if [ -n "$FW_SHA" ]; then
+            echo "$FW_SHA  $IMG" | sha256sum -c - || die "sha256 mismatch"
+        fi
+        log "flashing firmware"
+        sysupgrade -k "$IMG"
+        ;;
+    *)
+        echo "Usage: $0 {check|app|firmware}"
+        exit 1
+        ;;
+esac

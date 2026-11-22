@@ -1,0 +1,337 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <div>
+    <form @submit.prevent="handlePeer(!v$.$invalid)">
+      <Card>
+        <CardHeader>
+          <CardTitle>{{ $t("New Peer") }}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <label class="field-label" for="owner">{{ $t("Owner") }}</label>
+          <select
+            id="owner"
+            v-model="v$.owner_id.$model"
+            class="ui-select"
+            :class="{ 'ui-select-invalid': v$.owner_id.$invalid && submitted }"
+          >
+            <option value="" disabled>{{ $t("Select owner") }}</option>
+            <option v-for="user in allUsers" :key="user.id" :value="user.id">{{ user.display }}</option>
+          </select>
+          <span v-if="v$.owner_id.$error && submitted">
+            <span v-for="(error, index) of v$.owner_id.$errors" :key="index">
+              <small class="p-error">{{ error.$message.replace("Value", "Owner") }}</small>
+            </span>
+            <br />
+          </span>
+          <span v-else>
+            <small
+              v-if="(v$.owner_id.$invalid && submitted) || v$.owner_id.$pending.$response"
+              class="p-error"
+              >{{ v$.owner_id.required.$message.replace("Value", "Owner") }}</small
+            >
+          </span>
+          <br />
+          <label class="field-label" for="id">{{ $t("Peer ID") }}</label>
+          <ShadInput
+            id="id"
+            type="text"
+            v-model="v$.id.$model"
+            :aria-invalid="v$.id.$invalid && submitted"
+          />
+          <span v-if="v$.id.$error && submitted">
+            <span v-for="(error, index) of v$.id.$errors" :key="index">
+              <small class="p-error">{{ error.$message.replace("Value", "Peer ID") }}</small>
+            </span>
+            <br />
+          </span>
+          <span v-else>
+            <small
+              v-if="(v$.id.$invalid && submitted) || v$.id.$pending.$response"
+              class="p-error"
+              >{{ v$.id.required.$message.replace("Value", "Peer ID") }}</small
+            >
+          </span>
+          <br />
+          <label class="field-label" for="ip">{{ $t("IP Address") }}</label>
+          <ShadInput
+            id="ip"
+            type="text"
+            v-model="v$.ip.$model"
+            :aria-invalid="v$.ip.$invalid && submitted"
+            placeholder="e.g. 192.168.1.100"
+          />
+          <span v-if="v$.ip.$error && submitted">
+            <span v-for="(error, index) of v$.ip.$errors" :key="index">
+              <small class="p-error">{{ error.$message.replace("Value", "IP Address") }}</small>
+            </span>
+            <br />
+          </span>
+          <span v-else>
+            <small
+              v-if="(v$.ip.$invalid && submitted) || v$.ip.$pending.$response"
+              class="p-error"
+              >{{ v$.ip.required.$message.replace("Value", "IP Address") }}</small
+            >
+          </span>
+          <br />
+          <label class="field-label" for="port">{{ $t("Port") }}</label>
+          <ShadInput
+            id="port"
+            type="text"
+            v-model="v$.port.$model"
+            :aria-invalid="v$.port.$invalid && submitted"
+            placeholder="e.g. 62035"
+          />
+          <span v-if="v$.port.$error && submitted">
+            <span v-for="(error, index) of v$.port.$errors" :key="index">
+              <small class="p-error">{{ error.$message.replace("Value", "Port") }}</small>
+            </span>
+            <br />
+          </span>
+          <span v-else>
+            <small
+              v-if="(v$.port.$invalid && submitted) || v$.port.$pending.$response"
+              class="p-error"
+              >{{ v$.port.required.$message.replace("Value", "Port") }}</small
+            >
+          </span>
+          <br />
+          <div class="checkbox-row">
+            <input id="ingress" type="checkbox" v-model="ingress" />
+            <label for="ingress">{{ $t("Receive DMR traffic from this peer") }}</label>
+          </div>
+          <br />
+          <br />
+          <div class="checkbox-row">
+            <input id="egress" type="checkbox" v-model="egress" />
+            <label for="egress">{{ $t("Transmit DMR traffic to this peer") }}</label>
+          </div>
+          <br />
+          <div class="checkbox-row">
+            <input id="enhanced" type="checkbox" v-model="enhanced" />
+            <label for="enhanced">{{ $t("Use FreeDMR enhanced OpenBridge with this peer") }}</label>
+          </div>
+          <p>
+            {{ $t("Turn this on for a FreeDMR server whose link to this hub has ENHANCED_OBP on. DMRHub then sends keepalives and keeps the source server and the hop count of each call.") }}
+          </p>
+          <br />
+          <div class="checkbox-row">
+            <input id="codec2" type="checkbox" v-model="codec2" />
+            <label for="codec2">{{ $t("This peer carries Codec2") }}</label>
+          </div>
+          <p v-if="codec2">
+            {{ $t("On: this peer gets every call in the codec it was sent in. Turn this on only when every network behind the peer can carry Codec2.") }}
+          </p>
+          <p v-else>{{ $t("Off: this peer gets every call as AMBE. Codec2 calls are converted before they go to it.") }}</p>
+        </CardContent>
+        <CardFooter>
+          <div class="card-footer">
+            <ShadButton type="submit">{{ $t("Save") }}</ShadButton>
+          </div>
+        </CardFooter>
+      </Card>
+    </form>
+  </div>
+</template>
+
+<script lang="ts">
+import { t } from '@/i18n';
+
+import { Button as ShadButton } from '@/components/ui/button';
+import { Input as ShadInput } from '@/components/ui/input';
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { keepPeerPassword } from '@/lib/peer';
+import API from '@/services/API';
+
+import { useVuelidate } from '@vuelidate/core';
+import { required, numeric, ipAddress, between } from '@vuelidate/validators';
+
+export default {
+  components: {
+    ShadButton,
+    Card,
+    CardContent,
+    CardFooter,
+    CardHeader,
+    CardTitle,
+    ShadInput,
+  },
+  head: {
+    title: 'New OpenBridge Peer',
+  },
+  setup: () => ({ v$: useVuelidate() }),
+  created() {
+    this.getData();
+  },
+  mounted() {},
+  data: function() {
+    return {
+      id: '',
+      ip: '',
+      port: '',
+      ingress: false,
+      egress: false,
+      enhanced: false,
+      codec2: false,
+      submitted: false,
+      hostname: window.location.hostname,
+      allUsers: [] as Array<{ id: number; callsign: string; display?: string }>,
+      owner_id: '',
+    };
+  },
+  validations() {
+    return {
+      id: {
+        required,
+        numeric,
+      },
+      ip: {
+        required,
+        ipAddress,
+      },
+      port: {
+        required,
+        numeric,
+        between: between(1, 65535),
+      },
+      owner_id: {
+        required,
+        numeric,
+      },
+    };
+  },
+  methods: {
+    getData() {
+      API.get('/users?limit=none')
+        .then((res) => {
+          this.allUsers = res.data.users;
+          let parrotIndex = -1;
+          for (let i = 0; i < this.allUsers.length; i++) {
+            const user = this.allUsers[i];
+            if (!user) continue;
+            user.display = `${user.id} - ${user.callsign}`;
+            // Remove user with id 9990 (parrot)
+            if (user.id === 9990) {
+              parrotIndex = i;
+            }
+          }
+          if (parrotIndex !== -1) {
+            this.allUsers.splice(parrotIndex, 1);
+          }
+        })
+        .catch((err) => {
+          console.error(err);
+        });
+    },
+    handlePeer(isFormValid: boolean) {
+      this.submitted = true;
+      if (!isFormValid) {
+        return;
+      }
+
+      const numericID = parseInt(this.id);
+      if (!numericID) {
+        return;
+      }
+      API.post('/peers', {
+        id: numericID,
+        owner: parseInt(this.owner_id),
+        ip: this.ip,
+        port: parseInt(this.port),
+        ingress: this.ingress,
+        egress: this.egress,
+        enhanced: this.enhanced,
+        codec2: this.codec2,
+      })
+        .then((res) => {
+          if (!res.data) {
+            this.$toast.add({
+              summary: t('Error'),
+              severity: 'error',
+              detail: `Error registering peer`,
+              life: 3000,
+            });
+          } else {
+            keepPeerPassword(numericID, res.data.password);
+            this.$router.push(`/admin/peers/${numericID}`);
+          }
+        })
+        .catch((err) => {
+          console.error(err);
+          if (err.response && err.response.data && err.response.data.error) {
+            this.$toast.add({
+              summary: t('Error'),
+              severity: 'error',
+              detail: err.response.data.error,
+              life: 3000,
+            });
+          } else {
+            this.$toast.add({
+              summary: t('Error'),
+              severity: 'error',
+              detail: `Error creating peer`,
+              life: 3000,
+            });
+          }
+        });
+    },
+  },
+};
+</script>
+
+<style scoped>
+.field-label {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.ui-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 0.5rem 0.75rem;
+}
+
+.ui-select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.ui-select-invalid {
+  border-color: var(--primary);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+</style>

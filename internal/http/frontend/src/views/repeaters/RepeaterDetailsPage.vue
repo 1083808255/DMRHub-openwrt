@@ -1,0 +1,906 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  DMRHub - Run a DMR network server in a single binary
+  Copyright (C) 2023-2026 Jacob McSwain
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+  The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+-->
+
+<template>
+  <div class="space-y-6">
+    <!-- Loading skeleton -->
+    <div v-if="loading" class="space-y-6">
+      <Card>
+        <CardHeader>
+          <Skeleton class="h-8 w-64" />
+        </CardHeader>
+        <CardContent>
+          <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Skeleton v-for="n in 6" :key="n" class="h-16" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Error state -->
+    <Card v-else-if="error">
+      <CardHeader>
+        <CardTitle>{{ $t("Error") }}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p class="text-destructive">{{ error }}</p>
+      </CardContent>
+    </Card>
+
+    <!-- Repeater details -->
+    <template v-else-if="repeater">
+      <!-- Header card -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <div>
+              <CardTitle>{{ repeater.callsign || 'Repeater' }} — {{ repeater.id }}</CardTitle>
+              <CardDescription v-if="repeater.description">{{ repeater.description }}</CardDescription>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-medium"
+                :class="isOnline ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground'">
+                {{ isOnline ? 'Online' : 'Offline' }}
+              </span>
+              <span class="inline-flex items-center rounded-md bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                {{ protocol || (repeater.type || 'mmdvm').toUpperCase() }}
+              </span>
+              <span v-if="repeater.simplex_repeater"
+                class="inline-flex items-center rounded-md bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                {{ $t("Simplex") }}
+              </span>
+              <ShadButton v-if="canConnect" as-child variant="outline" size="sm" data-test="connect">
+                <RouterLink :to="`/repeaters/${repeater.id}/connect`" class="no-underline">{{ $t("Connect") }}</RouterLink>
+              </ShadButton>
+              <ShadButton
+                v-if="canEditCodec && isOnline"
+                variant="outline"
+                size="sm"
+                data-test="reset-connection"
+                @click="resetOpen = true"
+              >{{ $t("Reset connection") }}</ShadButton>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <div
+        v-for="ask in asks"
+        :key="`ask-${ask.id}`"
+        class="flex flex-col gap-3 rounded-xl border border-amber-500/50 bg-amber-500/10 p-4"
+        :data-test="`local-ask-${ask.id}`"
+      >
+        <p class="text-sm font-semibold">
+          {{ ask.asked_by.callsign || ask.owner.callsign }} {{ $t("asks to add this repeater to the local group") }} {{ ask.name }}.
+        </p>
+        <p class="text-sm">
+          {{ $t("Calls to TG") }} {{ ask.talkgroup }} {{ $t("on timeslot") }} {{ ask.slot }} {{ $t("here then go to the") }}
+          {{ ask.repeaters === 1 ? 'repeater' : `${ask.repeaters} repeaters` }} {{ $t("of the group.") }}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <ShadButton type="button" size="sm" :disabled="localBusy" data-test="local-accept" @click="acceptAsk(ask.id)">{{ $t("Add it") }}</ShadButton>
+          <ShadButton type="button" variant="outline" size="sm" :disabled="localBusy" data-test="local-decline" @click="declineAsk(ask.id)">{{ $t("Say no") }}</ShadButton>
+          <span v-if="localError" class="text-sm text-destructive">{{ localError }}</span>
+        </div>
+      </div>
+
+      <ShadDialog :open="resetOpen" @update:open="resetOpen = $event">
+        <DialogContent data-test="reset-dialog">
+          <DialogTitle>{{ $t("Reset the connection of") }} {{ repeater.callsign || 'Repeater' }} — {{ repeater.id }}?</DialogTitle>
+          <DialogDescription>{{ resetDescription }}</DialogDescription>
+          <p v-if="resetMessage" class="text-sm text-destructive" data-test="reset-message">{{ resetMessage }}</p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <ShadButton variant="outline" type="button" data-test="reset-cancel" @click="resetOpen = false">{{ $t("Cancel") }}</ShadButton>
+            <ShadButton type="button" :disabled="resetting" data-test="reset-confirm" @click="resetConnection">
+              {{ $t("Reset connection") }}
+            </ShadButton>
+          </div>
+        </DialogContent>
+      </ShadDialog>
+
+      <OnAirCard v-if="canEditCodec" :repeater-id="repeater.id" @calls="onAir = $event" />
+
+      <Card v-if="repeater.type !== 'ipsc'" data-test="voice-codec">
+        <CardHeader>
+          <CardTitle>{{ $t("Voice codec") }}</CardTitle>
+          <CardDescription>
+            {{ $t("The codec this repeater's radios use on each timeslot. DMRHub sends AMBE calls to a Codec2 timeslot as Codec2, and Codec2 calls to AMBE targets as AMBE.") }}
+          </CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-4">
+          <div class="grid gap-4 md:grid-cols-2">
+            <div v-for="slot in codecSlots" :key="slot.key" class="flex flex-col gap-2 rounded-lg border p-4">
+              <h4 class="text-sm font-semibold">{{ slot.title }}</h4>
+              <div class="flex flex-col gap-1">
+                <label class="text-sm" :for="`${slot.key}-codec`">{{ $t("Codec") }}</label>
+                <ShadSelect
+                  :model-value="codecs[slot.key]"
+                  :disabled="!canEditCodec"
+                  @update:model-value="(v) => setCodec(slot.key, v)"
+                >
+                  <SelectTrigger :id="`${slot.key}-codec`" class="w-full" :data-test="`${slot.key}-codec`">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in codecOptions" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </ShadSelect>
+              </div>
+              <p
+                v-if="codecs[slot.key] === 'auto' && slot.heard"
+                class="text-sm text-muted-foreground"
+                :data-test="`${slot.key}-heard`"
+              >{{ slot.heard }}</p>
+            </div>
+          </div>
+          <p class="text-sm text-muted-foreground">
+            {{ $t("Automatic follows the last call heard on the timeslot. A timeslot counts as Codec2 only when a call starts with a Codec2 voice header; until then it is AMBE.") }}
+          </p>
+          <div v-if="canEditCodec" class="flex items-center gap-3">
+            <ShadButton type="button" :disabled="codecSaving" data-test="codec-save" @click="saveCodecs">{{ $t("Save") }}</ShadButton>
+            <span
+              v-if="codecMessage"
+              class="text-sm"
+              :class="codecFailed ? 'text-destructive' : 'text-muted-foreground'"
+              data-test="codec-message"
+            >{{ codecMessage }}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <RepeaterRulesCard v-if="canEditCodec" :repeater-id="repeater.id" />
+
+      <ConnectionLogCard
+        v-if="canEditCodec"
+        ref="connectionLog"
+        :repeater-id="repeater.id"
+        :device="repeater.type === 'ipsc' ? 'repeater' : 'hotspot'"
+      />
+
+      <OfflineAlertCard
+        v-if="canEditCodec"
+        :repeater-id="repeater.id"
+        :device="repeater.type === 'ipsc' ? 'repeater' : 'hotspot'"
+      />
+
+      <CosysopsCard
+        v-if="cosysops"
+        :repeater-id="repeater.id"
+        :data="cosysops"
+        :my-id="myID"
+        @changed="fetchCosysops"
+      />
+
+      <!-- Info grid -->
+      <div class="grid gap-6 md:grid-cols-2">
+        <!-- Radio Configuration -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("Radio Configuration") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="detail-list">
+              <div v-if="protocol" class="detail-row">
+                <dt class="detail-label">{{ $t("Protocol") }}</dt>
+                <dd class="detail-value">{{ protocol }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("RX Frequency") }}</dt>
+                <dd class="detail-value">{{ formatFrequency(repeater.rx_frequency) }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("TX Frequency") }}</dt>
+                <dd class="detail-value">{{ formatFrequency(repeater.tx_frequency) }}</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("TX Power") }}</dt>
+                <dd class="detail-value">{{ repeater.tx_power }}W</dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Color Code") }}</dt>
+                <dd class="detail-value">{{ repeater.color_code }}</dd>
+              </div>
+              <div v-if="repeater.slots" class="detail-row">
+                <dt class="detail-label">{{ $t("Timeslots") }}</dt>
+                <dd class="detail-value">{{ repeater.slots }}</dd>
+              </div>
+              <div v-if="repeater.height" class="detail-row">
+                <dt class="detail-label">{{ $t("Height") }}</dt>
+                <dd class="detail-value">{{ repeater.height }}m</dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <!-- Location & Owner -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("Location &amp; Owner") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="detail-list">
+              <div v-if="repeater.owner" class="detail-row">
+                <dt class="detail-label">{{ $t("Owner") }}</dt>
+                <dd class="detail-value">
+                  <User :user="repeater.owner" />
+                </dd>
+              </div>
+              <div v-if="repeater.location" class="detail-row">
+                <dt class="detail-label">{{ $t("Location") }}</dt>
+                <dd class="detail-value">{{ repeater.location }}</dd>
+              </div>
+              <div v-if="hasCoordinates" class="detail-row">
+                <dt class="detail-label">{{ $t("Coordinates") }}</dt>
+                <dd class="detail-value">{{ repeater.latitude.toFixed(6) }}, {{ repeater.longitude.toFixed(6) }}</dd>
+              </div>
+              <div v-if="repeater.url" class="detail-row">
+                <dt class="detail-label">URL</dt>
+                <dd class="detail-value">
+                  <a :href="repeater.url" target="_blank" class="text-primary underline">{{ repeater.url }}</a>
+                </dd>
+              </div>
+              <div class="detail-row">
+                <dt class="detail-label">{{ $t("Created") }}</dt>
+                <dd class="detail-value">
+                  <RelativeTimestamp :time="repeater.created_at" />
+                </dd>
+              </div>
+              <div v-if="hasTimestamp(repeater.connected_time)" class="detail-row">
+                <dt class="detail-label">{{ $t("Last Connected") }}</dt>
+                <dd class="detail-value">
+                  <RelativeTimestamp :time="repeater.connected_time" />
+                </dd>
+              </div>
+              <div v-if="hasTimestamp(repeater.last_ping_time)" class="detail-row">
+                <dt class="detail-label">{{ $t("Last Ping") }}</dt>
+                <dd class="detail-value">
+                  <RelativeTimestamp :time="repeater.last_ping_time" />
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <!-- Software Info -->
+        <Card v-if="repeater.software_id || repeater.package_id">
+          <CardHeader>
+            <CardTitle>{{ $t("Software") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="detail-list">
+              <div v-if="repeater.software_id" class="detail-row">
+                <dt class="detail-label">{{ $t("Software ID") }}</dt>
+                <dd class="detail-value">{{ repeater.software_id }}</dd>
+              </div>
+              <div v-if="repeater.package_id" class="detail-row">
+                <dt class="detail-label">{{ $t("Package ID") }}</dt>
+                <dd class="detail-value">{{ repeater.package_id }}</dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <!-- Talkgroup Subscriptions -->
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ $t("Talkgroup Subscriptions") }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="space-y-4">
+              <!-- TS1 -->
+              <div>
+                <h4 class="text-sm font-semibold mb-2">{{ $t("Timeslot 1") }}</h4>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-muted-foreground w-16">{{ $t("Static:") }}</span>
+                    <div v-if="repeater.ts1_static_talkgroups && repeater.ts1_static_talkgroups.length > 0" class="flex flex-wrap gap-1">
+                      <Talkgroup v-for="tg in repeater.ts1_static_talkgroups" :key="tg.id" :talkgroup="tg" />
+                    </div>
+                    <span v-else class="text-sm text-muted-foreground">{{ $t("None") }}</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-muted-foreground w-16">{{ $t("Dynamic:") }}</span>
+                    <Talkgroup v-if="repeater.ts1_dynamic_talkgroup && repeater.ts1_dynamic_talkgroup.id"
+                      :talkgroup="repeater.ts1_dynamic_talkgroup" />
+                    <ShadButton
+                      v-if="canEditCodec && repeater.ts1_dynamic_talkgroup && repeater.ts1_dynamic_talkgroup.id"
+                      variant="outline"
+                      size="sm"
+                      data-test="drop-dynamic-ts1"
+                      @click="dropDynamic(1)"
+                    >{{ $t("Drop") }}</ShadButton>
+                    <span v-else class="text-sm text-muted-foreground">{{ $t("None") }}</span>
+                  </div>
+                  <div v-for="g in localOn(1)" :key="`local-${g.id}`" class="flex items-center gap-2" :data-test="`ts1-local`">
+                    <span class="text-xs text-muted-foreground w-16">{{ $t("Local:") }}</span>
+                    <span class="font-medium">TG {{ g.talkgroup }}</span>
+                    <RouterLink v-if="loggedIn" :to="`/localgroups/${g.id}`" class="text-primary underline">{{ g.name }}</RouterLink>
+                    <span v-else>{{ g.name }}</span>
+                  </div>
+                </div>
+              </div>
+              <Separator />
+              <!-- TS2 -->
+              <div>
+                <h4 class="text-sm font-semibold mb-2">{{ $t("Timeslot 2") }}</h4>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-muted-foreground w-16">{{ $t("Static:") }}</span>
+                    <div v-if="repeater.ts2_static_talkgroups && repeater.ts2_static_talkgroups.length > 0" class="flex flex-wrap gap-1">
+                      <Talkgroup v-for="tg in repeater.ts2_static_talkgroups" :key="tg.id" :talkgroup="tg" />
+                    </div>
+                    <span v-else class="text-sm text-muted-foreground">{{ $t("None") }}</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-muted-foreground w-16">{{ $t("Dynamic:") }}</span>
+                    <Talkgroup v-if="repeater.ts2_dynamic_talkgroup && repeater.ts2_dynamic_talkgroup.id"
+                      :talkgroup="repeater.ts2_dynamic_talkgroup" />
+                    <ShadButton
+                      v-if="canEditCodec && repeater.ts2_dynamic_talkgroup && repeater.ts2_dynamic_talkgroup.id"
+                      variant="outline"
+                      size="sm"
+                      data-test="drop-dynamic-ts2"
+                      @click="dropDynamic(2)"
+                    >{{ $t("Drop") }}</ShadButton>
+                    <span v-else class="text-sm text-muted-foreground">{{ $t("None") }}</span>
+                  </div>
+                  <div v-for="g in localOn(2)" :key="`local-${g.id}`" class="flex items-center gap-2" :data-test="`ts2-local`">
+                    <span class="text-xs text-muted-foreground w-16">{{ $t("Local:") }}</span>
+                    <span class="font-medium">TG {{ g.talkgroup }}</span>
+                    <RouterLink v-if="loggedIn" :to="`/localgroups/${g.id}`" class="text-primary underline">{{ g.name }}</RouterLink>
+                    <span v-else>{{ g.name }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <!-- Last Heard -->
+      <Card>
+        <CardHeader>
+          <CardTitle>{{ $t("Last Heard") }}</CardTitle>
+          <CardDescription>{{ $t("Recent calls through this repeater") }}</CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-4">
+          <TypeFilter v-model="filter" />
+          <DataTable
+            :columns="columns"
+            :data="lastheard"
+            :loading="lastheardLoading"
+            :loading-text="'Loading...'"
+            :empty-text="'No transmissions match these types'"
+            :manual-pagination="true"
+            :page-index="page - 1"
+            :page-size="rows"
+            :page-count="totalPages"
+            @update:page-index="handlePageIndexUpdate"
+            @update:page-size="handlePageSizeUpdate"
+          />
+        </CardContent>
+      </Card>
+    </template>
+  </div>
+</template>
+
+<script lang="ts">
+import { t } from '@/i18n';
+
+import type { AcceptableValue } from 'reka-ui';
+import { Button as ShadButton } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Dialog as ShadDialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { DataTable } from '@/components/ui/data-table';
+import TypeFilter from '@/components/TypeFilter.vue';
+import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
+import RepeaterRulesCard from '@/components/RepeaterRulesCard.vue';
+import CosysopsCard from '@/components/CosysopsCard.vue';
+import ConnectionLogCard from '@/components/ConnectionLogCard.vue';
+import OnAirCard from '@/components/OnAirCard.vue';
+import OfflineAlertCard from '@/components/OfflineAlertCard.vue';
+import { resetText, type OnAirCall } from '@/lib/sysop';
+import Talkgroup from '@/components/Talkgroup.vue';
+import { repeaterOnline } from '@/services/repeater';
+import User from '@/components/User.vue';
+import { lastHeardColumns } from '@/lib/lastHeardColumns';
+import { connectKind } from '@/lib/enroll';
+import { heardLine, type Codec, type Codec2Mode, type SlotCodec } from '@/lib/codec';
+import { asCosysops, canManage, canSeeSecret, type Cosysops, type Role } from '@/lib/cosysops';
+import {
+  cleanCalls,
+  defaultFilter,
+  filterQuery,
+  matchesFilter,
+  type CallRow,
+  type TypeFilterValue,
+} from '@/lib/transmissions';
+
+import API from '@/services/API';
+import { acceptLocalGroup, removeLocalGroupRepeater, repeaterLocalGroups, type RepeaterLocalGroup } from '@/services/localGroups';
+import { errorStatus, errorText } from '@/services/settings';
+import { getWebsocketURI } from '@/services/util';
+import { useUserStore } from '@/store';
+import ws from '@/services/ws';
+
+type TalkgroupRef = {
+  id: number;
+  name?: string;
+};
+
+type UserRef = {
+  id: number;
+  callsign: string;
+};
+
+type RepeaterData = {
+  id: number;
+  callsign: string;
+  type: string;
+  dialect: string;
+  connected_time: string;
+  last_ping_time: string;
+  disconnected_time: string | null;
+  created_at: string;
+  rx_frequency: number;
+  tx_frequency: number;
+  tx_power: number;
+  color_code: number;
+  latitude: number;
+  longitude: number;
+  height: number;
+  location: string;
+  city: string;
+  state: string;
+  country: string;
+  description: string;
+  url: string;
+  software_id: string;
+  package_id: string;
+  slots: number;
+  simplex_repeater: boolean;
+  owner: UserRef;
+  ts1_static_talkgroups: TalkgroupRef[];
+  ts2_static_talkgroups: TalkgroupRef[];
+  ts1_dynamic_talkgroup: TalkgroupRef;
+  ts2_dynamic_talkgroup: TalkgroupRef;
+  ts1_codec: SlotCodec;
+  ts2_codec: SlotCodec;
+  ts1_heard_codec: Codec;
+  ts2_heard_codec: Codec;
+  ts1_heard_codec2_mode: Codec2Mode;
+  ts2_heard_codec2_mode: Codec2Mode;
+  ts1_heard_at: string | null;
+  ts2_heard_at: string | null;
+};
+
+type SlotKey = 'ts1' | 'ts2';
+
+/** COSYSOPS_RETRY_MS is the first wait before the page loads the role of the user again after a server error; each failure doubles it up to COSYSOPS_RETRY_MAX_MS. */
+const COSYSOPS_RETRY_MS = 1_000;
+const COSYSOPS_RETRY_MAX_MS = 30_000;
+
+const CODEC_OPTIONS: { value: SlotCodec; label: string }[] = [
+  { value: 'auto', label: 'Automatic' },
+  { value: 'codec2', label: 'Codec2' },
+  { value: 'ambe', label: 'AMBE' },
+];
+
+const slotCodec = (v: unknown): SlotCodec => (v === 'codec2' || v === 'ambe' ? v : 'auto');
+
+export default {
+  components: {
+    ShadButton,
+    ShadSelect,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+    Separator,
+    Skeleton,
+    DataTable,
+    TypeFilter,
+    RelativeTimestamp,
+    RepeaterRulesCard,
+    CosysopsCard,
+    ConnectionLogCard,
+    OnAirCard,
+    OfflineAlertCard,
+    ShadDialog,
+    DialogContent,
+    DialogDescription,
+    DialogTitle,
+    Talkgroup,
+    User,
+  },
+  head: {
+    title: 'Repeater Details',
+  },
+  created() {},
+  mounted() {
+    const id = this.$route.params.id;
+    if (id) {
+      this.repeaterID = Number(id);
+      this.fetchRepeater();
+      this.fetchCosysops();
+      this.fetchLastheard();
+      this.fetchLocalGroups();
+      this.socket = ws.connect(getWebsocketURI() + '/calls', this.onWebsocketMessage);
+      this.timeInterval = setInterval(() => { this.now = Date.now(); }, 30000);
+    }
+  },
+  unmounted() {
+    if (this.timeInterval !== null) {
+      clearInterval(this.timeInterval);
+    }
+    if (this.cosysopsRetry !== null) {
+      clearTimeout(this.cosysopsRetry);
+    }
+    if (this.socket) {
+      this.socket.close();
+    }
+  },
+  data: function() {
+    return {
+      repeaterID: 0,
+      repeater: null as RepeaterData | null,
+      loading: true,
+      error: '',
+      lastheard: [] as CallRow[],
+      lastheardLoading: false,
+      filter: defaultFilter() as TypeFilterValue,
+      totalRecords: 0,
+      page: 1,
+      rows: 30,
+      socket: null as { close(): void } | null,
+      now: Date.now(),
+      timeInterval: null as ReturnType<typeof setInterval> | null,
+      codecOptions: CODEC_OPTIONS,
+      codecs: { ts1: 'auto', ts2: 'auto' } as Record<SlotKey, SlotCodec>,
+      codecSaving: false,
+      codecMessage: '',
+      codecFailed: false,
+      cosysops: null as Cosysops | null,
+      cosysopsRetry: null as ReturnType<typeof setTimeout> | null,
+      cosysopsDelay: COSYSOPS_RETRY_MS,
+      onAir: [] as OnAirCall[],
+      resetOpen: false,
+      resetting: false,
+      resetMessage: '',
+      localGroups: [] as RepeaterLocalGroup[],
+      localBusy: false,
+      localError: '',
+    };
+  },
+  watch: {
+    loggedIn() {
+      if (!this.repeaterID) return;
+      if (this.cosysopsRetry !== null) {
+        clearTimeout(this.cosysopsRetry);
+        this.cosysopsRetry = null;
+      }
+      this.cosysopsDelay = COSYSOPS_RETRY_MS;
+      this.fetchCosysops();
+      this.fetchLocalGroups();
+    },
+    filter: {
+      deep: true,
+      handler() {
+        this.page = 1;
+        this.fetchLastheard(this.page, this.rows);
+      },
+    },
+  },
+  computed: {
+    asks(): RepeaterLocalGroup[] {
+      return this.canEditCodec ? this.localGroups.filter((g) => g.state === 'asked') : [];
+    },
+    loggedIn(): boolean {
+      return useUserStore().loggedIn;
+    },
+    isOnline(): boolean {
+      return !!this.repeater && repeaterOnline(this.repeater, this.now);
+    },
+    protocol(): string {
+      if (!this.repeater || (this.repeater.type || 'mmdvm') !== 'mmdvm') return '';
+      return this.repeater.dialect === 'HBRP' ? 'HBRP' : 'MMDVM';
+    },
+    resetDescription(): string {
+      return resetText(this.repeater?.type === 'ipsc' ? 'repeater' : 'hotspot', this.onAir);
+    },
+    role(): Role | null {
+      return this.cosysops ? this.cosysops.role : null;
+    },
+    myID(): number {
+      return useUserStore().id;
+    },
+    canConnect(): boolean {
+      return canSeeSecret(this.role) && !!this.repeater && connectKind(this.repeater.type || 'mmdvm', this.repeater.id) !== null;
+    },
+    canEditCodec(): boolean {
+      return !!this.repeater && canManage(this.role);
+    },
+    codecSlots(): { key: SlotKey; title: string; heard: string }[] {
+      const r = this.repeater;
+      return [
+        {
+          key: 'ts1',
+          title: 'Timeslot 1',
+          heard: r ? heardLine(r.ts1_heard_codec, r.ts1_heard_codec2_mode, r.ts1_heard_at) : '',
+        },
+        {
+          key: 'ts2',
+          title: 'Timeslot 2',
+          heard: r ? heardLine(r.ts2_heard_codec, r.ts2_heard_codec2_mode, r.ts2_heard_at) : '',
+        },
+      ];
+    },
+    hasCoordinates(): boolean {
+      if (!this.repeater) return false;
+      return this.repeater.latitude !== 0 || this.repeater.longitude !== 0;
+    },
+    columns() {
+      void this.now;
+      return lastHeardColumns({});
+    },
+    totalPages(): number {
+      if (!this.totalRecords || this.totalRecords <= 0) {
+        return 1;
+      }
+      return Math.max(1, Math.ceil(this.totalRecords / this.rows));
+    },
+  },
+  methods: {
+    localOn(slot: 1 | 2): RepeaterLocalGroup[] {
+      return this.localGroups.filter((g) => g.state === 'member' && g.slot === slot);
+    },
+    async fetchLocalGroups() {
+      if (!useUserStore().loggedIn) {
+        this.localGroups = [];
+        return;
+      }
+      try {
+        this.localGroups = await repeaterLocalGroups(this.repeaterID);
+      } catch {
+        this.localGroups = [];
+      }
+    },
+    async answerAsk(fn: () => Promise<unknown>) {
+      this.localBusy = true;
+      this.localError = '';
+      try {
+        await fn();
+        await this.fetchLocalGroups();
+      } catch (err) {
+        this.localError = errorText(err, t('Could not answer the request'));
+      } finally {
+        this.localBusy = false;
+      }
+    },
+    acceptAsk(group: number) {
+      return this.answerAsk(() => acceptLocalGroup(group, this.repeaterID));
+    },
+    declineAsk(group: number) {
+      return this.answerAsk(() => removeLocalGroupRepeater(group, this.repeaterID));
+    },
+    hasTimestamp(value: string | undefined): boolean {
+      if (!value) return false;
+      const d = new Date(value);
+      return d.getFullYear() > 1;
+    },
+    formatFrequency(hz: number): string {
+      if (!hz) return '-';
+      const mhz = hz / 1000000;
+      return `${mhz.toFixed(4)} MHz`;
+    },
+    fetchRepeater(quiet = false) {
+      this.loading = !quiet;
+      API.get(`/repeaters/${this.repeaterID}`)
+        .then((res) => {
+          this.repeater = res.data;
+          this.codecs = { ts1: slotCodec(res.data?.ts1_codec), ts2: slotCodec(res.data?.ts2_codec) };
+          this.loading = false;
+        })
+        .catch((err) => {
+          console.error(err);
+          this.error = 'Failed to load repeater details. You may not have permission to view this repeater.';
+          this.loading = false;
+        });
+    },
+    resetConnection() {
+      this.resetting = true;
+      this.resetMessage = '';
+      API.post(`/repeaters/${this.repeaterID}/reset`)
+        .then(() => {
+          this.resetOpen = false;
+          const log = this.$refs.connectionLog as { load?: () => void } | undefined;
+          log?.load?.();
+        })
+        .catch((err) => {
+          this.resetMessage = errorText(err, t('Could not reset the connection. Try again.'));
+        })
+        .finally(() => {
+          this.resetting = false;
+        });
+    },
+    dropDynamic(ts: 1 | 2) {
+      const tg = ts === 1 ? this.repeater?.ts1_dynamic_talkgroup : this.repeater?.ts2_dynamic_talkgroup;
+      if (!tg || !tg.id) return;
+      API.post(`/repeaters/${this.repeaterID}/unlink/dynamic/${ts}/${tg.id}`, {})
+        .then(() => {
+          this.fetchRepeater(true);
+        })
+        .catch((err) => {
+          console.error(err);
+        });
+    },
+    fetchCosysops() {
+      if (!useUserStore().loggedIn) {
+        this.cosysops = null;
+        return;
+      }
+      this.cosysopsRetry = null;
+      API.get(`/repeaters/${this.repeaterID}/cosysops`)
+        .then((res) => {
+          this.cosysops = asCosysops(res.data);
+          this.cosysopsDelay = COSYSOPS_RETRY_MS;
+        })
+        .catch((err) => {
+          this.cosysops = null;
+          const status = errorStatus(err);
+          if (status !== 0 && status < 500) return;
+          this.cosysopsRetry = setTimeout(() => this.fetchCosysops(), this.cosysopsDelay);
+          this.cosysopsDelay = Math.min(this.cosysopsDelay * 2, COSYSOPS_RETRY_MAX_MS);
+        });
+    },
+    setCodec(slot: SlotKey, value: AcceptableValue) {
+      this.codecs = { ...this.codecs, [slot]: slotCodec(value) };
+      this.codecMessage = '';
+      this.codecFailed = false;
+    },
+    saveCodecs() {
+      const body = { ts1_codec: this.codecs.ts1, ts2_codec: this.codecs.ts2 };
+      this.codecSaving = true;
+      this.codecMessage = '';
+      this.codecFailed = false;
+      API.patch(`/repeaters/${this.repeaterID}`, body)
+        .then(() => {
+          if (this.repeater) {
+            this.repeater = { ...this.repeater, ...body };
+          }
+          this.codecMessage = 'Saved.';
+        })
+        .catch((err) => {
+          console.error(err);
+          this.codecFailed = true;
+          this.codecMessage = errorText(err, t('Could not save. Try again later.'));
+        })
+        .finally(() => {
+          this.codecSaving = false;
+        });
+    },
+    fetchLastheard(page = 1, limit = 30) {
+      if (this.filter.types.length === 0) {
+        this.lastheard = [];
+        this.totalRecords = 0;
+        return;
+      }
+      this.lastheardLoading = true;
+      API.get(`/lastheard/repeater/${this.repeaterID}?page=${page}&limit=${limit}&${filterQuery(this.filter)}`)
+        .then((res) => {
+          this.totalRecords = res.data.total;
+          this.lastheard = cleanCalls(res.data.calls);
+          this.lastheardLoading = false;
+        })
+        .catch((err) => {
+          console.error(err);
+          this.lastheardLoading = false;
+        });
+    },
+    handlePageIndexUpdate(pageIndex: number) {
+      const nextPage = pageIndex + 1;
+      if (nextPage === this.page || nextPage < 1) {
+        return;
+      }
+      this.page = nextPage;
+      this.fetchLastheard(this.page, this.rows);
+    },
+    handlePageSizeUpdate(pageSize: number) {
+      if (pageSize === this.rows || pageSize <= 0) {
+        return;
+      }
+      this.rows = pageSize;
+      this.page = 1;
+      this.fetchLastheard(this.page, this.rows);
+    },
+    onWebsocketMessage(event: MessageEvent) {
+      const call = JSON.parse(event.data);
+      if (!matchesFilter(call, this.filter) && !this.lastheard.some((c) => c.id === call.id)) {
+        return;
+      }
+      // Only process calls relevant to this repeater
+      if (call.repeater_id !== this.repeaterID &&
+          !(call.is_to_repeater && call.to_repeater?.id === this.repeaterID)) {
+        return;
+      }
+      let found = false;
+      const copyLastheard = JSON.parse(JSON.stringify(this.lastheard));
+      for (let i = 0; i < copyLastheard.length; i++) {
+        if (copyLastheard[i].id == call.id) {
+          found = true;
+          copyLastheard[i] = call;
+          break;
+        }
+      }
+      if (!found && copyLastheard.length === this.rows) {
+        copyLastheard.pop();
+      }
+      if (!found && copyLastheard.length < this.rows) {
+        copyLastheard.unshift(call);
+      }
+      this.lastheard = cleanCalls(copyLastheard);
+    },
+  },
+};
+</script>
+
+<style scoped>
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.detail-label {
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: right;
+}
+</style>

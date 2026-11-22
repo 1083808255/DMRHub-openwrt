@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package calltracker
+
+import (
+	"context"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/dmrconst"
+	"github.com/USA-RedDragon/DMRHub/internal/kv"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	"github.com/USA-RedDragon/DMRHub/internal/testutils/memdb"
+	"github.com/USA-RedDragon/configulator/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestTrackNeverBlocksOnAFullQueue(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		defConfig, err := configulator.New(config.ConfigSchema()).Default()
+		require.NoError(t, err)
+		memdb.Use(t, &defConfig)
+		database, err := db.MakeDB(&defConfig)
+		require.NoError(t, err)
+		ps, err := pubsub.MakePubSub(context.TODO(), &defConfig)
+		require.NoError(t, err)
+		kvStore, err := kv.MakeKV(context.TODO(), &defConfig, kv.WithoutCallBound())
+		require.NoError(t, err)
+		ct := NewCallTracker(database, ps, kvStore)
+		release := make(chan struct{})
+		t.Cleanup(func() {
+			ct.Stop()
+			sqlDB, _ := database.DB()
+			_ = sqlDB.Close()
+			_ = ps.Close()
+			_ = kvStore.Close()
+		})
+
+		p := models.Packet{Src: 3002068, Dst: 42, Repeater: 100001, GroupCall: true, StreamID: 1, FrameType: dmrconst.FrameVoice}
+		idx := chanKey{server: models.RepeaterTypeMMDVM, repeater: p.Repeater, slot: p.Slot}.shard()
+		ct.shards[idx].in <- task{fn: func(*shard) { <-release }}
+
+		start := time.Now()
+		for range shardDepth * 2 {
+			ct.Track(context.Background(), p, models.RepeaterTypeMMDVM, false)
+		}
+		assert.Less(t, time.Since(start), time.Second, "Track must not wait for a busy worker")
+		assert.GreaterOrEqual(t, ct.Dropped(), uint64(shardDepth-1))
+		close(release)
+	})
+}
+
+// TestACallEndsWhileTasksThatAreNotPacketsKeepTheQueueBusy keeps a task
+// that is not a packet in the queue of a worker past the hang time of a
+// call. The call must still end on time.
+func TestACallEndsWhileTasksThatAreNotPacketsKeepTheQueueBusy(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		defConfig, err := configulator.New(config.ConfigSchema()).Default()
+		require.NoError(t, err)
+		memdb.Use(t, &defConfig)
+		database, err := db.MakeDB(&defConfig)
+		require.NoError(t, err)
+		ps, err := pubsub.MakePubSub(context.TODO(), &defConfig)
+		require.NoError(t, err)
+		kvStore, err := kv.MakeKV(context.TODO(), &defConfig, kv.WithoutCallBound())
+		require.NoError(t, err)
+		ct := NewCallTracker(database, ps, kvStore)
+		t.Cleanup(func() {
+			ct.Stop()
+			sqlDB, _ := database.DB()
+			_ = sqlDB.Close()
+			_ = ps.Close()
+			_ = kvStore.Close()
+		})
+
+		p := models.Packet{Src: 3002068, Dst: 42, Repeater: 100001, GroupCall: true, StreamID: 1, FrameType: dmrconst.FrameVoice}
+		idx := chanKey{server: models.RepeaterTypeMMDVM, repeater: p.Repeater, slot: p.Slot}.shard()
+		ct.Track(context.Background(), p, models.RepeaterTypeMMDVM, false)
+		ct.Flush()
+
+		end := time.Now().Add(3 * voiceHang)
+		var busy func(*shard)
+		busy = func(*shard) {
+			time.Sleep(sweepInterval / 5)
+			if time.Now().Before(end) {
+				ct.enqueue(idx, task{fn: busy})
+			}
+		}
+		ct.enqueue(idx, task{fn: busy})
+		time.Sleep(2 * voiceHang)
+
+		var active int64
+		require.NoError(t, database.Model(&models.Call{}).Where("active = ?", true).Count(&active).Error)
+		assert.Zero(t, active, "the call ended %s after its last packet", 2*voiceHang)
+		time.Sleep(time.Until(end) + sweepInterval)
+	})
+}

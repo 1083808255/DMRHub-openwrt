@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// DMRHub - Run a DMR network server in a single binary
+// Copyright (C) 2023-2026 Jacob McSwain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+
+package plugins
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"log/slog"
+	"net"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/USA-RedDragon/DMRHub/internal/config"
+	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
+	pluginv1 "github.com/USA-RedDragon/DMRHub/sdk/plugin/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
+	"gorm.io/gorm"
+)
+
+const (
+	// stopWait is how long Stop lets the streams end before it cuts them.
+	stopWait = 5 * time.Second
+	// pingEvery is how often the hub checks that a quiet plugin is still
+	// there.
+	pingEvery = 30 * time.Second
+	// minPluginPing is the shortest time between two pings of a plugin.
+	minPluginPing = 10 * time.Second
+	// maxMessage is the largest message a plugin may send.
+	maxMessage = 64 << 10
+)
+
+// Server serves the plugins: the listener of those that run as their own
+// programs, and the service that those inside DMRHub use.
+type Server struct {
+	grpc     *grpc.Server
+	listener net.Listener
+	registry *Registry
+	service  *Service
+	done     chan struct{}
+	followed <-chan struct{}
+	stopOnce sync.Once
+}
+
+// Start serves the plugins as cfg says, and gives the hub the registry of
+// their IDs through setPlugins. notify gets each position that a plugin
+// sent and the hub stored; opts set up the service. It listens only when
+// cfg accepts plugins that run as their own programs, and returns nil when
+// no plugins run at all.
+func Start(ctx context.Context, cfg *config.Config, db *gorm.DB, ps pubsub.PubSub, router Router,
+	setPlugins func(*Registry), notify func(models.Position), opts ...ServiceOption) (*Server, error) {
+	c := cfg.DMR.Plugins
+	if !c.Enabled && !c.InProcess {
+		return nil, nil //nolint:nilnil // no plugins when both are off
+	}
+	registry, err := NewRegistry(db, ps)
+	if err != nil {
+		return nil, err
+	}
+	if err := registry.SetInProcess(c.InProcess); err != nil {
+		return nil, err
+	}
+	service := NewService(db, ps, registry, router, notify, opts...)
+	if !c.Enabled {
+		s := &Server{registry: registry, service: service, done: make(chan struct{})}
+		s.followed = registry.Follow(s.done)
+		setPlugins(registry)
+		return s, nil
+	}
+	certs, err := NewCertSource(cfg.GetDerivedSecret(), c.CertFile, c.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("plugin certificate: %w", err)
+	}
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", net.JoinHostPort(trimBrackets(c.Bind), strconv.Itoa(c.Port)))
+	if err != nil {
+		return nil, fmt.Errorf("could not listen for plugins: %w", err)
+	}
+	return listening(lis, certs, registry, service, setPlugins), nil
+}
+
+// listening serves the plugins on lis with the certificates of certs.
+func listening(lis net.Listener, certs *CertSource, registry *Registry, service *Service, setPlugins func(*Registry)) *Server {
+	s := &Server{
+		grpc: grpc.NewServer(
+			grpc.Creds(credentials.NewTLS(&tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS13})),
+			grpc.KeepaliveParams(keepalive.ServerParameters{Time: pingEvery, Timeout: pingEvery}),
+			grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: minPluginPing, PermitWithoutStream: true}),
+			grpc.MaxRecvMsgSize(maxMessage),
+		),
+		listener: lis,
+		registry: registry,
+		service:  service,
+		done:     make(chan struct{}),
+	}
+	pluginv1.RegisterPluginServiceServer(s.grpc, service)
+	s.followed = registry.Follow(s.done)
+	setPlugins(registry)
+	go func() {
+		if err := s.grpc.Serve(lis); err != nil {
+			slog.Error("Plugins: the listener stopped", "error", err)
+		}
+	}()
+	slog.Info("Plugins: listening", "address", lis.Addr().String())
+	return s
+}
+
+// Registry returns the registry of the plugins' IDs.
+func (s *Server) Registry() *Registry {
+	return s.registry
+}
+
+// Service returns the service that the plugins inside DMRHub connect to.
+func (s *Server) Service() *Service {
+	return s.service
+}
+
+// Addr returns the address the listener listens on, or nil when only the
+// plugins inside DMRHub run.
+func (s *Server) Addr() net.Addr {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Addr()
+}
+
+// Drain moves the plugins with a stream on this replica to the other
+// replicas, as Service.Drain does, until ctx ends. Call it only when other
+// replicas run. It returns how many streams are left.
+func (s *Server) Drain(ctx context.Context) int {
+	if s == nil {
+		return 0
+	}
+	slog.Info("Plugins: draining")
+	left := s.service.Drain(ctx)
+	slog.Info("Plugins: drain finished", "streamsLeft", left)
+	return left
+}
+
+// Stop ends the streams of the plugins, closes the listener, and returns
+// once the registry and the streams no longer use the database. It cuts a
+// stream that outlives stopWait, and waits for the requests that the
+// stream was answering, which end with the context of the stream.
+func (s *Server) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		close(s.done)
+		<-s.followed
+		if s.grpc == nil {
+			return
+		}
+		stopped := make(chan struct{})
+		go func() {
+			s.grpc.GracefulStop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(stopWait):
+			s.service.cut()
+			<-stopped
+		}
+	})
+}
+
+func trimBrackets(host string) string {
+	if len(host) > 1 && host[0] == '[' && host[len(host)-1] == ']' {
+		return host[1 : len(host)-1]
+	}
+	return host
+}
