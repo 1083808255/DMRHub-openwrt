@@ -250,7 +250,7 @@ import CopyButton from '@/components/enroll/CopyButton.vue';
 import PeerRules from '@/components/peer/PeerRules.vue';
 import PeerSteps from '@/components/peer/PeerSteps.vue';
 import {
-  PEER_PASSWORD_PLACEHOLDER,
+  peerPasswordPlaceholder,
   PEER_TABS,
   peerTabs,
   takePeerPassword,
@@ -388,7 +388,7 @@ export default {
         host: this.host,
         port: this.port,
         id: this.peer?.id ?? 0,
-        password: this.secret || PEER_PASSWORD_PLACEHOLDER,
+        password: this.secret || peerPasswordPlaceholder(),
         ip: this.form.ip,
         peerPort: this.form.port,
       };

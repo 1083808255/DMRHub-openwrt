@@ -33,9 +33,9 @@ export const CLIENT_TABS: Record<ClientTab, { name: string; tested: boolean | nu
   dmrgateway: { name: 'DMRGateway', tested: true },
   droidstar: { name: 'DroidStar', tested: true },
   hblink3: { name: 'HBlink3', tested: true },
-  other: { name: t('Other'), tested: null },
-  cps: { name: t('Motorola CPS'), tested: false },
-  'ipsc-other': { name: t('Other'), tested: null },
+  other: { get name() { return t('Other'); }, tested: null },
+  cps: { get name() { return t('Motorola CPS'); }, tested: false },
+  'ipsc-other': { get name() { return t('Other'); }, tested: null },
 };
 
 /** Returns the kind of the repeater of type type and ID id, or null for a type that does not connect over the network. */

@@ -84,9 +84,9 @@ export type PositionPush = {
 };
 
 export const WINDOWS = [
-  { hours: 24, label: t('24 hours') },
-  { hours: 168, label: t('7 days') },
-  { hours: 720, label: t('30 days') },
+  { hours: 24, get label() { return t('24 hours'); } },
+  { hours: 168, get label() { return t('7 days'); } },
+  { hours: 720, get label() { return t('30 days'); } },
 ] as const;
 
 export const SYMBOLS = [

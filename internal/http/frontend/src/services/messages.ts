@@ -76,21 +76,24 @@ export type MessageEvent = {
   message: Message;
 };
 
-export const FORMAT_LABELS: Record<MessageFormat, string> = {
-  ip: t('ETSI IP'),
-  tms: t('Motorola TMS'),
-  anytone: t('AnyTone'),
-  hytera: t('Hytera'),
-  defined_data: t('Defined Data'),
+// Keys only: the translated text is resolved in formatLabel() so that it is
+// evaluated when the label is read, not when this module is imported.
+const FORMAT_LABEL_KEYS: Record<MessageFormat, string> = {
+  ip: 'ETSI IP',
+  tms: 'Motorola TMS',
+  anytone: 'AnyTone',
+  hytera: 'Hytera',
+  defined_data: 'Defined Data',
   udt: 'UDT',
-  data: t('Data (not text)'),
+  data: 'Data (not text)',
   unknown: 'Unknown',
 };
 
 export const FORMAT_ORDER: MessageFormat[] = ['ip', 'tms', 'anytone', 'hytera', 'defined_data', 'udt', 'data', 'unknown'];
 
 export function formatLabel(format: string): string {
-  return FORMAT_LABELS[format as MessageFormat] ?? format;
+  const key = FORMAT_LABEL_KEYS[format as MessageFormat];
+  return key ? t(key) : format;
 }
 
 export function heldState(h: MessageHeld): { label: string; tone: BadgeTone } {
@@ -98,8 +101,8 @@ export function heldState(h: MessageHeld): { label: string; tone: BadgeTone } {
   case 'held':
   case 'sending':
     return h.format_known
-      ? { label: t('Held for the radio'), tone: 'warn' }
-      : { label: t('Held: radio format not known yet'), tone: 'warn' };
+      ? { get label() { return t('Held for the radio'); }, tone: 'warn' }
+      : { get label() { return t('Held: radio format not known yet'); }, tone: 'warn' };
   case 'delivered':
     return { label: h.response === 'ack' ? t('Delivered later (ACK)') : t('Delivered later'), tone: 'ok' };
   default:
@@ -116,13 +119,13 @@ export function messageState(m: Pick<Message, 'confirmed' | 'response' | 'held'>
   }
   switch (m.response) {
   case 'ack':
-    return { label: t('Delivered (ACK)'), tone: 'ok' };
+    return { get label() { return t('Delivered (ACK)'); }, tone: 'ok' };
   case 'nack':
-    return { label: t('Rejected (NACK)'), tone: 'bad' };
+    return { get label() { return t('Rejected (NACK)'); }, tone: 'bad' };
   case 'sack':
-    return { label: t('Partial (SACK)'), tone: 'warn' };
+    return { get label() { return t('Partial (SACK)'); }, tone: 'warn' };
   default:
-    return { label: t('Confirmed, no reply'), tone: 'warn' };
+    return { get label() { return t('Confirmed, no reply'); }, tone: 'warn' };
   }
 }
 

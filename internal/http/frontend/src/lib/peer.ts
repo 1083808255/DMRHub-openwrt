@@ -26,7 +26,7 @@ export type PeerTab = 'freedmr' | 'hblink3' | 'other';
 export const PEER_TABS: Record<PeerTab, { name: string; tested: boolean | null }> = {
   freedmr: { name: 'FreeDMR', tested: true },
   hblink3: { name: 'HBlink3', tested: true },
-  other: { name: t('Other OpenBridge server'), tested: null },
+  other: { get name() { return t('Other OpenBridge server'); }, tested: null },
 };
 
 /** Returns the server tabs of a peer: FreeDMR for an enhanced peer, else HBlink3 and any other server. */
@@ -45,7 +45,9 @@ export type PeerValues = {
 };
 
 /** PEER_PASSWORD_PLACEHOLDER stands in for the password when the page does not show it. */
-export const PEER_PASSWORD_PLACEHOLDER = t('<peer password>');
+export function peerPasswordPlaceholder(): string {
+  return t('<peer password>');
+}
 
 const passwords = new Map<number, string>();
 

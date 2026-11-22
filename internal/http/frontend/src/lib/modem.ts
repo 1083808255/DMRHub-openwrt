@@ -164,7 +164,8 @@ const boardRows = (b: { firmware?: string; protocol?: number; modes?: string[] }
   return rows;
 };
 
-const checkPort = t('Check the port and its speed, and that no other program, such as MMDVMHost, uses the port.');
+const checkPort = (): string =>
+  t('Check the port and its speed, and that no other program, such as MMDVMHost, uses the port.');
 
 /** How the Modem tab shows the answer of a test. */
 export const testView = (test: ModemTest): ResultView => {
@@ -188,31 +189,31 @@ const resultView = (test: ModemTest): ResultView => {
       ? t('The modem runs on this port.')
       : i18n.global.t('The modem runs on this port on replica {replica}.', { replica: replicaName(st.replica ?? '') });
     if (st.linked) {
-      return { tone: 'ok', title: t('The modem is connected'), rows: boardRows(st), text: `${where} ${t('DMRHub did not open the port again.')}` };
+      return { tone: 'ok', get title() { return t('The modem is connected'); }, rows: boardRows(st), text: `${where} ${t('DMRHub did not open the port again.')}` };
     }
     return {
-      tone: 'bad', title: t('The modem is not connected'), rows: [],
-      text: `${where} ${t('DMRHub keeps trying to open it')}${st.error ? `: ${st.error}` : ''}. ${checkPort}`,
+      tone: 'bad', get title() { return t('The modem is not connected'); }, rows: [],
+      text: `${where} ${t('DMRHub keeps trying to open it')}${st.error ? `: ${st.error}` : ''}. ${checkPort()}`,
     };
   }
   const r = test.result;
   if (!r) {
-    return { tone: 'bad', title: t('The test did not run'), rows: [] };
+    return { tone: 'bad', get title() { return t('The test did not run'); }, rows: [] };
   }
   if (!r.opened) {
     return {
-      tone: 'bad', title: t('The port did not open'), rows: [],
+      tone: 'bad', get title() { return t('The port did not open'); }, rows: [],
       text: i18n.global.t('DMRHub could not open {port}: {error}.', { port: r.port, error: r.error ?? t('unknown error') }),
     };
   }
   if (!r.answered) {
     return {
-      tone: 'bad', title: t('No answer from the board'), rows: [],
+      tone: 'bad', get title() { return t('No answer from the board'); }, rows: [],
       text: `${i18n.global.t('DMRHub opened {port} at {baud} but the board did not answer after {count} try | DMRHub opened {port} at {baud} but the board did not answer after {count} tries.', {
         port: r.port,
         baud: r.baud,
         count: r.tries,
-      })} ${checkPort}`,
+      })} ${checkPort()}`,
     };
   }
   const rows = boardRows(r);
@@ -223,10 +224,10 @@ const resultView = (test: ModemTest): ResultView => {
     }
   }
   if (!r.error) {
-    return { tone: 'ok', title: t('The board answered'), rows };
+    return { tone: 'ok', get title() { return t('The board answered'); }, rows };
   }
   if (!r.frequencies) {
-    return { tone: 'bad', title: t('DMRHub cannot drive this board'), rows, text: `${r.error}.` };
+    return { tone: 'bad', get title() { return t('DMRHub cannot drive this board'); }, rows, text: `${r.error}.` };
   }
-  return { tone: 'bad', title: t('The board did not take the settings'), rows };
+  return { tone: 'bad', get title() { return t('The board did not take the settings'); }, rows };
 };

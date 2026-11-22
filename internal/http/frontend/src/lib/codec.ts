@@ -80,11 +80,15 @@ export type StatusText = {
 const HOST_PORT = /^([^\s:[\]]+):(\d{1,5})$/;
 const IPV6_PORT = /^\[([^\s[\]]*:[^\s[\]]*)\]:(\d{1,5})$/;
 
-/** HOST_PORT_ERROR is the error shown for an AMBE server that is not a host and port. */
-export const HOST_PORT_ERROR = t('Enter a host and port for each server, such as ambeserver:2460.');
+/** hostPortError is the error shown for an AMBE server that is not a host and port. */
+export function hostPortError(): string {
+  return t('Enter a host and port for each server, such as ambeserver:2460.');
+}
 
-/** CALLS_ERROR is the error shown for a Calls at once value that is not a whole number of 1 or more. */
-export const CALLS_ERROR = t('Calls at once is a whole number of 1 or more, or empty for no limit.');
+/** callsAtOnceError is the error shown for a Calls at once value that is not a whole number of 1 or more. */
+export function callsAtOnceError(): string {
+  return t('Calls at once is a whole number of 1 or more, or empty for no limit.');
+}
 
 const WHOLE = /^[1-9]\d*$/;
 
@@ -170,11 +174,11 @@ export function ambeServerError(value: string): string {
   const v = value.trim();
   const m = HOST_PORT.exec(v) ?? IPV6_PORT.exec(v);
   if (!m) {
-    return HOST_PORT_ERROR;
+    return hostPortError();
   }
   const port = Number(m[2]);
   if (port < 1 || port > 65535) {
-    return HOST_PORT_ERROR;
+    return hostPortError();
   }
   return '';
 }
@@ -193,7 +197,7 @@ export function callsError(calls: number | string | undefined | null): string {
   if (v === '') {
     return '';
   }
-  return WHOLE.test(v) && Number.isSafeInteger(Number(v)) ? '' : CALLS_ERROR;
+  return WHOLE.test(v) && Number.isSafeInteger(Number(v)) ? '' : callsAtOnceError();
 }
 
 /** ambeServersError returns the first error of the AMBE server rows, or '' when every row is good. */

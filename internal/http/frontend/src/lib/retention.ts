@@ -22,12 +22,12 @@ import { i18n, t } from '@/i18n';
 export type RetentionChoice = { value: number; label: string };
 
 export const RETENTION_CHOICES: RetentionChoice[] = [
-  { value: 0, label: t('Keep forever') },
-  { value: 30, label: t('30 days') },
-  { value: 90, label: t('90 days') },
-  { value: 365, label: t('1 year') },
-  { value: 730, label: t('2 years') },
-  { value: 1825, label: t('5 years') },
+  { value: 0, get label() { return t('Keep forever'); } },
+  { value: 30, get label() { return t('30 days'); } },
+  { value: 90, get label() { return t('90 days'); } },
+  { value: 365, get label() { return t('1 year'); } },
+  { value: 730, get label() { return t('2 years'); } },
+  { value: 1825, get label() { return t('5 years'); } },
 ];
 
 /** retentionDays reads a retention setting as whole days; anything else is 0, which keeps records forever. */

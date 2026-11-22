@@ -23,14 +23,14 @@ import { i18n, t } from '@/i18n';
 export type TypeKey = 'voice' | 'data' | 'sms' | 'gps' | 'alias' | 'csbk' | 'control' | 'unknown';
 
 export const TYPES: { key: TypeKey; label: string }[] = [
-  { key: 'voice', label: t('Voice') },
-  { key: 'data', label: t('Data') },
-  { key: 'sms', label: t('SMS') },
-  { key: 'gps', label: t('GPS') },
-  { key: 'alias', label: t('Talker Alias') },
-  { key: 'csbk', label: t('CSBK') },
-  { key: 'control', label: t('Control') },
-  { key: 'unknown', label: t('Unknown') },
+  { key: 'voice', get label() { return t('Voice'); } },
+  { key: 'data', get label() { return t('Data'); } },
+  { key: 'sms', get label() { return t('SMS'); } },
+  { key: 'gps', get label() { return t('GPS'); } },
+  { key: 'alias', get label() { return t('Talker Alias'); } },
+  { key: 'csbk', get label() { return t('CSBK'); } },
+  { key: 'control', get label() { return t('Control'); } },
+  { key: 'unknown', get label() { return t('Unknown'); } },
 ];
 
 export const DEFAULT_TYPES: TypeKey[] = ['voice', 'data', 'sms', 'gps', 'alias', 'csbk', 'control'];
@@ -103,15 +103,15 @@ const SAP_NAMES: Record<number, string> = {
   4: 'IP',
   5: 'ARP',
   9: 'Proprietary',
-  10: t('Short data'),
+  10: 'Short data',
 };
 
 const SMS_FORMATS: Record<string, string> = {
-  ip: t('ETSI IP'),
-  tms: t('Motorola TMS'),
-  anytone: t('AnyTone'),
-  hytera: t('Hytera'),
-  defined_data: t('Defined Data'),
+  ip: 'ETSI IP',
+  tms: 'Motorola TMS',
+  anytone: 'AnyTone',
+  hytera: 'Hytera',
+  defined_data: 'Defined Data',
 };
 
 const DATA_SUBS: Record<string, string> = {
@@ -121,18 +121,18 @@ const DATA_SUBS: Record<string, string> = {
 };
 
 const CSBK_NAMES: Record<string, string> = {
-  preamble: t('Preamble'),
-  radio_check: t('Radio Check'),
-  radio_check_answer: t('Radio Check Answer'),
-  call_alert: t('Call Alert'),
-  call_alert_ack: t('Call Alert ACK'),
+  preamble: 'Preamble',
+  radio_check: 'Radio Check',
+  radio_check_answer: 'Radio Check Answer',
+  call_alert: 'Call Alert',
+  call_alert_ack: 'Call Alert ACK',
 };
 
 const UNKNOWN_NAMES: Record<string, string> = {
-  bad_crc: t('Bad CRC'),
-  undecodable: t('Undecodable burst'),
-  reserved: t('Reserved data type'),
-  frame_type_3: t('Frame type 3'),
+  bad_crc: 'Bad CRC',
+  undecodable: 'Undecodable burst',
+  reserved: 'Reserved data type',
+  frame_type_3: 'Frame type 3',
 };
 /** humanize turns a sub kind such as c_bcast into C bcast for display. */
 export function humanize(sub: string): string {
@@ -141,23 +141,23 @@ export function humanize(sub: string): string {
 }
 
 const UNDELIVERABLE_WORDS: Record<string, string> = {
-  invalid_data_type: t('invalid data type'),
-  no_ipsc_form: t('could not carry this burst'),
-  frame_type_3: t('unknown frame type'),
-  fec_uncorrectable: t('too damaged to repair'),
-  slot_type: t('could not rebuild this burst'),
-  stream_id_range: t('call ID does not fit the link'),
-  build_failed: t('could not build this burst'),
-  encode_failed: t('could not encode this burst'),
-  data_in_voice: t('data burst in a voice call'),
-  undecodable: t('could not read this burst'),
-  slot_busy: t('busy on that slot'),
+  invalid_data_type: 'invalid data type',
+  no_ipsc_form: 'could not carry this burst',
+  frame_type_3: 'unknown frame type',
+  fec_uncorrectable: 'too damaged to repair',
+  slot_type: 'could not rebuild this burst',
+  stream_id_range: 'call ID does not fit the link',
+  build_failed: 'could not build this burst',
+  encode_failed: 'could not encode this burst',
+  data_in_voice: 'data burst in a voice call',
+  undecodable: 'could not read this burst',
+  slot_busy: 'busy on that slot',
 };
 
 const UNDELIVERABLE_TARGETS: Record<string, string> = {
-  ipsc: t('IPSC repeater'),
-  mmdvm: t('MMDVM repeater'),
-  openbridge: t('OpenBridge peer'),
+  ipsc: 'IPSC repeater',
+  mmdvm: 'MMDVM repeater',
+  openbridge: 'OpenBridge peer',
 };
 const LISTED_PER_REASON = 3;
 

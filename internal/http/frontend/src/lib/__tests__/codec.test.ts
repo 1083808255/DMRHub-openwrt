@@ -19,8 +19,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  CALLS_ERROR,
-  HOST_PORT_ERROR,
+  callsAtOnceError,
+  hostPortError,
   ambeServerError,
   ambeServersError,
   ambeServersPayload,
@@ -149,8 +149,8 @@ describe('heardLine', () => {
 
 describe('ambeServerError', () => {
   it('rejects an empty value', () => {
-    expect(ambeServerError('')).toBe(HOST_PORT_ERROR);
-    expect(ambeServerError('  ')).toBe(HOST_PORT_ERROR);
+    expect(ambeServerError('')).toBe(hostPortError());
+    expect(ambeServerError('  ')).toBe(hostPortError());
   });
 
   it('accepts a host or an address with a port', () => {
@@ -163,18 +163,18 @@ describe('ambeServerError', () => {
   it('rejects a value that is not a host and port', () => {
     for (const v of ['ambeserver', 'ambeserver:', ':2460', 'ambe server:2460', '::1:2460', '[::1]', '[]:2460',
       'host:port', 'a:b:2460', 'host:123456']) {
-      expect(ambeServerError(v), v).toBe(HOST_PORT_ERROR);
+      expect(ambeServerError(v), v).toBe(hostPortError());
     }
   });
 
   it('rejects port 0 and ports over 65535', () => {
-    expect(ambeServerError('ambeserver:0')).toBe(HOST_PORT_ERROR);
-    expect(ambeServerError('ambeserver:65536')).toBe(HOST_PORT_ERROR);
-    expect(ambeServerError('[::1]:99999')).toBe(HOST_PORT_ERROR);
+    expect(ambeServerError('ambeserver:0')).toBe(hostPortError());
+    expect(ambeServerError('ambeserver:65536')).toBe(hostPortError());
+    expect(ambeServerError('[::1]:99999')).toBe(hostPortError());
   });
 
   it('uses the text of the mockup', () => {
-    expect(HOST_PORT_ERROR).toBe('Enter a host and port for each server, such as ambeserver:2460.');
+    expect(hostPortError()).toBe('Enter a host and port for each server, such as ambeserver:2460.');
   });
 });
 
@@ -202,12 +202,12 @@ describe('callsError', () => {
 
   it('rejects anything else', () => {
     for (const v of ['0', '-1', -1, '1.5', 1.5, 'two', '01', '1e3', '99999999999999999999']) {
-      expect(callsError(v), String(v)).toBe(CALLS_ERROR);
+      expect(callsError(v), String(v)).toBe(callsAtOnceError());
     }
   });
 
   it('uses the text of the mockup', () => {
-    expect(CALLS_ERROR).toBe('Calls at once is a whole number of 1 or more, or empty for no limit.');
+    expect(callsAtOnceError()).toBe('Calls at once is a whole number of 1 or more, or empty for no limit.');
   });
 });
 
@@ -218,9 +218,9 @@ describe('ambeServersError', () => {
   });
 
   it('returns the first error', () => {
-    expect(ambeServersError([{ address: 'ambeserver:2460', calls: 'x' }, { address: '', calls: '' }])).toBe(CALLS_ERROR);
-    expect(ambeServersError([{ address: 'ambeserver', calls: 'x' }])).toBe(HOST_PORT_ERROR);
-    expect(ambeServersError([{ address: 'ambeserver:2460', calls: '' }, { address: '', calls: '' }])).toBe(HOST_PORT_ERROR);
+    expect(ambeServersError([{ address: 'ambeserver:2460', calls: 'x' }, { address: '', calls: '' }])).toBe(callsAtOnceError());
+    expect(ambeServersError([{ address: 'ambeserver', calls: 'x' }])).toBe(hostPortError());
+    expect(ambeServersError([{ address: 'ambeserver:2460', calls: '' }, { address: '', calls: '' }])).toBe(hostPortError());
   });
 });
 
