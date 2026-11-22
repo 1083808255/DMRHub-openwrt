@@ -161,28 +161,28 @@ jobs:
           # ImageBuilder ships ipkg-make-index.sh; build a local feed for our ipk.
           mkdir -p local_packages
           cp "$GITHUB_WORKSPACE/artifacts/${IPK_NAME}" local_packages/
-          IDX=$(find . -name ipkg-make-index.sh | head -1)
-          echo "Using index script: $IDX"
-          IDX_ABS="$(pwd)/${IDX#./}"
-          # ipkg-make-index.sh calls `$MKHASH sha256 <file>` and expects only the hash.
-          # Provide a shim implementing OpenWrt's mkhash <alg> <file> -> bare checksum.
-          SHIM_DIR="$(mktemp -d)"
-          cat > "$SHIM_DIR/mkhash" <<'SHIM'
-          #!/bin/sh
-          alg="$1"; shift
-          case "$alg" in
-            sha256) exec sha256sum "$@" | awk '{print $1}' ;;
-            md5)    exec md5sum "$@" | awk '{print $1}' ;;
-            *)      exit 1 ;;
-          esac
-          SHIM
-          chmod +x "$SHIM_DIR/mkhash"
-          (cd local_packages && MKHASH="$SHIM_DIR/mkhash" bash "$IDX_ABS" . > Packages)
+          # Generate the opkg Packages index directly (no OpenWrt-only helpers).
+          IPK_FILE="$GITHUB_WORKSPACE/artifacts/${IPK_NAME}"
+          IPK_SIZE=$(stat -c%s "$IPK_FILE")
+          IPK_SHA=$(sha256sum "$IPK_FILE" | awk '{print $1}')
+          cat > local_packages/Packages <<EOF
+          Package: dmrhub
+          Version: 1.3.31-zh1
+          Depends: ca-certificates
+          Architecture: x86_64
+          Maintainer: 1083808255
+          Filename: ${IPK_NAME}
+          Size: ${IPK_SIZE}
+          SHA256sum: ${IPK_SHA}
+          Description: DMRHub DMR network server (zh-CN localization build)
+
+          EOF
           gzip -kf local_packages/Packages
-          echo "==> generated Packages:"; cat local_packages/Packages | head -30
-          echo "src custom file:$(pwd)/local_packages" >> repositories.conf
-          echo "==> repositories.conf:"; cat repositories.conf
           echo "==> local Packages:"; cat local_packages/Packages
+          echo "src custom file:$(pwd)/local_packages" >> repositories.conf
+          # Disable signature verification so the unsigned local feed is accepted.
+          sed -i '/option check_signature/d' repositories.conf
+          echo "==> repositories.conf:"; cat repositories.conf
           # Base set: LuCI web UI (Chinese) + DMRHub + certs
           PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates"
           echo "==> make image PACKAGES=$PACKAGES"
