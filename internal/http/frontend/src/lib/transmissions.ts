@@ -103,7 +103,7 @@ const SAP_NAMES: Record<number, string> = {
   4: 'IP',
   5: 'ARP',
   9: 'Proprietary',
-  10: 'Short data',
+  10: t('Short data'),
 };
 
 const SMS_FORMATS: Record<string, string> = {

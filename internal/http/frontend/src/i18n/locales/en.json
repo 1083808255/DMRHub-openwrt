@@ -1570,5 +1570,13 @@
   ", and private calls,": ", and private calls,",
   "The calls on {slots} end. ": "The calls on {slots} end. ",
   "The call on {slot} ends. ": "The call on {slot} ends. ",
-  "The {device} logs in again by itself.": "The {device} logs in again by itself."
+  "The {device} logs in again by itself.": "The {device} logs in again by itself.",
+  "1 minute": "1 minute",
+  "{minutes} minutes": "{minutes} minutes",
+  "1 hour": "1 hour",
+  "7 days": "7 days",
+  "Motorola CPS": "Motorola CPS",
+  "The basemap status names no archive": "The basemap status names no archive",
+  "The basemap status answered {status}": "The basemap status answered {status}",
+  "Basemap part {part} answered {status}": "Basemap part {part} answered {status}"
 }

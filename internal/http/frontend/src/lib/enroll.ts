@@ -34,7 +34,7 @@ export const CLIENT_TABS: Record<ClientTab, { name: string; tested: boolean | nu
   droidstar: { name: 'DroidStar', tested: true },
   hblink3: { name: 'HBlink3', tested: true },
   other: { name: t('Other'), tested: null },
-  cps: { name: 'Motorola CPS', tested: false },
+  cps: { name: t('Motorola CPS'), tested: false },
   'ipsc-other': { name: t('Other'), tested: null },
 };
 

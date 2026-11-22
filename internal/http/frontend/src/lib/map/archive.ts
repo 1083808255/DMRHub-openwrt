@@ -17,6 +17,7 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { t } from '@/i18n';
 import { FetchSource, type RangeResponse, type Source } from 'pmtiles';
 
 import { BlockCachedSource, generationOf } from './blockCache';
@@ -75,7 +76,7 @@ export class PartsSource implements Source {
           return new ArrayBuffer(0);
         }
         if (!res.ok) {
-          throw new Error(`Basemap part ${s.part} answered ${res.status}`);
+          throw new Error(t('Basemap part {part} answered {status}', { part: s.part, status: res.status }));
         }
         const buf = await res.arrayBuffer();
         return res.status === 200 ? buf.slice(s.start, s.end + 1) : buf;
@@ -101,11 +102,11 @@ type Status = { key?: string; part_bytes?: number };
 export async function latestKey(base: string): Promise<{ key: string; partBytes: number }> {
   const res = await fetch(`${base}/status/latest.json`, { cache: 'no-store', credentials: 'omit' });
   if (!res.ok) {
-    throw new Error(`The basemap status answered ${res.status}`);
+    throw new Error(t('The basemap status answered {status}', { status: res.status }));
   }
   const s = (await res.json()) as Status;
   if (!s.key) {
-    throw new Error('The basemap status names no archive');
+    throw new Error(t('The basemap status names no archive'));
   }
   return { key: s.key, partBytes: s.part_bytes || PART_BYTES };
 }

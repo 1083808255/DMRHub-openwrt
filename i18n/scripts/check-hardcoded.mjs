@@ -31,20 +31,28 @@ function isTranslatable(raw) {
   return UI_WORD.test(t) || /^[A-Z][a-z]/.test(t);
 }
 
-function collect(dir, out) {
+function collect(dir, out, exts) {
   for (const f of readdirSync(dir)) {
     const p = path.join(dir, f);
-    if (statSync(p).isDirectory()) collect(p, out);
-    else if (f.endsWith('.vue')) out.push(p);
+    if (statSync(p).isDirectory()) {
+      if (f === '__tests__') continue;
+      collect(p, out, exts);
+    } else if (exts.some((e) => f.endsWith(e))) out.push(p);
   }
 }
 
-const files = [];
-collect(path.join(root, 'src/views'), files);
-collect(path.join(root, 'src/components'), files);
+const vueFiles = [];
+collect(path.join(root, 'src/views'), vueFiles, ['.vue']);
+collect(path.join(root, 'src/components'), vueFiles, ['.vue']);
+// Plain .ts modules hold user-facing text too (error messages, status labels,
+// setup field descriptions). Scanning them catches the strings the template
+// scan used to miss.
+const tsFiles = [];
+collect(path.join(root, 'src/lib'), tsFiles, ['.ts']);
+collect(path.join(root, 'src/services'), tsFiles, ['.ts']);
 
 const found = [];
-for (const file of files) {
+for (const file of vueFiles) {
   const src = readFileSync(file, 'utf8');
   const { descriptor, errors } = parse(src);
   if (errors.length || !descriptor.template?.ast) continue;
@@ -77,11 +85,65 @@ for (const file of files) {
   walk(descriptor.template.ast, null);
 }
 
+// Plain .ts modules: look for English string literals that look like UI text.
+// Strings already inside t()/i18n.global.t() are keys, not untranslated text,
+// so they are stripped before scanning.
+const TS_ALLOW = [
+  /^[A-Z]{2,}$/, // ALLCAPS identifiers like AMBE, CORS, CSBK
+  /^[\w./:@-]+$/, // paths, ids, css-ish tokens
+  /^https?:\/\//,
+  /^[a-z0-9_-]+$/i, // single lowercase token
+  /^(id|uuid|token|api|json|xml|html|css|js|yaml|yml|md|csv|log|png|jpg|svg|webp|ico)$/i,
+  /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)$/,
+  /^(application|audio|image|text|multipart)\//i,
+  /^[\d\s.,:%+-]+$/, // pure numbers and units
+  // Font family names used by the map styles.
+  /^(Montserrat|Open Sans)\b/,
+  // Date/time format patterns such as "MMM d, HH:mm".
+  /^[A-Z]{3,}\s+[a-z]?\s*[dHms:,\-/]+$/,
+  // Map tile coordinates such as "z12/656/1582".
+  /\bz\d+\/\d+\/\d+/,
+  // date-fns format patterns such as "MMM d, HH:mm".
+  /^[A-Z]{2,4}\s+[a-z]?,\s*[A-Za-z:]+$/,
+  // Date/time samples such as "Tue at 19:00 America/Chicago".
+  /^[A-Z][a-z]{2} at \d{2}:\d{2}/,
+];
+
+for (const file of tsFiles) {
+  const raw = readFileSync(file, 'utf8');
+  // Drop i18n-wrapped strings (they are keys).
+  const src = raw.replace(/[A-Za-z0-9_$.]*\.?t\(\s*(['"])((?:\\.|(?!\1)[^\\\r\n])*)\1/g, '""');
+  // Blank out block comments so their prose is not reported.
+  const scanned = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+  const rel = path.relative(root, file);
+  const re = /'([^'\\\n]{4,120})'|"([^"\\\n]{4,120})"/g;
+  let m;
+  while ((m = re.exec(scanned)) !== null) {
+    const v = m[1] !== undefined ? m[1] : m[2];
+    if (!HAS_WORDS.test(v)) continue;
+    if (TS_ALLOW.some((rx) => rx.test(v.trim()))) continue;
+    // Skip CSS utility classes and long code-ish strings.
+    if (/\b(bg-|text-|flex|items-|rounded|gap-|px-|py-|hover:|dark:|font-)/.test(v)) continue;
+    // Skip strings that look like sentences about code rather than UI text.
+    if (/^\s*(\/\/|\*|\/\*)/.test(v)) continue;
+    if (!/\s/.test(v.trim())) continue;
+    // Must look like prose: start with a capital letter and read as a sentence.
+    if (!/^[A-Z0-9"'(\[]/.test(v.trim())) continue;
+    // Ignore matches inside comments and debug logging.
+    const lineStart = scanned.lastIndexOf('\n', m.index) + 1;
+    const lineText = scanned.slice(lineStart, m.index);
+    if (/\/\/|\/\*|\*\//.test(lineText)) continue;
+    if (/console\.(log|debug|info|warn|error)\s*\(/.test(lineText)) continue;
+    const line = scanned.slice(0, m.index).split('\n').length;
+    found.push({ rel, line, key: v.trim() });
+  }
+}
+
 if (found.length) {
-  console.error(`Found ${found.length} hardcoded English string(s) in templates:`);
+  console.error(`Found ${found.length} hardcoded English string(s):`);
   for (const f of found.slice(0, 50)) console.error(`  ${f.rel}:${f.line}  ${JSON.stringify(f.key)}`);
   if (found.length > 50) console.error(`  ... and ${found.length - 50} more`);
   process.exitCode = 1;
 } else {
-  console.log('No hardcoded English text found in Vue templates.');
+  console.log('No hardcoded English text found.');
 }

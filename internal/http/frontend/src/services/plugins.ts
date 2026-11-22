@@ -163,13 +163,13 @@ export function formatRanges(ranges: PluginRange[]): string {
 export function formatSpan(fromIso: string, now: number = Date.now()): string {
   const minutes = Math.max(1, Math.round((now - Date.parse(fromIso)) / 60000));
   if (minutes < 60) {
-    return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+    return minutes === 1 ? t('1 minute') : t('{minutes} minutes', { minutes });
   }
   const hours = Math.round(minutes / 60);
   if (hours < 48) {
-    return hours === 1 ? '1 hour' : `${hours} hours`;
+    return hours === 1 ? t('1 hour') : t('{hours} hours', { hours });
   }
-  return `${Math.round(hours / 24)} days`;
+  return t('{days} days', { days: Math.round(hours / 24) });
 }
 
 /** isInside reports whether p runs inside DMRHub. */

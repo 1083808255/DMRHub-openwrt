@@ -1570,5 +1570,13 @@
   ", and private calls,": "，以及私密通话，",
   "The calls on {slots} end. ": "在 {slots} 上的通话结束。",
   "The call on {slot} ends. ": "在 {slot} 上的通话结束。",
-  "The {device} logs in again by itself.": "{device}会自动重新登录。"
+  "The {device} logs in again by itself.": "{device}会自动重新登录。",
+  "1 minute": "1 分钟",
+  "{minutes} minutes": "{minutes} 分钟",
+  "1 hour": "1 小时",
+  "7 days": "7 天",
+  "Motorola CPS": "Motorola CPS（摩托罗拉编程软件）",
+  "The basemap status names no archive": "底图状态未指定归档。",
+  "The basemap status answered {status}": "底图状态返回 {status}。",
+  "Basemap part {part} answered {status}": "底图分片 {part} 返回 {status}。"
 }
