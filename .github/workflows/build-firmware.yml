@@ -164,7 +164,20 @@ jobs:
           IDX=$(find . -name ipkg-make-index.sh | head -1)
           echo "Using index script: $IDX"
           IDX_ABS="$(pwd)/${IDX#./}"
-          (cd local_packages && bash "$IDX_ABS" . > Packages)
+          # ipkg-make-index.sh calls `$MKHASH sha256 <file>` and expects only the hash.
+          # Provide a shim implementing OpenWrt's mkhash <alg> <file> -> bare checksum.
+          SHIM_DIR="$(mktemp -d)"
+          cat > "$SHIM_DIR/mkhash" <<'SHIM'
+          #!/bin/sh
+          alg="$1"; shift
+          case "$alg" in
+            sha256) exec sha256sum "$@" | awk '{print $1}' ;;
+            md5)    exec md5sum "$@" | awk '{print $1}' ;;
+            *)      exit 1 ;;
+          esac
+          SHIM
+          chmod +x "$SHIM_DIR/mkhash"
+          (cd local_packages && MKHASH="$SHIM_DIR/mkhash" bash "$IDX_ABS" . > Packages)
           gzip -kf local_packages/Packages
           echo "==> generated Packages:"; cat local_packages/Packages | head -30
           echo "src custom file:$(pwd)/local_packages" >> repositories.conf
