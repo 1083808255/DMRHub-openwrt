@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import type { Option, Read } from '@/lib/setupMenu';
+import { t } from '@/i18n';
 
 /** The voice sets that DMRHub embeds, as internal/prompts/voices holds them. */
 export const PROMPT_VOICES: Option[] = [
@@ -38,21 +39,21 @@ export interface SpokenRefusal {
 
 /** The refusals and on-air code replies that the hub speaks, with when each plays. */
 export const SPOKEN_REFUSALS: SpokenRefusal[] = [
-  { clip: 'talkgroup-not-found', when: 'The talkgroup does not exist', text: 'Talkgroup not found.' },
-  { clip: 'talkgroup-restricted', when: 'The talkgroup is not open to the repeater', text: 'Talkgroup restricted.' },
-  { clip: 'talkgroup-blocked', when: 'The repeater blocks the talkgroup', text: 'Talkgroup blocked here.' },
-  { clip: 'timeslot-reserved', when: 'The timeslot is locked to other users', text: 'Timeslot reserved.' },
-  { clip: 'radio-id-not-registered', when: 'The radio may not transmit on this network', text: 'Radio ID not registered.' },
-  { clip: 'time-out', when: 'The transmission ran past the longest one allowed', text: 'Time out.' },
+  { clip: 'talkgroup-not-found', when: t('The talkgroup does not exist'), text: t('Talkgroup not found.') },
+  { clip: 'talkgroup-restricted', when: t('The talkgroup is not open to the repeater'), text: t('Talkgroup restricted.') },
+  { clip: 'talkgroup-blocked', when: t('The repeater blocks the talkgroup'), text: t('Talkgroup blocked here.') },
+  { clip: 'timeslot-reserved', when: t('The timeslot is locked to other users'), text: t('Timeslot reserved.') },
+  { clip: 'radio-id-not-registered', when: t('The radio may not transmit on this network'), text: t('Radio ID not registered.') },
+  { clip: 'time-out', when: t('The transmission ran past the longest one allowed'), text: t('Time out.') },
   {
     clip: 'channel-busy',
-    when: 'Another call held the timeslot when the radio keyed up',
-    text: 'Channel busy.',
+    when: t('Another call held the timeslot when the radio keyed up'),
+    text: t('Channel busy.'),
     applies: (read) => read('dmr.routing.contention') === 'first',
   },
-  { clip: 'code-needed', when: 'The radio needs its on-air code', text: 'Code needed.' },
-  { clip: 'unlocked', when: 'The on-air code was right', text: 'Unlocked.' },
-  { clip: 'wrong-code', when: 'The on-air code was wrong', text: 'Wrong code.' },
+  { clip: 'code-needed', when: t('The radio needs its on-air code'), text: t('Code needed.') },
+  { clip: 'unlocked', when: t('The on-air code was right'), text: t('Unlocked.') },
+  { clip: 'wrong-code', when: t('The on-air code was wrong'), text: t('Wrong code.') },
 ];
 
 let playing: HTMLAudioElement | null = null;

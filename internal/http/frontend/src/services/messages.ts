@@ -19,6 +19,7 @@
 
 import API from '@/services/API';
 import type { BadgeTone } from '@/lib/badge';
+import { t } from '@/i18n';
 
 export const MESSAGE_BOX_CAP = 250;
 
@@ -76,13 +77,13 @@ export type MessageEvent = {
 };
 
 export const FORMAT_LABELS: Record<MessageFormat, string> = {
-  ip: 'ETSI IP',
-  tms: 'Motorola TMS',
-  anytone: 'AnyTone',
-  hytera: 'Hytera',
-  defined_data: 'Defined Data',
+  ip: t('ETSI IP'),
+  tms: t('Motorola TMS'),
+  anytone: t('AnyTone'),
+  hytera: t('Hytera'),
+  defined_data: t('Defined Data'),
   udt: 'UDT',
-  data: 'Data (not text)',
+  data: t('Data (not text)'),
   unknown: 'Unknown',
 };
 
@@ -97,12 +98,12 @@ export function heldState(h: MessageHeld): { label: string; tone: BadgeTone } {
   case 'held':
   case 'sending':
     return h.format_known
-      ? { label: 'Held for the radio', tone: 'warn' }
-      : { label: 'Held: radio format not known yet', tone: 'warn' };
+      ? { label: t('Held for the radio'), tone: 'warn' }
+      : { label: t('Held: radio format not known yet'), tone: 'warn' };
   case 'delivered':
-    return { label: h.response === 'ack' ? 'Delivered later (ACK)' : 'Delivered later', tone: 'ok' };
+    return { label: h.response === 'ack' ? t('Delivered later (ACK)') : t('Delivered later'), tone: 'ok' };
   default:
-    return { label: h.response === 'nack' ? 'Not delivered (NACK)' : 'Not delivered', tone: 'bad' };
+    return { label: h.response === 'nack' ? t('Not delivered (NACK)') : t('Not delivered'), tone: 'bad' };
   }
 }
 
@@ -115,13 +116,13 @@ export function messageState(m: Pick<Message, 'confirmed' | 'response' | 'held'>
   }
   switch (m.response) {
   case 'ack':
-    return { label: 'Delivered (ACK)', tone: 'ok' };
+    return { label: t('Delivered (ACK)'), tone: 'ok' };
   case 'nack':
-    return { label: 'Rejected (NACK)', tone: 'bad' };
+    return { label: t('Rejected (NACK)'), tone: 'bad' };
   case 'sack':
-    return { label: 'Partial (SACK)', tone: 'warn' };
+    return { label: t('Partial (SACK)'), tone: 'warn' };
   default:
-    return { label: 'Confirmed, no reply', tone: 'warn' };
+    return { label: t('Confirmed, no reply'), tone: 'warn' };
   }
 }
 
@@ -230,12 +231,12 @@ export function transportLabel(transport: string): string {
 
 const SAP_NAMES: Record<number, string> = {
   0: 'UDT',
-  2: 'TCP/IP header compression',
-  3: 'UDP/IP header compression',
+  2: t('TCP/IP header compression'),
+  3: t('UDP/IP header compression'),
   4: 'IP',
   5: 'ARP',
   9: 'Proprietary',
-  10: 'Short data',
+  10: t('Short data'),
 };
 
 export function sapLabel(sap: number | null | undefined): string {

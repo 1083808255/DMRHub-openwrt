@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import { ref } from 'vue';
+import { i18n, t } from '@/i18n';
 import { replicaName } from '@/lib/setupState';
 
 /** A serial port of a replica. */
@@ -117,19 +118,27 @@ export const otherPort = (groups: ReplicaPorts[], value: string): boolean => {
   return ports.length === 0 || (value !== '' && !ports.some((p) => p.path === value));
 };
 
-const on = (s: ModemState) => (s.self ? '' : ` on replica ${replicaName(s.status?.replica ?? '')}`);
+const on = (s: ModemState) => (s.self ? '' : replicaName(s.status?.replica ?? ''));
 
 export type Pill = { tone: Tone; text: string; title?: string };
 
 /** The status pill of the Modem card. */
 export const modemPill = (s: ModemState | null): Pill => {
   if (!s?.status) {
-    return { tone: 'idle', text: 'Modem not running' };
+    return { tone: 'idle', text: t('Modem not running') };
   }
+  const replica = on(s);
   if (s.status.linked) {
-    return { tone: 'ok', text: `Modem connected${on(s)}` };
+    return {
+      tone: 'ok',
+      text: replica ? i18n.global.t('Modem connected on replica {replica}', { replica }) : t('Modem connected'),
+    };
   }
-  return { tone: 'bad', text: `Modem not connected${on(s)}`, title: s.status.error };
+  return {
+    tone: 'bad',
+    text: replica ? i18n.global.t('Modem not connected on replica {replica}', { replica }) : t('Modem not connected'),
+    title: s.status.error,
+  };
 };
 
 export type ResultView = { tone: Tone; title: string; rows: [string, string][]; text?: string };
@@ -138,77 +147,86 @@ const stepText = (s: ProbeStep | undefined): string | undefined => {
   if (!s) {
     return undefined;
   }
-  return s.taken ? 'Taken' : `Refused: ${s.error ?? 'no answer'}`;
+  return s.taken ? t('Taken') : i18n.global.t('Refused: {error}', { error: s.error ?? t('no answer') });
 };
 
 const boardRows = (b: { firmware?: string; protocol?: number; modes?: string[] }): [string, string][] => {
   const rows: [string, string][] = [];
   if (b.firmware) {
-    rows.push(['Firmware', b.firmware]);
+    rows.push([t('Firmware'), b.firmware]);
   }
   if (b.protocol) {
-    rows.push(['Protocol', String(b.protocol)]);
+    rows.push([t('Protocol'), String(b.protocol)]);
   }
   if (b.modes && b.modes.length > 0) {
-    rows.push(['Modes', b.modes.join(', ')]);
+    rows.push([t('Modes'), b.modes.join(', ')]);
   }
   return rows;
 };
 
-const checkPort = 'Check the port and its speed, and that no other program, such as MMDVMHost, uses the port.';
+const checkPort = t('Check the port and its speed, and that no other program, such as MMDVMHost, uses the port.');
 
 /** How the Modem tab shows the answer of a test. */
-export const testView = (t: ModemTest): ResultView => {
-  if (t.unanswered) {
+export const testView = (test: ModemTest): ResultView => {
+  if (test.unanswered) {
     return {
-      tone: 'bad', title: `Replica ${replicaName(t.replica ?? '')} did not answer`, rows: [],
-      text: 'Try again.',
+      tone: 'bad', title: i18n.global.t('Replica {replica} did not answer', { replica: replicaName(test.replica ?? '') }), rows: [],
+      text: t('Try again.'),
     };
   }
-  const view = resultView(t);
-  if (t.replica && t.self === false && !t.live) {
-    view.rows.unshift(['Replica', replicaName(t.replica)]);
+  const view = resultView(test);
+  if (test.replica && test.self === false && !test.live) {
+    view.rows.unshift([t('Replica'), replicaName(test.replica)]);
   }
   return view;
 };
 
-const resultView = (t: ModemTest): ResultView => {
-  if (t.live && t.state?.status) {
-    const st = t.state.status;
-    const where = t.state.self ? 'The modem runs on this port.' : `The modem runs on this port on replica ${replicaName(st.replica ?? '')}.`;
+const resultView = (test: ModemTest): ResultView => {
+  if (test.live && test.state?.status) {
+    const st = test.state.status;
+    const where = test.state.self
+      ? t('The modem runs on this port.')
+      : i18n.global.t('The modem runs on this port on replica {replica}.', { replica: replicaName(st.replica ?? '') });
     if (st.linked) {
-      return { tone: 'ok', title: 'The modem is connected', rows: boardRows(st), text: `${where} DMRHub did not open the port again.` };
+      return { tone: 'ok', title: t('The modem is connected'), rows: boardRows(st), text: `${where} ${t('DMRHub did not open the port again.')}` };
     }
     return {
-      tone: 'bad', title: 'The modem is not connected', rows: [],
-      text: `${where} DMRHub keeps trying to open it${st.error ? `: ${st.error}` : ''}. ${checkPort}`,
+      tone: 'bad', title: t('The modem is not connected'), rows: [],
+      text: `${where} ${t('DMRHub keeps trying to open it')}${st.error ? `: ${st.error}` : ''}. ${checkPort}`,
     };
   }
-  const r = t.result;
+  const r = test.result;
   if (!r) {
-    return { tone: 'bad', title: 'The test did not run', rows: [] };
+    return { tone: 'bad', title: t('The test did not run'), rows: [] };
   }
   if (!r.opened) {
-    return { tone: 'bad', title: 'The port did not open', rows: [], text: `DMRHub could not open ${r.port}: ${r.error ?? 'unknown error'}.` };
+    return {
+      tone: 'bad', title: t('The port did not open'), rows: [],
+      text: i18n.global.t('DMRHub could not open {port}: {error}.', { port: r.port, error: r.error ?? t('unknown error') }),
+    };
   }
   if (!r.answered) {
     return {
-      tone: 'bad', title: 'No answer from the board', rows: [],
-      text: `DMRHub opened ${r.port} at ${r.baud} but the board did not answer after ${r.tries} ${r.tries === 1 ? 'try' : 'tries'}. ${checkPort}`,
+      tone: 'bad', title: t('No answer from the board'), rows: [],
+      text: `${i18n.global.t('DMRHub opened {port} at {baud} but the board did not answer after {count} try | DMRHub opened {port} at {baud} but the board did not answer after {count} tries.', {
+        port: r.port,
+        baud: r.baud,
+        count: r.tries,
+      })} ${checkPort}`,
     };
   }
   const rows = boardRows(r);
-  for (const [label, s] of [['Frequencies', r.frequencies], ['Settings', r.settings]] as const) {
+  for (const [label, s] of [[t('Frequencies'), r.frequencies], [t('Settings'), r.settings]] as const) {
     const text = stepText(s);
     if (text) {
       rows.push([label, text]);
     }
   }
   if (!r.error) {
-    return { tone: 'ok', title: 'The board answered', rows };
+    return { tone: 'ok', title: t('The board answered'), rows };
   }
   if (!r.frequencies) {
-    return { tone: 'bad', title: 'DMRHub cannot drive this board', rows, text: `${r.error}.` };
+    return { tone: 'bad', title: t('DMRHub cannot drive this board'), rows, text: `${r.error}.` };
   }
-  return { tone: 'bad', title: 'The board did not take the settings', rows };
+  return { tone: 'bad', title: t('The board did not take the settings'), rows };
 };

@@ -17,15 +17,17 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { i18n, t } from '@/i18n';
+
 export type RetentionChoice = { value: number; label: string };
 
 export const RETENTION_CHOICES: RetentionChoice[] = [
-  { value: 0, label: 'Keep forever' },
-  { value: 30, label: '30 days' },
-  { value: 90, label: '90 days' },
-  { value: 365, label: '1 year' },
-  { value: 730, label: '2 years' },
-  { value: 1825, label: '5 years' },
+  { value: 0, label: t('Keep forever') },
+  { value: 30, label: t('30 days') },
+  { value: 90, label: t('90 days') },
+  { value: 365, label: t('1 year') },
+  { value: 730, label: t('2 years') },
+  { value: 1825, label: t('5 years') },
 ];
 
 /** retentionDays reads a retention setting as whole days; anything else is 0, which keeps records forever. */
@@ -39,6 +41,9 @@ export function retentionChoices(current: number): RetentionChoice[] {
   if (RETENTION_CHOICES.some((c) => c.value === current)) {
     return RETENTION_CHOICES;
   }
-  const extra = { value: current, label: current === 1 ? '1 day' : `${current} days` };
+  const extra = {
+    value: current,
+    label: current === 1 ? t('1 day') : i18n.global.t('{count} days', { count: current }),
+  };
   return [...RETENTION_CHOICES, extra].sort((a, b) => a.value - b.value);
 }

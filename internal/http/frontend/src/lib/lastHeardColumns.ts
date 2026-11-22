@@ -25,6 +25,7 @@ import Repeater from '@/components/Repeater.vue';
 import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
 import TransmissionType from '@/components/TransmissionType.vue';
 import CallCodec from '@/components/CallCodec.vue';
+import { t } from '@/i18n';
 import {
   berText,
   durationText,
@@ -76,44 +77,44 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
   const columns: DataTableColumn<CallRow, unknown>[] = [
     {
       accessorKey: 'time',
-      header: 'Time',
+      header: t('Time'),
       cell: ({ row }: Cell) => {
         const call = row.original;
         if (call.active) {
-          return 'Active';
+          return t('Active');
         }
         return h(RelativeTimestamp, { time: call.start_time, active: call.active });
       },
     },
     {
       accessorKey: 'time_slot',
-      header: 'TS',
+      header: t('TS'),
       cell: ({ row }: Cell) => (row.original.time_slot ? '2' : '1'),
     },
     {
       accessorKey: 'kind',
-      header: 'Type',
+      header: t('Type'),
       cell: ({ row }: Cell) => h(TransmissionType, { call: row.original }),
     },
   ];
   if (user) {
     columns.push({
       accessorKey: 'user',
-      header: 'User',
+      header: t('User'),
       cell: ({ row }: Cell) => person(row.original.user),
     });
   }
   if (showDestination) {
     columns.push({
       accessorKey: 'destination',
-      header: 'Destination',
+      header: t('Destination'),
       cell: ({ row }: Cell) => destination(row.original),
     });
   }
   if (repeater) {
     columns.push({
       accessorKey: 'repeater',
-      header: 'Repeater',
+      header: t('Repeater'),
       cell: ({ row }: Cell) => {
         const r = row.original.repeater;
         if (!r || !r.id) {
@@ -126,32 +127,32 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
   columns.push(
     {
       accessorKey: 'duration',
-      header: 'Duration',
+      header: t('Duration'),
       cell: ({ row }: Cell) => durationText(row.original),
     },
     {
       accessorKey: 'codec',
-      header: 'Codec',
+      header: t('Codec'),
       cell: ({ row }: Cell) => h(CallCodec, { call: row.original }),
     },
     {
       accessorKey: 'ber',
-      header: 'BER',
+      header: t('BER'),
       cell: ({ row }: Cell) => berText(row.original),
     },
     {
       accessorKey: 'loss',
-      header: 'Loss',
+      header: t('Loss'),
       cell: ({ row }: Cell) => lossText(row.original),
     },
     {
       accessorKey: 'jitter',
-      header: 'Jitter',
+      header: t('Jitter'),
       cell: ({ row }: Cell) => jitterText(row.original),
     },
     {
       accessorKey: 'rssi',
-      header: 'RSSI',
+      header: t('RSSI'),
       cell: ({ row }: Cell) => rssiText(row.original),
     },
   );

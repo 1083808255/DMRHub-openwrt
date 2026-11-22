@@ -18,18 +18,19 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import type { CallCodecFields } from '@/lib/codec';
+import { i18n, t } from '@/i18n';
 
 export type TypeKey = 'voice' | 'data' | 'sms' | 'gps' | 'alias' | 'csbk' | 'control' | 'unknown';
 
 export const TYPES: { key: TypeKey; label: string }[] = [
-  { key: 'voice', label: 'Voice' },
-  { key: 'data', label: 'Data' },
-  { key: 'sms', label: 'SMS' },
-  { key: 'gps', label: 'GPS' },
-  { key: 'alias', label: 'Talker Alias' },
-  { key: 'csbk', label: 'CSBK' },
-  { key: 'control', label: 'Control' },
-  { key: 'unknown', label: 'Unknown' },
+  { key: 'voice', label: t('Voice') },
+  { key: 'data', label: t('Data') },
+  { key: 'sms', label: t('SMS') },
+  { key: 'gps', label: t('GPS') },
+  { key: 'alias', label: t('Talker Alias') },
+  { key: 'csbk', label: t('CSBK') },
+  { key: 'control', label: t('Control') },
+  { key: 'unknown', label: t('Unknown') },
 ];
 
 export const DEFAULT_TYPES: TypeKey[] = ['voice', 'data', 'sms', 'gps', 'alias', 'csbk', 'control'];
@@ -106,11 +107,11 @@ const SAP_NAMES: Record<number, string> = {
 };
 
 const SMS_FORMATS: Record<string, string> = {
-  ip: 'ETSI IP',
-  tms: 'Motorola TMS',
-  anytone: 'AnyTone',
-  hytera: 'Hytera',
-  defined_data: 'Defined Data',
+  ip: t('ETSI IP'),
+  tms: t('Motorola TMS'),
+  anytone: t('AnyTone'),
+  hytera: t('Hytera'),
+  defined_data: t('Defined Data'),
 };
 
 const DATA_SUBS: Record<string, string> = {
@@ -120,20 +121,19 @@ const DATA_SUBS: Record<string, string> = {
 };
 
 const CSBK_NAMES: Record<string, string> = {
-  preamble: 'Preamble',
-  radio_check: 'Radio Check',
-  radio_check_answer: 'Radio Check Answer',
-  call_alert: 'Call Alert',
-  call_alert_ack: 'Call Alert ACK',
+  preamble: t('Preamble'),
+  radio_check: t('Radio Check'),
+  radio_check_answer: t('Radio Check Answer'),
+  call_alert: t('Call Alert'),
+  call_alert_ack: t('Call Alert ACK'),
 };
 
 const UNKNOWN_NAMES: Record<string, string> = {
-  bad_crc: 'Bad CRC',
-  undecodable: 'Undecodable burst',
-  reserved: 'Reserved data type',
-  frame_type_3: 'Frame type 3',
+  bad_crc: t('Bad CRC'),
+  undecodable: t('Undecodable burst'),
+  reserved: t('Reserved data type'),
+  frame_type_3: t('Frame type 3'),
 };
-
 /** humanize turns a sub kind such as c_bcast into C bcast for display. */
 export function humanize(sub: string): string {
   const text = sub.replace(/_/g, ' ').trim();
@@ -141,25 +141,24 @@ export function humanize(sub: string): string {
 }
 
 const UNDELIVERABLE_WORDS: Record<string, string> = {
-  invalid_data_type: 'invalid data type',
-  no_ipsc_form: 'could not carry this burst',
-  frame_type_3: 'unknown frame type',
-  fec_uncorrectable: 'too damaged to repair',
-  slot_type: 'could not rebuild this burst',
-  stream_id_range: 'call ID does not fit the link',
-  build_failed: 'could not build this burst',
-  encode_failed: 'could not encode this burst',
-  data_in_voice: 'data burst in a voice call',
-  undecodable: 'could not read this burst',
-  slot_busy: 'busy on that slot',
+  invalid_data_type: t('invalid data type'),
+  no_ipsc_form: t('could not carry this burst'),
+  frame_type_3: t('unknown frame type'),
+  fec_uncorrectable: t('too damaged to repair'),
+  slot_type: t('could not rebuild this burst'),
+  stream_id_range: t('call ID does not fit the link'),
+  build_failed: t('could not build this burst'),
+  encode_failed: t('could not encode this burst'),
+  data_in_voice: t('data burst in a voice call'),
+  undecodable: t('could not read this burst'),
+  slot_busy: t('busy on that slot'),
 };
 
 const UNDELIVERABLE_TARGETS: Record<string, string> = {
-  ipsc: 'IPSC repeater',
-  mmdvm: 'MMDVM repeater',
-  openbridge: 'OpenBridge peer',
+  ipsc: t('IPSC repeater'),
+  mmdvm: t('MMDVM repeater'),
+  openbridge: t('OpenBridge peer'),
 };
-
 const LISTED_PER_REASON = 3;
 
 /** UndeliverableView is how the type column shows the repeaters that a call was not sent to. */
@@ -174,13 +173,13 @@ function capitalize(text: string): string {
 }
 
 function reasonWords(e: UndeliverableEntry): string {
-  return UNDELIVERABLE_WORDS[e.reason] ?? 'could not prepare this burst';
+  return t(UNDELIVERABLE_WORDS[e.reason] ?? 'could not prepare this burst');
 }
 
 function repeaterName(e: UndeliverableEntry): string {
   if (!e.repeater_id) {
     const kind = UNDELIVERABLE_TARGETS[e.target];
-    return kind ? `an ${kind}` : 'a repeater';
+    return kind ? i18n.global.t('an {kind}', { kind: t(kind) }) : t('a repeater');
   }
   return e.callsign ? `${e.callsign} (${e.repeater_id})` : `${e.repeater_id}`;
 }
@@ -189,7 +188,7 @@ function targetName(e: UndeliverableEntry): string {
   if (!e.repeater_id) {
     return repeaterName(e);
   }
-  return `${UNDELIVERABLE_TARGETS[e.target] ?? 'repeater'} ${repeaterName(e)}`;
+  return `${t(UNDELIVERABLE_TARGETS[e.target] ?? 'repeater')} ${repeaterName(e)}`;
 }
 
 function repeaterCount(entries: UndeliverableEntry[]): number {
@@ -209,14 +208,21 @@ export function undeliverableView(row: CallRow): UndeliverableView {
   const view: UndeliverableView = { lines: [], summary: '', details: [] };
   if (row.undeliverable_scope === 'own') {
     view.lines = entries.map((e) => {
-      const yours = e.target === 'openbridge' ? 'your OpenBridge peer' : 'your repeater';
-      return `Not sent to ${yours} ${repeaterName(e)}: ${reasonWords(e)}`;
+      const yours = e.target === 'openbridge' ? t('your OpenBridge peer') : t('your repeater');
+      return i18n.global.t('Not sent to {yours} {repeater}: {reason}', {
+        yours,
+        repeater: repeaterName(e),
+        reason: reasonWords(e),
+      });
     });
     return view;
   }
   const count = repeaterCount(entries);
   if (count <= 1) {
-    view.lines = entries.map((e) => `Not sent to ${targetName(e)}: ${reasonWords(e)}`);
+    view.lines = entries.map((e) => i18n.global.t('Not sent to {target}: {reason}', {
+      target: targetName(e),
+      reason: reasonWords(e),
+    }));
     return view;
   }
   const groups = new Map<string, string[]>();
@@ -226,14 +232,14 @@ export function undeliverableView(row: CallRow): UndeliverableView {
   }
   const sorted = [...groups].sort((a, b) => b[1].length - a[1].length);
   view.lines = [
-    `Not sent to ${count} repeaters`,
-    sorted.map(([words, names]) => `${names.length} ${words}`).join(' · '),
+    i18n.global.t('Not sent to {count} repeaters', { count }),
+    sorted.map(([words, names]) => i18n.global.t('{count} {reason}', { count: names.length, reason: words })).join(' · '),
   ];
-  view.summary = `Show the ${count} repeaters`;
+  view.summary = i18n.global.t('Show the {count} repeaters', { count });
   view.details = sorted.map(([words, names]) => {
     const shown = names.slice(0, LISTED_PER_REASON).join(', ');
     const more = names.length - LISTED_PER_REASON;
-    return `${capitalize(words)}: ${shown}${more > 0 ? `, and ${more} more` : ''}`;
+    return `${capitalize(words)}: ${shown}${more > 0 ? i18n.global.t(', and {count} more', { count: more }) : ''}`;
   });
   return view;
 }
@@ -269,17 +275,13 @@ export function typeOf(row: CallRow): TypeKey {
 }
 
 export function typeLabel(key: TypeKey): string {
-  return TYPES.find((t) => t.key === key)?.label ?? 'Unknown';
-}
-
-function plural(n: number, one: string): string {
-  return `${n} ${one}${n === 1 ? '' : 's'}`;
+  return TYPES.find((t) => t.key === key)?.label ?? t('Unknown');
 }
 
 function sizeText(row: CallRow): string {
   const blocks = row.blocks ?? 0;
   const octets = row.octets ?? 0;
-  return `${plural(blocks, 'block')}, ${octets} B`;
+  return `${i18n.global.t('{count} block | {count} blocks', { count: blocks })}, ${octets} B`;
 }
 
 function responseName(row: CallRow): string {
@@ -291,7 +293,7 @@ function responseName(row: CallRow): string {
     case 'sack':
       return 'SACK';
     default:
-      return 'no reply';
+      return t('no reply');
   }
 }
 
@@ -301,15 +303,17 @@ function hasSize(row: CallRow): boolean {
 
 function smsLines(row: CallRow): string[] {
   const sap = row.sap ?? null;
-  const format = SMS_FORMATS[row.data_format || ''] || 'Text';
+  const format = t(SMS_FORMATS[row.data_format || ''] || 'Text');
   const sub = sap === null ? format : `${format} · SAP ${SAP_NAMES[sap] || 'SAP'} (${sap})`;
-  const resp = row.confirmed ? `Confirmed, ${responseName(row)}` : 'Unconfirmed';
+  const resp = row.confirmed
+    ? i18n.global.t('Confirmed, {response}', { response: responseName(row) })
+    : t('Unconfirmed');
   return [sub, `${resp}, ${sizeText(row)}`];
 }
 
 function dataLines(row: CallRow): string[] {
   if (row.sub_kind === 'response') {
-    return ['Response', responseName(row)];
+    return [t('Response'), responseName(row)];
   }
   const lines: string[] = [];
   const sap = row.sap ?? null;
@@ -322,7 +326,7 @@ function dataLines(row: CallRow): string[] {
     lines.push(sub);
   }
   if (hasSize(row) || row.confirmed) {
-    let subx = `${row.confirmed ? 'Confirmed' : 'Unconfirmed'}, ${sizeText(row)}`;
+    let subx = `${row.confirmed ? t('Confirmed') : t('Unconfirmed')}, ${sizeText(row)}`;
     if (row.confirmed) {
       subx += `, ${responseName(row)}`;
     }
@@ -333,9 +337,9 @@ function dataLines(row: CallRow): string[] {
 
 function csbkLines(row: CallRow): string[] {
   const sub = row.sub_kind || '';
-  const lines = [CSBK_NAMES[sub] || humanize(sub)];
+  const lines = [t(CSBK_NAMES[sub] || humanize(sub))];
   if (sub === 'preamble') {
-    lines.push(plural(row.bursts ?? 1, 'burst'));
+    lines.push(i18n.global.t('{count} burst | {count} bursts', { count: row.bursts ?? 1 }));
   } else if (row.fid === MOTOROLA_FID) {
     lines.push(`Motorola FID ${hex(MOTOROLA_FID)}${row.response === 'ack' ? ', ACK' : ''}`);
   }
@@ -348,11 +352,14 @@ function controlLines(row: CallRow): string[] {
       return ['UDT', sizeText(row)];
     case 'mbc': {
       const opcode = row.opcode ?? null;
-      const detail = opcode === null ? '' : `Opcode ${hex(opcode)} ${humanize(row.sub_kind || '')}`.trim();
+      const detail = opcode === null ? '' : i18n.global.t('Opcode {opcode} {kind}', {
+        opcode: hex(opcode),
+        kind: humanize(row.sub_kind || ''),
+      }).trim();
       return detail ? ['MBC', detail] : ['MBC'];
     }
     case 'idle':
-      return ['Idle', 'PR fill'];
+      return [t('Idle'), t('PR fill')];
     case 'usbd':
       return row.sub_kind ? ['USBD', humanize(row.sub_kind)] : ['USBD'];
   }
@@ -363,14 +370,20 @@ function unknownLines(row: CallRow): string[] {
   if (row.sub_kind === 'csbk') {
     const opcode = row.opcode ?? 0;
     const fid = row.fid ?? 0;
-    return [`CSBK opcode ${hex(opcode)}`, `FID ${hex(fid)}, forwarded unchanged`];
+    return [
+      i18n.global.t('CSBK opcode {opcode}', { opcode: hex(opcode) }),
+      i18n.global.t('FID {fid}, forwarded unchanged', { fid: hex(fid) }),
+    ];
   }
-  return [UNKNOWN_NAMES[row.sub_kind || ''] || 'Unknown burst', 'Forwarded unchanged'];
+  return [
+    t(UNKNOWN_NAMES[row.sub_kind || ''] || 'Unknown burst'),
+    t('Forwarded unchanged'),
+  ];
 }
 
 function gpsLines(row: CallRow): string[] {
   if (row.partial) {
-    return ['Partial position'];
+    return [t('Partial position')];
   }
   const parts: string[] = [];
   if (row.grid) {
@@ -385,14 +398,14 @@ function gpsLines(row: CallRow): string[] {
 
 function aliasLines(row: CallRow): string[] {
   if (row.partial) {
-    return ['Partial alias'];
+    return [t('Partial alias')];
   }
   const lines: string[] = [];
   if (row.talker_alias) {
     lines.push(row.talker_alias);
   }
   if (row.alias_format) {
-    lines.push(`Format ${row.alias_format}`);
+    lines.push(i18n.global.t('Format {format}', { format: row.alias_format }));
   }
   return lines;
 }
@@ -401,7 +414,7 @@ export function typeLines(row: CallRow): string[] {
   let lines: string[];
   switch (typeOf(row)) {
     case 'voice':
-      lines = row.sub_kind === 'encrypted' ? ['Encrypted'] : [];
+      lines = row.sub_kind === 'encrypted' ? [t('Encrypted')] : [];
       break;
     case 'sms':
       lines = smsLines(row);

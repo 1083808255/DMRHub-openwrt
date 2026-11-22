@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 import API from '@/services/API';
 import { shortTime } from '@/lib/codec';
+import { t } from '@/i18n';
 
 export type PluginRange = { first: number; last: number };
 
@@ -180,7 +181,7 @@ export function isInside(p: AdminPlugin): boolean {
 export function runsLabel(kind: PluginKind): string {
   switch (kind) {
     case 'builtin':
-      return 'Built in';
+      return t('Built in');
     case 'uploaded':
       return 'Uploaded';
     default:
@@ -246,7 +247,7 @@ export function status(p: AdminPlugin, now: number = Date.now(), timeZone?: stri
       case 'off':
         return 'Off';
       case 'running':
-        return 'Running in DMRHub';
+        return t('Running in DMRHub');
       case 'waiting':
         return `Waiting for its IDs, ${p.waiting_id} is used by ${p.waiting_for}`;
       case 'stopped':
@@ -265,7 +266,7 @@ export function status(p: AdminPlugin, now: number = Date.now(), timeZone?: stri
     }
     return `Not connected since ${formatDay(p.last_seen_at, timeZone)}`;
   }
-  return 'Not connected yet';
+  return t('Not connected yet');
 }
 
 /** stopNote is the edit page's box about a plugin inside DMRHub that stopped, or null when it did not. */

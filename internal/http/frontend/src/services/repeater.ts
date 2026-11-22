@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import API from '@/services/API';
+import { t } from '@/i18n';
 
 export interface RepeaterData {
   id: number;
@@ -110,7 +111,7 @@ export function kindLabel(r: Pick<UnassignedRepeater, 'type' | 'slots'>): string
   if (r.type !== 'modem') {
     return kind;
   }
-  return r.slots === 4 ? `${kind}, hotspot` : `${kind}, repeater`;
+  return r.slots === 4 ? t('{kind}, hotspot', { kind }) : t('{kind}, repeater', { kind });
 }
 
 /** SESSION_TIMEOUT_MS is how long after its last ping the hub keeps a repeater logged in. */

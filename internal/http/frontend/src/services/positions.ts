@@ -17,6 +17,7 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 import API from '@/services/API';
+import { t } from '@/i18n';
 
 export type PositionFormat = 'lrrp' | 'nmea' | 'hdap' | 'gps';
 
@@ -180,24 +181,24 @@ export function formatMotion(p: Pick<Position, 'speed_mps' | 'heading_deg'>): st
 export function formatAgo(iso: string, now: number = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
   if (seconds < 60) {
-    return 'just now';
+    return t('just now');
   }
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) {
-    return `${minutes} min ago`;
+    return t('{minutes} min ago', { minutes });
   }
   const hours = Math.round(minutes / 60);
   if (hours < 48) {
-    return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+    return hours === 1 ? t('1 hour ago') : t('{hours} hours ago', { hours });
   }
-  return `${Math.round(hours / 24)} days ago`;
+  return t('{days} days ago', { days: Math.round(hours / 24) });
 }
 
 export function formatRetention(hours: number): string {
   if (hours === 24) {
-    return '24 hours';
+    return t('24 hours');
   }
-  return hours % 24 === 0 ? `${hours / 24} days` : `${hours} hours`;
+  return hours % 24 === 0 ? t('{days} days', { days: hours / 24 }) : t('{hours} hours', { hours });
 }
 
 export function aprsName(callsign: string, ssid: string): string {

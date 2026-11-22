@@ -59,6 +59,6 @@ export function setLocale(locale: LocaleCode): void {
 }
 
 /** Translate a key outside of a component setup() (e.g. Options API methods). */
-export function t(key: string): string {
-  return i18n.global.t(key) as string;
+export function t(key: string, named?: Record<string, unknown>): string {
+  return i18n.global.t(key, named ?? {}) as string;
 }

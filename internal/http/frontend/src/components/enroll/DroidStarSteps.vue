@@ -40,7 +40,7 @@
     />
     <h3>{{ $t("3. Connect") }}</h3>
     <p>
-      {{ $t("On the") }} <b>{{ $t("Main") }}</b> {{ $t("tab, tap") }} <b>{{ $t("Connect") }}</b>. To test, set <b>TGID</b> {{ $t("to") }} <code>9990</code>{{ $t(", tap") }} <b>TX</b>{{ $t(", talk, and tap") }} <b>TX</b> {{ $t("again. The parrot plays your call back.") }}
+      {{ $t("On the") }} <b>{{ $t("Main") }}</b> {{ $t("tab, tap") }} <b>{{ $t("Connect") }}</b>. {{ $t("To test, set") }} <b>TGID</b> {{ $t("to") }} <code>9990</code>{{ $t(", tap") }} <b>TX</b>{{ $t(", talk, and tap") }} <b>TX</b> {{ $t("again. The parrot plays your call back.") }}
     </p>
   </div>
 </template>

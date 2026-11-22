@@ -17,6 +17,8 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { i18n } from '@/i18n';
+
 /**
  * Convert a local day-of-week + HH:MM to UTC day-of-week + HH:MM.
  * Returns { dayOfWeek: 0-6, timeOfDay: "HH:MM" }.
@@ -85,7 +87,7 @@ function knownZone(timeZone: string): string {
 }
 
 function weekdayAndTime(at: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = new Intl.DateTimeFormat(i18n.global.locale.value, {
     timeZone,
     weekday: 'short',
     hour: '2-digit',
@@ -93,7 +95,10 @@ function weekdayAndTime(at: Date, timeZone: string): string {
     hourCycle: 'h23',
   }).formatToParts(at);
   const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-  return `${part('weekday')} at ${part('hour')}:${part('minute')}`;
+  return i18n.global.t('{weekday} at {time}', {
+    weekday: part('weekday'),
+    time: `${part('hour')}:${part('minute')}`,
+  });
 }
 
 /**

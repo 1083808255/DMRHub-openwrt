@@ -26,12 +26,12 @@
       <h3>{{ $t("1. Add DMRHub to the host list") }}</h3>
       <p>
         {{ $t("In the dashboard, open") }} <b>{{ $t("Configuration") }}</b>{{ $t(", then") }} <b>{{ $t("Expert") }}</b>{{ $t(", then") }} <b>{{ $t("SSH Access") }}</b>{{ $t(", and log in as") }}
-        <code>pi-star</code>. Then run:
+        <code>pi-star</code>. {{ $t("Then run:") }}
       </p>
       <CodeBlock :title="$t('Shell')" :segments="piStarShell" />
       <h3>{{ $t("2. Turn on DMR") }}</h3>
       <p>
-        {{ $t("Skip this step if the") }} <b>{{ $t("DMR Configuration") }}</b> {{ $t("section is already on the") }} <b>{{ $t("Configuration") }}</b> {{ $t("page. On a new Pi-Star, open") }} <b>{{ $t("Configuration") }}</b>. In <b>{{ $t("MMDVMHost Configuration") }}</b>{{ $t(", turn on") }} <b>{{ $t("DMR Mode") }}</b>. In
+        {{ $t("Skip this step if the") }} <b>{{ $t("DMR Configuration") }}</b> {{ $t("section is already on the") }} <b>{{ $t("Configuration") }}</b> {{ $t("page. On a new Pi-Star, open") }} <b>{{ $t("Configuration") }}</b>. {{ $t("In") }} <b>{{ $t("MMDVMHost Configuration") }}</b>{{ $t(", turn on") }} <b>{{ $t("DMR Mode") }}</b>. In
         <b>{{ $t("General Configuration") }}</b>{{ $t(", set") }} <b>Radio/Modem Type</b> {{ $t("to your modem. Click") }} <b>{{ $t("Apply Changes") }}</b>.
       </p>
       <h3>{{ $t("3. Set the DMR fields") }}</h3>
@@ -47,14 +47,13 @@
       />
       <p>{{ $t("Click") }} <b>{{ $t("Apply Changes") }}</b>.</p>
       <p>
-        <b>{{ $t("Optional:") }}</b> {{ $t("after that Apply, a") }} <b>{{ $t("DMR Options") }}</b> {{ $t("row appears. Type") }} <FilledValue>TS2=3100;</FilledValue> after
+        <b>{{ $t("Optional:") }}</b> {{ $t("after that Apply, a") }} <b>{{ $t("DMR Options") }}</b> {{ $t("row appears. Type") }} <FilledValue>TS2=3100;</FilledValue> {{ $t("after") }}
         <code>Options=</code> {{ $t("and apply again.") }}
       </p>
       <h3>{{ $t("4. Put the password in MMDVMHost") }}</h3>
       <p>
-        {{ $t("Open") }} <b>{{ $t("Configuration") }}</b>, <b>{{ $t("Expert") }}</b>, <b>MMDVMHost</b>. In <b>{{ $t("DMR Network") }}</b>{{ $t(", set") }} <b>{{ $t("Password") }}</b> {{ $t("to") }}
-        <FilledValue>{{ values.password }}</FilledValue> {{ $t("and click") }} <b>{{ $t("Apply Changes") }}</b>. Pi-Star does not take the password from the
-        host list.
+        {{ $t("Open") }} <b>{{ $t("Configuration") }}</b>, <b>{{ $t("Expert") }}</b>, <b>MMDVMHost</b>. {{ $t("In") }} <b>{{ $t("DMR Network") }}</b>{{ $t(", set") }} <b>{{ $t("Password") }}</b> {{ $t("to") }}
+        <FilledValue>{{ values.password }}</FilledValue> {{ $t("and click") }} <b>{{ $t("Apply Changes") }}</b>. {{ $t("Pi-Star does not take the password from the host list.") }}
       </p>
     </template>
 
@@ -62,10 +61,10 @@
       <TestedPill tested :text="$t('WPSD Trixie, 2026-10-26')" />
       <h3>{{ $t("1. Turn on DMR") }}</h3>
       <p>
-        {{ $t("Skip this step if the") }} <b>{{ $t("DMR Configuration") }}</b> {{ $t("section is already on the") }} <b>{{ $t("Configuration") }}</b> {{ $t("page. On a new WPSD, open") }} <b>{{ $t("Configuration") }}</b>. In <b>{{ $t("General Configuration") }}</b>{{ $t(", set") }} <b>{{ $t("Node Callsign") }}</b> {{ $t("to") }}
+        {{ $t("Skip this step if the") }} <b>{{ $t("DMR Configuration") }}</b> {{ $t("section is already on the") }} <b>{{ $t("Configuration") }}</b> {{ $t("page. On a new WPSD, open") }} <b>{{ $t("Configuration") }}</b>. {{ $t("In") }} <b>{{ $t("General Configuration") }}</b>{{ $t(", set") }} <b>{{ $t("Node Callsign") }}</b> {{ $t("to") }}
         <FilledValue>{{ values.callsign }}</FilledValue>, <b>DMR/CCS7 ID</b> {{ $t("to") }} <FilledValue>{{ values.ownerId }}</FilledValue>{{ $t(", and") }}
         <b>Radio/Modem Type</b> {{ $t("to your modem. In") }} <b>Radio/MMDVMHost Modem Configuration</b>{{ $t(", turn on") }} <b>{{ $t("DMR Mode") }}</b>.
-        Click <b>{{ $t("Apply Changes") }}</b>.
+        {{ $t("Click") }} <b>{{ $t("Apply Changes") }}</b>.
       </p>
       <h3>{{ $t("2. Add DMRHub as the custom network") }}</h3>
       <p>{{ $t("In") }} <b>{{ $t("DMR Configuration") }}</b>{{ $t(", go to") }} <b>{{ $t("Custom DMR Network Settings") }}</b>:</p>
@@ -99,7 +98,7 @@
       <TestedPill tested :text="$t('MMDVMHost 9384d68')" />
       <p>
         {{ $t("The current MMDVMHost connects only to DMRGateway on the same host, and DMRGateway logs in to DMRHub. Put this in") }} <code>MMDVM-Host.ini</code> {{ $t("(older builds:") }} <code>MMDVM.ini</code>{{ $t("), and then set up the") }}
-        <a href="#" data-goto="dmrgateway" @click.prevent="emit('goto', 'dmrgateway')">DMRGateway</a> tab.
+        <a href="#" data-goto="dmrgateway" @click.prevent="emit('goto', 'dmrgateway')">DMRGateway</a> {{ $t("tab.") }}
       </p>
       <CodeBlock title="MMDVM-Host.ini" :segments="mmdvmHostIni" />
       <h3>{{ $t("Older MMDVMHost builds that connect directly") }}</h3>
@@ -110,7 +109,7 @@
     <template v-else-if="tab === 'dmrgateway'">
       <TestedPill tested :text="$t('DMRGateway 20260713')" />
       <p>
-        {{ $t("Add this section to") }} <code>DMRGateway.ini</code>. Use a network number that is free in your file:
+        {{ $t("Add this section to") }} <code>DMRGateway.ini</code>. {{ $t("Use a network number that is free in your file:") }}
         <select
           v-model="network"
           :aria-label="$t('Network number')"

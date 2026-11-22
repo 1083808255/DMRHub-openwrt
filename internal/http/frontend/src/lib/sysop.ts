@@ -17,6 +17,9 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+
+import { t } from '@/i18n';
+
 export type OnAirCall = {
   call_id: number;
   slot: number;
@@ -37,6 +40,11 @@ export function callLength(start: string, now: number): string {
 /** resetText returns what a reset of a device does while calls are on the air. */
 export function resetText(device: string, calls: OnAirCall[]): string {
   const slots = [...new Set(calls.map((c) => `TS${c.slot}`))].sort();
-  const ends = slots.length === 0 ? '' : `The ${slots.length > 1 ? 'calls' : 'call'} on ${slots.join(' and ')} ${slots.length > 1 ? 'end' : 'ends'}. `;
-  return `${ends}The ${device} logs in again by itself.`;
+  const ends =
+    slots.length === 0
+      ? ''
+      : slots.length > 1
+        ? t('The calls on {slots} end. ', { slots: slots.join(' and ') })
+        : t('The call on {slot} ends. ', { slot: slots[0] });
+  return `${ends}${t('The {device} logs in again by itself.', { device })}`;
 }

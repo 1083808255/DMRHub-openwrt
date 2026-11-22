@@ -17,6 +17,8 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { i18n, t } from '@/i18n';
+
 /** The ID of a call that a peer rule checks: the destination or the caller. */
 export type RuleMatch = 'destination' | 'source';
 
@@ -52,17 +54,17 @@ export type TextPart = { text: string; id?: boolean };
 
 /** Returns the parts of the text of an ID range: one ID, "a to b", "a and up", or "any ID". */
 export function rangeParts(min: number, max: number): TextPart[] {
-  if (min <= 1 && max >= MAX_DMR_ID) return [{ text: 'any ID' }];
-  if (max >= MAX_DMR_ID) return [{ text: String(min), id: true }, { text: ' and up' }];
+  if (min <= 1 && max >= MAX_DMR_ID) return [{ text: t('any ID') }];
+  if (max >= MAX_DMR_ID) return [{ text: String(min), id: true }, { text: t(' and up') }];
   if (min === max) return [{ text: String(min), id: true }];
-  return [{ text: String(min), id: true }, { text: ' to ' }, { text: String(max), id: true }];
+  return [{ text: String(min), id: true }, { text: t(' to ') }, { text: String(max), id: true }];
 }
 
 /** Joins lists of parts as "a", "a and b" or "a, b and c". */
 export function joinParts(items: TextPart[][]): TextPart[] {
   const out: TextPart[] = [];
   items.forEach((item, i) => {
-    if (i > 0) out.push({ text: i === items.length - 1 ? ' and ' : ', ' });
+    if (i > 0) out.push({ text: i === items.length - 1 ? t(' and ') : ', ' });
     out.push(...item);
   });
   return out;
@@ -82,21 +84,24 @@ export function summaryParts(verb: string, rules: PeerRule[], privateCalls: bool
   const to = ids('destination');
   const from = ids('source');
   const priv = privateCalls && privateApplies(rules);
-  if (!to.length && !from.length) return [{ text: priv ? `${verb} private calls.` : `${verb} nothing.` }];
-  const parts: TextPart[] = [{ text: `${verb} calls` }];
-  if (to.length) {
-    parts.push({ text: ' to ' }, ...joinParts(to));
-    if (priv) parts.push({ text: from.length ? ', and private calls,' : ', and private calls' });
+  const subject = t(verb);
+  if (!to.length && !from.length) {
+    return [{ text: priv ? i18n.global.t('{verb} private calls.', { verb: subject }) : i18n.global.t('{verb} nothing.', { verb: subject }) }];
   }
-  if (from.length) parts.push({ text: ' from radios ' }, ...joinParts(from));
-  parts.push({ text: '.' });
+  const parts: TextPart[] = [{ text: i18n.global.t('{verb} calls', { verb: subject }) }];
+  if (to.length) {
+    parts.push({ text: t(' to ') }, ...joinParts(to));
+    if (priv) parts.push({ text: from.length ? t(', and private calls,') : t(', and private calls') });
+  }
+  if (from.length) parts.push({ text: t(' from radios ') }, ...joinParts(from));
+  parts.push({ text: t('.') });
   return parts;
 }
 
 /** Returns the label of a rule row: "To", "From radio" or "From radios". */
 export function ruleLabel(rule: PeerRule): string {
-  if (rule.match === 'destination') return 'To';
-  return rule.subject_id_min === rule.subject_id_max ? 'From radio' : 'From radios';
+  if (rule.match === 'destination') return t('To');
+  return rule.subject_id_min === rule.subject_id_max ? t('From radio') : t('From radios');
 }
 
 /** Parses a whole decimal ID, or returns null. */

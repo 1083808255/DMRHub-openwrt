@@ -228,8 +228,8 @@ export default {
   computed: {
     groups(): Group[] {
       return [
-        { key: 'rx', ingress: true, title: 'Receive', verb: 'Receives', on: this.ingress, off: 'Receive is off.' },
-        { key: 'tx', ingress: false, title: 'Transmit', verb: 'Transmits', on: this.egress, off: 'Transmit is off.' },
+        { key: 'rx', ingress: true, title: 'Receive', verb: 'Receives', on: this.ingress, off: t('Receive is off.') },
+        { key: 'tx', ingress: false, title: 'Transmit', verb: 'Transmits', on: this.egress, off: t('Transmit is off.') },
       ];
     },
   },

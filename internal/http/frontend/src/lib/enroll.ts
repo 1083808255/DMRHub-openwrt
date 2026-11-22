@@ -17,6 +17,8 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { i18n, t } from '@/i18n';
+
 /** What a repeater is, for the connect page: an MMDVM hotspot, an MMDVM repeater, or a Motorola IPSC repeater. */
 export type ConnectKind = 'hotspot' | 'repeater' | 'ipsc';
 
@@ -31,9 +33,9 @@ export const CLIENT_TABS: Record<ClientTab, { name: string; tested: boolean | nu
   dmrgateway: { name: 'DMRGateway', tested: true },
   droidstar: { name: 'DroidStar', tested: true },
   hblink3: { name: 'HBlink3', tested: true },
-  other: { name: 'Other', tested: null },
+  other: { name: t('Other'), tested: null },
   cps: { name: 'Motorola CPS', tested: false },
-  'ipsc-other': { name: 'Other', tested: null },
+  'ipsc-other': { name: t('Other'), tested: null },
 };
 
 /** Returns the kind of the repeater of type type and ID id, or null for a type that does not connect over the network. */
@@ -51,24 +53,24 @@ export function clientTabs(kind: ConnectKind): ClientTab[] {
 
 /** Returns the name of the device of kind in the text of the page. */
 export function deviceNoun(kind: ConnectKind): string {
-  return kind === 'hotspot' ? 'hotspot' : 'repeater';
+  return kind === 'hotspot' ? t('hotspot') : t('repeater');
 }
 
 /** Returns the name of the secret of kind: the auth key of IPSC, else the password. */
 export function secretName(kind: ConnectKind): string {
-  return kind === 'ipsc' ? 'auth key' : 'password';
+  return kind === 'ipsc' ? t('auth key') : t('password');
 }
 
 /** Returns the stand-in for the secret of kind when the page does not show it. */
 export function secretPlaceholder(kind: ConnectKind): string {
-  if (kind === 'ipsc') return '<auth key>';
-  return `<${deviceNoun(kind)} password>`;
+  if (kind === 'ipsc') return t('<auth key>');
+  return i18n.global.t('<{device} password>', { device: deviceNoun(kind) });
 }
 
 /** Returns the ESSID of a 9-digit hotspot ID, its last two digits, and None for any other ID. */
 export function essid(id: number): string {
   const s = String(id);
-  return s.length === 9 ? s.slice(7) : 'None';
+  return s.length === 9 ? s.slice(7) : t('None');
 }
 
 /** The values that the client steps fill in. */

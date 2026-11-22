@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import type { BadgeTone } from '@/lib/badge';
+import { i18n, t } from '@/i18n';
 
 /** Codec is the voice codec of a call or a timeslot, or '' when none was heard. */
 export type Codec = '' | 'ambe' | 'codec2';
@@ -80,16 +81,12 @@ const HOST_PORT = /^([^\s:[\]]+):(\d{1,5})$/;
 const IPV6_PORT = /^\[([^\s[\]]*:[^\s[\]]*)\]:(\d{1,5})$/;
 
 /** HOST_PORT_ERROR is the error shown for an AMBE server that is not a host and port. */
-export const HOST_PORT_ERROR = 'Enter a host and port for each server, such as ambeserver:2460.';
+export const HOST_PORT_ERROR = t('Enter a host and port for each server, such as ambeserver:2460.');
 
 /** CALLS_ERROR is the error shown for a Calls at once value that is not a whole number of 1 or more. */
-export const CALLS_ERROR = 'Calls at once is a whole number of 1 or more, or empty for no limit.';
+export const CALLS_ERROR = t('Calls at once is a whole number of 1 or more, or empty for no limit.');
 
 const WHOLE = /^[1-9]\d*$/;
-
-function plural(n: number, one: string): string {
-  return `${n} ${one}${n === 1 ? '' : 's'}`;
-}
 
 /** codecLabel names a codec and its Codec2 mode, as AMBE or Codec2 3200. */
 export function codecLabel(codec: Codec | undefined, mode: number | undefined): string {
@@ -109,24 +106,26 @@ export function callCodec(call: CallCodecFields): CallCodec | null {
     return null;
   }
   if (call.busy) {
-    return { label, tone: 'warn', lines: ['Not converted: every AMBE server was busy'] };
+    return { label, tone: 'warn', lines: [t('Not converted: every AMBE server was busy')] };
   }
   const missed = call.missed_ms ?? 0;
   if (missed > 0) {
     return {
       label,
       tone: 'warn',
-      lines: [`${(missed / 1000).toFixed(1)} s not converted: AMBE server did not answer`],
+      lines: [i18n.global.t('{seconds} s not converted: AMBE server did not answer', {
+        seconds: (missed / 1000).toFixed(1),
+      })],
     };
   }
   const lines: string[] = [];
   const ambe = call.sent_ambe ?? 0;
   const codec2 = call.sent_codec2 ?? 0;
   if (ambe > 0) {
-    lines.push(`Sent as AMBE to ${plural(ambe, 'target')}`);
+    lines.push(i18n.global.t('Sent as AMBE to {count} target | Sent as AMBE to {count} targets', { count: ambe }));
   }
   if (codec2 > 0) {
-    lines.push(`Sent as Codec2 to ${plural(codec2, 'target')}`);
+    lines.push(i18n.global.t('Sent as Codec2 to {count} target | Sent as Codec2 to {count} targets', { count: codec2 }));
   }
   return { label, tone: call.codec === 'codec2' ? 'info' : 'none', lines };
 }
@@ -160,7 +159,10 @@ export function heardLine(
   if (Number.isNaN(date.getTime())) {
     return '';
   }
-  return `Heard: ${label}, on the last call at ${shortTime(date, timeZone)}.`;
+  return i18n.global.t('Heard: {codec}, on the last call at {time}.', {
+    codec: label,
+    time: shortTime(date, timeZone),
+  });
 }
 
 /** ambeServerError returns the error of an AMBE server address, or '' when it is a host and port. */
@@ -228,12 +230,16 @@ export function serverStatus(
 /** statusText words the status of one AMBE server; a server without a status is checked after the save. */
 export function statusText(status: ServerStatus | null | undefined): StatusText {
   if (!status) {
-    return { tone: 'none', text: 'Checked after you save.' };
+    return { tone: 'none', text: t('Checked after you save.') };
   }
   if (typeof status.answered_seconds === 'number') {
     const s = Math.max(0, Math.round(status.answered_seconds));
     const calls = Math.max(0, status.calls ?? 0);
-    return { tone: 'ok', text: `Answered ${plural(s, 'second')} ago. ${plural(calls, 'call')} now.` };
-  }
-  return { tone: 'bad', text: 'The AMBE server did not answer.' };
+  return {
+    tone: 'ok',
+    text: `${i18n.global.t('Answered {count} second ago. | Answered {count} seconds ago.', { count: s })} ${
+      i18n.global.t('{count} call now. | {count} calls now.', { count: calls })}`,
+  };
+}
+  return { tone: 'bad', text: t('The AMBE server did not answer.') };
 }

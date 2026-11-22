@@ -17,6 +17,8 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { i18n } from '@/i18n';
+
 const v4 = (s: string): bigint | null => {
   const parts = s.split('.');
   if (parts.length !== 4) {
@@ -106,10 +108,10 @@ export const ipEntryError = (line: string): string | undefined => {
   if (s === '') {
     return undefined;
   }
-  const bad = `${s} is not an IP address or CIDR range`;
+  const bad = (): string => i18n.global.t('{value} is not an IP address or CIDR range', { value: s });
   const [addr = '', bits, more] = s.split('/');
   if (more !== undefined) {
-    return bad;
+    return bad();
   }
   let width = 32;
   let n = v4(addr);
@@ -118,18 +120,19 @@ export const ipEntryError = (line: string): string | undefined => {
     n = v6(addr);
   }
   if (n === null) {
-    return bad;
+    return bad();
   }
   if (bits === undefined) {
     return undefined;
   }
   if (!/^\d{1,3}$/.test(bits) || Number(bits) > width) {
-    return bad;
+    return bad();
   }
   const host = (1n << BigInt(width - Number(bits))) - 1n;
   if ((n & host) !== 0n) {
     const masked = n & ~host;
-    return `${s} has bits set after its prefix; use ${width === 32 ? show4(masked) : show6(masked)}/${bits}`;
+    const suggestion = `${width === 32 ? show4(masked) : show6(masked)}/${bits}`;
+    return i18n.global.t('{value} has bits set after its prefix; use {suggestion}', { value: s, suggestion });
   }
   return undefined;
 };
