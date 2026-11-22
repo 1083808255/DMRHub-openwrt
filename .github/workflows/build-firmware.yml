@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 env:
-  OP_VERSION: 24.10.8
+  OP_VERSION: 24.10.4
   OP_TARGET: x86/64
   GO_VERSION: '1.27.3'
   NODE_VERSION: '26.13.0'
@@ -201,7 +201,7 @@ jobs:
             IMG=$(ls "$IB_DIR"/bin/targets/x86/64/*.img.gz 2>/dev/null | head -1 || true)
           fi
           [ -n "$IMG" ] || { echo "No firmware image produced!"; exit 1; }
-          FW_NAME="openwrt-24.10.8-x86-64-dmrhub-${{ steps.ver.outputs.build_tag }}-squashfs-combined.img.gz"
+          FW_NAME="openwrt-24.10.4-x86-64-dmrhub-${{ steps.ver.outputs.build_tag }}-squashfs-combined.img.gz"
           cp "$IMG" "artifacts/$FW_NAME"
           echo "FW_NAME=$FW_NAME" >> "$GITHUB_ENV"
           cd artifacts
