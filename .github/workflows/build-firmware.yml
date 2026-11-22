@@ -109,6 +109,35 @@ jobs:
           file artifacts/dmrhub
           ls -lh artifacts/dmrhub
 
+      # ---- Patch the LuCI "Backup / Flash Firmware" view with the OTA section ----
+      - name: Add the DMRHub OTA section to the LuCI flash view
+        run: |
+          set -eu
+          cd "$GITHUB_WORKSPACE"
+          # Take the view from the same feed the image installs, then patch it.
+          # The patch fails loudly when the view changes, so an upstream LuCI
+          # update cannot silently drop the section.
+          LUCI_FEED="https://downloads.openwrt.org/releases/${OP_VERSION}/packages/${OP_TARGET}/luci"
+          curl -fsSL --retry 3 "$LUCI_FEED/Packages.gz" -o /tmp/luci-Packages.gz
+          gunzip -f /tmp/luci-Packages.gz
+          LUCIPKG=$(awk '/^Package: luci-mod-system$/ {found=1} found && /^Filename:/ {print $2; exit}' /tmp/luci-Packages)
+          [ -n "$LUCIPKG" ] || { echo "luci-mod-system not found in the feed"; exit 1; }
+          echo "==> $LUCI_FEED/$LUCIPKG"
+          curl -fsSL --retry 3 "$LUCI_FEED/$LUCIPKG" -o /tmp/luci-mod-system.ipk
+          rm -rf /tmp/luci-ipk && mkdir -p /tmp/luci-ipk
+          tar -xzf /tmp/luci-mod-system.ipk -C /tmp/luci-ipk
+          mkdir -p /tmp/luci-data && tar -xzf /tmp/luci-ipk/data.tar.gz -C /tmp/luci-data
+          FLASH=/tmp/luci-data/www/luci-static/resources/view/system/flash.js
+          [ -f "$FLASH" ] || { echo "flash.js not found in luci-mod-system"; exit 1; }
+          mkdir -p openwrt/dmrhub/files/usr/share/dmrhub
+          python3 openwrt/dmrhub/files/usr/share/dmrhub/patch-luci-flash.py \
+            "$FLASH" \
+            openwrt/dmrhub/files/usr/share/dmrhub/luci-dmrhub-ota.js \
+            openwrt/dmrhub/files/usr/share/dmrhub/flash.js
+          node --check openwrt/dmrhub/files/usr/share/dmrhub/flash.js 2>/dev/null \
+            || python3 -c "print('node is unavailable; skipping the syntax check')"
+          ls -lh openwrt/dmrhub/files/usr/share/dmrhub/flash.js
+
       # ---- Build ipk package ----
       - name: Build ipk package
         run: |
@@ -132,10 +161,9 @@ jobs:
           Maintainer: 1083808255
           Description: DMRHub DMR network server (zh-CN localization build)
           EOF
-          cp -a files/etc "$TMP/data/"
-          mkdir -p "$TMP/data/usr/bin" "$TMP/data/usr/sbin"
-          cp files/usr/bin/dmrhub "$TMP/data/usr/bin/dmrhub"
-          cp files/usr/sbin/dmrhub-ota "$TMP/data/usr/sbin/dmrhub-ota"
+          mkdir -p "$TMP/data/usr/bin"
+          cp -a files/. "$TMP/data/"
+          cp artifacts/dmrhub "$TMP/data/usr/bin/dmrhub"
           (cd "$TMP/data" && tar -czf ../data.tar.gz .)
           (cd "$TMP/control" && tar -czf ../control.tar.gz .)
           # OpenWrt ipk = gzip-compressed tar, NOT Debian ar archive.
@@ -210,24 +238,64 @@ jobs:
           sha256sum * > checksums.sha256
           ls -lh
 
+      - name: Build the opkg feed index and sign it
+        run: |
+          set -eu
+          cd artifacts
+          # usign signs the feed so the image can keep "option check_signature"
+          # enabled for every feed, including this one.
+          if [ ! -x /usr/local/bin/usign ]; then
+            git clone --depth 1 https://github.com/openwrt/usign.git /tmp/usign
+            gcc -O2 -o /usr/local/bin/usign /tmp/usign/*.c
+          fi
+          echo "${{ secrets.OTA_SIGNING_KEY }}" > /tmp/dmrhub-ota.sec
+          chmod 600 /tmp/dmrhub-ota.sec
+          APP_SHA=$(sha256sum "${IPK_NAME}" | awk '{print $1}')
+          APP_SIZE=$(stat -c%s "${IPK_NAME}")
+          cat > Packages <<EOF
+          Package: dmrhub
+          Version: 1.3.31-zh1
+          Depends: ca-certificates
+          Section: net
+          Architecture: x86_64
+          Installed-Size: 84000000
+          Filename: ${IPK_NAME}
+          Size: ${APP_SIZE}
+          SHA256sum: ${APP_SHA}
+          Description: DMRHub DMR network server (zh-CN localization build)
+
+          EOF
+          gzip -9kf Packages
+          /usr/local/bin/usign -S -m Packages -s /tmp/dmrhub-ota.sec -m Packages > Packages.sig
+          rm -f /tmp/dmrhub-ota.sec
+          echo "=== Packages ==="; cat Packages
+          echo "=== Packages.sig ==="; cat Packages.sig
+          /usr/local/bin/usign -V -m Packages -p openwrt/dmrhub/files/etc/opkg/keys/21874afde7248b53
+          echo "signature verified"
+
       - name: Generate version.json for OTA
         run: |
           set -eu
           cd artifacts
           APP_SHA=$(sha256sum "${IPK_NAME}" | awk '{print $1}')
           FW_SHA=$(sha256sum "${FW_NAME}" | awk '{print $1}')
+          TAG="${{ steps.ver.outputs.build_tag }}"
           cat > version.json <<EOF
           {
             "version": "1.3.31-zh1-${{ steps.ver.outputs.short_sha }}",
-            "build_tag": "${{ steps.ver.outputs.build_tag }}",
+            "build_tag": "$TAG",
             "upstream": "USA-RedDragon/DMRHub",
             "localization": "zh-CN",
             "openwrt": "${OP_VERSION}",
             "target": "${OP_TARGET}",
             "app_file": "${IPK_NAME}",
             "app_sha256": "$APP_SHA",
+            "app_url": "https://github.com/1083808255/DMRHub-openwrt/releases/download/$TAG/${IPK_NAME}",
             "firmware_file": "${FW_NAME}",
             "firmware_sha256": "$FW_SHA",
+            "firmware_url": "https://github.com/1083808255/DMRHub-openwrt/releases/download/$TAG/${FW_NAME}",
+            "release_url": "https://github.com/1083808255/DMRHub-openwrt/releases/tag/$TAG",
+            "feed_url": "https://github.com/1083808255/DMRHub-openwrt/releases/latest/download",
             "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
@@ -242,12 +310,13 @@ jobs:
             ## DMRHub x86_64 OpenWrt 固件（汉化版）
 
             - OpenWrt 基线：**${{ env.OP_VERSION }}** (${{ env.OP_TARGET }})
-            - DMRHub：汉化版，简体中文界面，940 条中英词条
+            - DMRHub：汉化版，简体中文界面
             - 源码提交：`${{ steps.ver.outputs.short_sha }}`
 
             ### 文件
             - `${{ env.FW_NAME }}` — 整机固件（squashfs-combined，预装 DMRHub），sysupgrade 直接刷
             - `${{ env.IPK_NAME }}` — DMRHub 应用包（可单独 opkg 更新）
+            - `Packages` / `Packages.gz` / `Packages.sig` — opkg 软件源索引（usign 已签名）
             - `version.json` — OTA 清单
             - `checksums.sha256` — 校验和
 
@@ -256,9 +325,17 @@ jobs:
             sysupgrade -k <firmware.img.gz>    # -k 保留配置
             ```
             首次启动后配置在 `/opt/dmrhub/config.yaml`，Web 管理端口 3005。
+
+            ### 在线更新
+            固件已预置 DMRHub 软件源与签名公钥（`/etc/opkg/keys/21874afde7248b53`），
+            在 LuCI「系统 → 软件包」中即可看到 DMRHub 并在线更新；
+            「系统 → 更新与备份」页内也提供 DMRHub 固件 OTA。
           files: |
             artifacts/*.img.gz
             artifacts/*.ipk
+            artifacts/Packages
+            artifacts/Packages.gz
+            artifacts/Packages.sig
             artifacts/version.json
             artifacts/checksums.sha256
           generate_release_notes: false

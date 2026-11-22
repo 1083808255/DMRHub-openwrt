@@ -3,4 +3,13 @@
 [ -f /etc/config/dmrhub ] || exit 0
 mkdir -p /opt/dmrhub/data
 chmod 755 /opt/dmrhub
+
+# Add the DMRHub release feed to opkg. The signing key is installed in
+# /etc/opkg/keys, so "option check_signature" stays on for this feed too.
+FEED="src/gz dmrhub https://github.com/1083808255/DMRHub-openwrt/releases/latest/download"
+if [ -f /etc/opkg/customfeeds.conf ]; then
+	grep -q '^src/gz dmrhub ' /etc/opkg/customfeeds.conf || echo "$FEED" >> /etc/opkg/customfeeds.conf
+else
+	echo "$FEED" > /etc/opkg/customfeeds.conf
+fi
 exit 0

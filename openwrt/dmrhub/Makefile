@@ -44,6 +44,10 @@ define Package/dmrhub/install
 	$(INSTALL_BIN) ./files/etc/uci-defaults/99-dmrhub $(1)/etc/uci-defaults/99-dmrhub
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./files/usr/sbin/dmrhub-ota $(1)/usr/sbin/dmrhub-ota
+	# The signing key that lets opkg verify our feed. The image keeps
+	# "option check_signature" on, so the official feeds stay verified too.
+	$(INSTALL_DIR) $(1)/etc/opkg/keys
+	$(INSTALL_CONF) ./files/etc/opkg/keys/21874afde7248b53 $(1)/etc/opkg/keys/21874afde7248b53
 endef
 
 $(eval $(call BuildPackage,dmrhub))

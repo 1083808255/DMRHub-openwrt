@@ -11,6 +11,8 @@ CONF_DIR=/opt/dmrhub
 BIN=/usr/bin/dmrhub
 
 start_service() {
+    installLuciFlashView
+
     # Ensure persistent data/config directory exists
     mkdir -p "$CONF_DIR/data"
 
@@ -38,6 +40,20 @@ EOF
     procd_set_param stderr 1
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
     procd_close_instance
+}
+
+# installLuciFlashView puts the patched LuCI "Backup / Flash Firmware" view in
+# place. The DMRHub package ships it under /usr/share/dmrhub; copying it here
+# on every start keeps the section even when a LuCI update overwrites the
+# file, because the copy happens after all packages are installed.
+installLuciFlashView() {
+    local src="/usr/share/dmrhub/flash.js"
+    local dst="/www/luci-static/resources/view/system/flash.js"
+    [ -f "$src" ] || return 0
+    [ -d "$(dirname "$dst")" ] || return 0
+    if ! cmp -s "$src" "$dst" 2>/dev/null; then
+        cp "$src" "$dst" 2>/dev/null && echo "dmrhub: installed the LuCI OTA section"
+    fi
 }
 
 status() {

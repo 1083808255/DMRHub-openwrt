@@ -1,83 +1,199 @@
 #!/bin/sh
-# DMRHub application/firmware OTA updater for OpenWrt
-# Sources: Gitee (primary) -> GitHub (backup)
+# DMRHub application and firmware OTA updater for OpenWrt.
+#
+# The version manifest is published with every GitHub release of the firmware
+# repository. It names the application package and the firmware image plus
+# their SHA256 sums, so this script can verify what it downloads before it
+# writes anything to flash.
+#
 # Usage:
-#   dmrhub-ota check              # check for updates
-#   dmrhub-ota app                # update application ipk only
-#   dmrhub-ota firmware           # sysupgrade firmware (manual confirmation)
+#   dmrhub-ota check              # report whether an update is available
+#   dmrhub-ota status             # same, as JSON for the LuCI page
+#   dmrhub-ota app [--force]      # install the application package (ipk)
+#   dmrhub-ota firmware [--yes]   # flash the firmware image (reboots)
 set -eu
 
-OTA_BASE_GITEE="https://gitee.com/1083808255/DMRHub-ota/raw/main"
-OTA_BASE_GITHUB="https://raw.githubusercontent.com/1083808255/DMRHub-ota/main"
-VERSION_FILE="/opt/dmrhub/version"
+REPO="${DMRHUB_OTA_REPO:-1083808255/DMRHub-openwrt}"
+# The manifest lives next to the release assets; "latest" always points at the
+# newest release, so the script needs no configuration after an install.
+MANIFEST_URL="https://github.com/$REPO/releases/latest/download/version.json"
+# A mirror of the same manifest, used when GitHub cannot be reached.
+MIRROR_URL="https://gitee.com/1083808255/DMRHub-ota/raw/main/version.json"
+
+VERSION_DIR="/opt/dmrhub"
+VERSION_FILE="$VERSION_DIR/version"
+MANIFEST="/tmp/dmrhub-version.json"
+APP_FILE="/tmp/dmrhub-app.ipk"
+FW_FILE="/tmp/dmrhub-fw.img.gz"
+
 LOCAL_VERSION="none"
-[ -f "$VERSION_FILE" ] && LOCAL_VERSION=$(cat "$VERSION_FILE")
+LOCAL_LABEL="none"
+
+# The build tag is the identity of a build: the manifest names it as
+# "build_tag" and the binary reports it as its version, so the two can be
+# compared without a separate file to keep in sync.
+if [ -x /usr/bin/dmrhub ]; then
+	LOCAL_VERSION=$(/usr/bin/dmrhub --version 2>/dev/null |
+		sed -n 's/^DMRHub - \([^ ]*\).*/\1/p')
+fi
+if [ -z "$LOCAL_VERSION" ] && [ -f "$VERSION_FILE" ]; then
+	LOCAL_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo none)
+fi
+[ -n "$LOCAL_VERSION" ] || LOCAL_VERSION="none"
+LOCAL_LABEL="$LOCAL_VERSION"
 
 log() { echo "[dmrhub-ota] $*"; }
 die() { echo "[dmrhub-ota] ERROR: $*" >&2; exit 1; }
 
-fetch_version() {
-    for base in "$OTA_BASE_GITEE" "$OTA_BASE_GITHUB"; do
-        log "fetching version.json from $base"
-        if curl -fsSL --connect-timeout 10 --max-time 30 "$base/version.json" -o /tmp/dmrhub-version.json 2>/dev/null; then
-            echo "$base"
-            return 0
-        fi
-    done
-    die "cannot fetch version.json from any source"
+# fetch <url> <outfile> - download with whatever the image provides.
+fetch() {
+	_url="$1"
+	_out="$2"
+	if command -v uclient-fetch >/dev/null 2>&1; then
+		uclient-fetch -q --timeout=30 -O "$_out" "$_url" && return 0
+	fi
+	if command -v wget >/dev/null 2>&1; then
+		wget -q -T 30 -O "$_out" "$_url" && return 0
+	fi
+	return 1
 }
 
-BASE=$(fetch_version)
-REMOTE_APP=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
+# json <expr> - read one value out of the manifest.
+json() {
+	jsonfilter -i "$MANIFEST" -e "$1" 2>/dev/null || true
+}
 
-log "local=$LOCAL_VERSION remote=$REMOTE_APP"
+# load_manifest - put the newest manifest in $MANIFEST.
+load_manifest() {
+	_ok=0
+	for _base in "$MANIFEST_URL" "$MIRROR_URL"; do
+		log "fetching manifest from $_base"
+		if fetch "$_base" "$MANIFEST" && [ -s "$MANIFEST" ]; then
+			_ok=1
+			break
+		fi
+	done
+	[ "$_ok" = 1 ] || die "cannot fetch the version manifest from any source"
+	# A manifest without a version field is not usable.
+	[ -n "$(json '@.version')" ] || die "the version manifest has no version field"
+}
 
-update_app() {
-    APP_URL=$(grep -o '"app_url"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
-    APP_SHA=$(grep -o '"app_sha256"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
-    [ -n "$APP_URL" ] || die "no app_url in version.json"
-    IPK=/tmp/dmrhub-app.ipk
-    log "downloading app package"
-    curl -fsSL --retry 3 "$APP_URL" -o "$IPK" || die "download failed"
-    if [ -n "$APP_SHA" ]; then
-        echo "$APP_SHA  $IPK" | sha256sum -c - || die "sha256 mismatch"
-    fi
-    log "installing app package"
-    opkg install --force-reinstall "$IPK" || die "opkg install failed"
-    echo "$REMOTE_APP" > "$VERSION_FILE"
-    /etc/init.d/dmrhub restart
-    log "app updated to $REMOTE_APP"
+# resolve_url <file-field> <url-field> - an absolute URL for a release asset.
+resolve_url() {
+	_file_field="$1"
+	_url_field="$2"
+	_url="$(json "@.$_url_field")"
+	if [ -n "$_url" ]; then
+		echo "$_url"
+		return 0
+	fi
+	_file="$(json "@.$_file_field")"
+	[ -n "$_file" ] || return 1
+	echo "https://github.com/$REPO/releases/download/$(json '@.build_tag')/$_file"
+}
+
+REMOTE_VERSION=""
+REMOTE_TAG=""
+REMOTE_APP_URL=""
+REMOTE_FW_URL=""
+REMOTE_APP_SHA=""
+REMOTE_FW_SHA=""
+
+load_release() {
+	load_manifest
+	REMOTE_VERSION="$(json '@.version')"
+	REMOTE_TAG="$(json '@.build_tag')"
+	REMOTE_APP_SHA="$(json '@.app_sha256')"
+	REMOTE_FW_SHA="$(json '@.firmware_sha256')"
+	REMOTE_APP_URL="$(resolve_url app_file app_url || true)"
+	REMOTE_FW_URL="$(resolve_url firmware_file firmware_url || true)"
+}
+
+# up_to_date - true when the running build is the one the manifest names.
+up_to_date() {
+	[ -n "$REMOTE_TAG" ] && [ "$LOCAL_VERSION" = "$REMOTE_TAG" ]
+}
+
+save_version() {
+	mkdir -p "$VERSION_DIR" 2>/dev/null || true
+	echo "$1" > "$VERSION_FILE" 2>/dev/null || true
+}
+
+cmd_check() {
+	load_release
+	if up_to_date; then
+		log "already up to date ($REMOTE_VERSION)"
+	else
+		log "update available: $LOCAL_LABEL -> $REMOTE_VERSION"
+	fi
+}
+
+cmd_status() {
+	load_release
+	if up_to_date; then
+		_state="current"
+	else
+		_state="available"
+	fi
+	printf '{"local":"%s","remote":"%s","state":"%s","app_url":"%s","app_sha256":"%s","firmware_url":"%s","firmware_sha256":"%s"}\n' \
+		"$LOCAL_LABEL" "$REMOTE_VERSION" "$_state" \
+		"$REMOTE_APP_URL" "$REMOTE_APP_SHA" "$REMOTE_FW_URL" "$REMOTE_FW_SHA"
+}
+
+cmd_app() {
+	load_release
+	if up_to_date && [ "${1:-}" != "--force" ]; then
+		log "already up to date ($REMOTE_VERSION)"
+		return 0
+	fi
+	[ -n "$REMOTE_APP_URL" ] || die "the version manifest names no application package"
+	log "downloading $REMOTE_APP_URL"
+	fetch "$REMOTE_APP_URL" "$APP_FILE" || die "download failed"
+	if [ -n "$REMOTE_APP_SHA" ]; then
+		echo "$REMOTE_APP_SHA  $APP_FILE" | sha256sum -c - >/dev/null || die "sha256 mismatch"
+	fi
+	log "installing the application package"
+	opkg install --force-reinstall "$APP_FILE" || die "opkg install failed"
+	save_version "$REMOTE_TAG"
+	/etc/init.d/dmrhub restart
+	log "application updated to $REMOTE_VERSION"
+}
+
+cmd_firmware() {
+	load_release
+	[ -n "$REMOTE_FW_URL" ] || die "the version manifest names no firmware image"
+	if [ "${1:-}" != "--yes" ]; then
+		log "WARNING: flashing the firmware reboots the device"
+		printf "Type 'yes' to continue: "
+		read -r ans
+		[ "$ans" = "yes" ] || die "aborted"
+	fi
+	log "downloading $REMOTE_FW_URL"
+	fetch "$REMOTE_FW_URL" "$FW_FILE" || die "download failed"
+	if [ -n "$REMOTE_FW_SHA" ]; then
+		echo "$REMOTE_FW_SHA  $FW_FILE" | sha256sum -c - >/dev/null || die "sha256 mismatch"
+	fi
+	log "flashing the firmware; the device will reboot"
+	# -k keeps the current configuration, -u skips backup files that already
+	# match what is in /rom.
+	sysupgrade -k -u "$FW_FILE"
 }
 
 case "${1:-check}" in
-    check)
-        if [ "$LOCAL_VERSION" = "$REMOTE_APP" ]; then
-            log "already up to date"
-        else
-            log "update available: $LOCAL_VERSION -> $REMOTE_APP"
-        fi
-        ;;
-    app)
-        update_app
-        ;;
-    firmware)
-        FW_URL=$(grep -o '"firmware_url"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
-        FW_SHA=$(grep -o '"firmware_sha256"[[:space:]]*:[[:space:]]*"[^"]*"' /tmp/dmrhub-version.json | head -1 | cut -d'"' -f4)
-        [ -n "$FW_URL" ] || die "no firmware_url in version.json"
-        log "WARNING: firmware sysupgrade will reboot the device"
-        printf "Type 'yes' to continue: "
-        read -r ans
-        [ "$ans" = "yes" ] || die "aborted"
-        IMG=/tmp/dmrhub-fw.img.gz
-        curl -fsSL --retry 3 "$FW_URL" -o "$IMG" || die "download failed"
-        if [ -n "$FW_SHA" ]; then
-            echo "$FW_SHA  $IMG" | sha256sum -c - || die "sha256 mismatch"
-        fi
-        log "flashing firmware"
-        sysupgrade -k "$IMG"
-        ;;
-    *)
-        echo "Usage: $0 {check|app|firmware}"
-        exit 1
-        ;;
+check)
+	cmd_check
+	;;
+status)
+	cmd_status
+	;;
+app)
+	cmd_app "${2:-}"
+	;;
+firmware)
+	cmd_firmware "${2:-}"
+	;;
+*)
+	echo "Usage: $0 {check|status|app|firmware}"
+	exit 1
+	;;
 esac
