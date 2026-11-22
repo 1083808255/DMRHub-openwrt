@@ -163,8 +163,10 @@ jobs:
           cp "$GITHUB_WORKSPACE/artifacts/${IPK_NAME}" local_packages/
           IDX=$(find . -name ipkg-make-index.sh | head -1)
           echo "Using index script: $IDX"
-          (cd local_packages && sh "../${IDX#./}" . > Packages)
+          IDX_ABS="$(pwd)/${IDX#./}"
+          (cd local_packages && bash "$IDX_ABS" . > Packages)
           gzip -kf local_packages/Packages
+          echo "==> generated Packages:"; cat local_packages/Packages | head -30
           echo "src custom file:$(pwd)/local_packages" >> repositories.conf
           echo "==> repositories.conf:"; cat repositories.conf
           echo "==> local Packages:"; cat local_packages/Packages
