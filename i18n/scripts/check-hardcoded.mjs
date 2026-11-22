@@ -9,7 +9,8 @@ import path from 'node:path';
 import { parse } from '@vue/compiler-sfc';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '..');
+// Repo root is two levels up from i18n/scripts/
+const root = path.resolve(here, '../../internal/http/frontend');
 const SKIP_TAGS = new Set(['code', 'pre', 'kbd', 'samp', 'script', 'style']);
 const TEXT_ATTRS = new Set(['placeholder', 'aria-label', 'alt', 'title', 'label', 'intro', 'empty-text', 'text', 'loading-text', 'summary', 'hint']);
 const HAS_WORDS = /[A-Za-z]{2,}/;

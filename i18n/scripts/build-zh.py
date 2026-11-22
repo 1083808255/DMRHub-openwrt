@@ -1108,12 +1108,12 @@ for k in keys:
     zh[k] = T.get(k, k)
 
 # Preserve existing hand-translated entries from the earlier small attempt
-existing = json.load(open('src/i18n/locales/zh-CN.json', encoding='utf-8'))
+existing = json.load(open('../locales/zh-CN.json', encoding='utf-8'))
 for k, v in existing.items():
     if k in keys and v and v != k:
         zh[k] = v
 
-json.dump(zh, open('src/i18n/locales/zh-CN.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+json.dump(zh, open('../locales/zh-CN.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
 print(f'Total keys: {len(keys)}')
 print(f'Translated: {len(keys) - len(missing)}')
 print(f'Missing (fallback to English): {len(missing)}')

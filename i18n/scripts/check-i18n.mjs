@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const locales = path.resolve(here, '../src/i18n/locales');
+const locales = path.resolve(here, '../locales');
 
 const read = (file) => JSON.parse(readFileSync(path.join(locales, file), 'utf8'));
 const flatten = (obj, prefix = '') =>

@@ -25,7 +25,8 @@ GitHub Actions（`.github/workflows/build-firmware.yml`）每次运行产出：
 
 ## 汉化如何跟随上游
 
-- 汉化以词条形式集中在 `internal/http/frontend/src/i18n/locales/zh-CN.json`（key 为英文原文）
+- 汉化以词条形式集中在顶层 `i18n/locales/zh-CN.json`（key 为英文原文）；前端构建时由 `i18n/scripts/sync-locales.mjs` 自动同步到 `src/i18n/locales/`
+- 汉化相关工具脚本（codemod、词条检查、预览页）统一放在顶层 `i18n/scripts/` 和 `i18n/preview.html`
 - 上游更新后，重新构建时 `i18n:check` 校验 940 条词条对齐；新增词条会以英文占位并提示补翻
 - 补翻只需编辑 `zh-CN.json`，无需改组件代码
 
