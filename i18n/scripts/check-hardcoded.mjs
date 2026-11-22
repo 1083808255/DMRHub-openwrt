@@ -6,11 +6,15 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { parse } from '@vue/compiler-sfc';
+import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Repo root is two levels up from i18n/scripts/
 const root = path.resolve(here, '../../internal/http/frontend');
+// Resolve @vue/compiler-sfc from the frontend's node_modules (this script now
+// lives in the top-level i18n/scripts folder, outside the package tree).
+const require = createRequire(path.join(root, 'package.json'));
+const { parse } = require('@vue/compiler-sfc');
 const SKIP_TAGS = new Set(['code', 'pre', 'kbd', 'samp', 'script', 'style']);
 const TEXT_ATTRS = new Set(['placeholder', 'aria-label', 'alt', 'title', 'label', 'intro', 'empty-text', 'text', 'loading-text', 'summary', 'hint']);
 const HAS_WORDS = /[A-Za-z]{2,}/;
