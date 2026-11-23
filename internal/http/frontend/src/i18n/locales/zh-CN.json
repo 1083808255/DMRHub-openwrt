@@ -1109,7 +1109,7 @@
   "Radio/MMDVMHost Modem Configuration": "电台/MMDVMHost 调制解调器配置",
   "Radio/Modem Type": "电台/调制解调器类型",
   "RadioID": "RadioID（电台 ID 数据库）",
-  "RadioID Drift": "RadioID 呼号不一致",
+  "RadioID Drift": "ID 校验",
   "RadioID checks": "RadioID 校验",
   "RadioID does not list": "RadioID 未列出",
   "RadioID does not list {id}.": "RadioID 中没有登记 {id}。",
