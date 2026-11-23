@@ -67,7 +67,7 @@
             </thead>
             <tbody>
               <tr v-if="!rulesOf(g).length">
-                <td colspan="3" class="px-3 py-4 text-center text-muted-foreground">{{ $t("No") }} {{ g.title.toLowerCase() }} {{ $t("rules") }}</td>
+                <td colspan="3" class="px-3 py-4 text-center text-muted-foreground">{{ $t("No rules in this direction") }}</td>
               </tr>
               <tr
                 v-for="r in rulesOf(g)"
@@ -220,16 +220,16 @@ export default {
       busy: false,
       savingPriv: false,
       kinds: [
-        { match: 'destination' as RuleMatch, label: 'To' },
-        { match: 'source' as RuleMatch, label: 'From' },
+        { match: 'destination' as RuleMatch, label: t('To') },
+        { match: 'source' as RuleMatch, label: t('From') },
       ],
     };
   },
   computed: {
     groups(): Group[] {
       return [
-        { key: 'rx', ingress: true, title: 'Receive', verb: 'Receives', on: this.ingress, off: t('Receive is off.') },
-        { key: 'tx', ingress: false, title: 'Transmit', verb: 'Transmits', on: this.egress, off: t('Transmit is off.') },
+        { key: 'rx', ingress: true, title: t('Receive'), verb: 'Receives', on: this.ingress, off: t('Receive is off.') },
+        { key: 'tx', ingress: false, title: t('Transmit'), verb: 'Transmits', on: this.egress, off: t('Transmit is off.') },
       ];
     },
   },
@@ -289,7 +289,7 @@ export default {
         return;
       }
       if (max > MAX_DMR_ID) {
-        this.err = `IDs must be at most ${MAX_DMR_ID}.`;
+        this.err = t('IDs must be at most {max}.', { max: MAX_DMR_ID });
         return;
       }
       this.busy = true;

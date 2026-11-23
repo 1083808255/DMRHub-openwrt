@@ -51,7 +51,7 @@ export default {
     UserRegistrationCard,
   },
   head: {
-    title: 'Register',
+    title: t('Register'),
   },
   created() {
     void this.settingsStore.fetchConfig();

@@ -42,9 +42,14 @@ function detectLocale(): LocaleCode {
   return navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
 
+const initialLocale: LocaleCode = detectLocale();
+
+// Set it before the first paint, so the browser picks the right glyphs and fonts.
+document.documentElement.lang = initialLocale;
+
 export const i18n = createI18n({
   legacy: false,
-  locale: detectLocale(),
+  locale: initialLocale,
   fallbackLocale: 'en',
   messages: {
     en,

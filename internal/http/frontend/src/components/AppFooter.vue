@@ -22,10 +22,11 @@
 <template>
   <div class="footer">
     <p>
-      {{ $t("DMRHub is proudly open") }}
-      <a href="https://github.com/USA-RedDragon/DMRHub" target="_blank"
-        >source</a
-      >
+      <i18n-t keypath="DMRHub is proudly open {link}" tag="span">
+        <template #link>
+          <a href="https://github.com/USA-RedDragon/DMRHub" target="_blank">{{ $t("source code") }}</a>
+        </template>
+      </i18n-t>
     </p>
     <p>{{ $t("Copyright &copy; 2023-") }}{{ year }} {{ $t("Jacob McSwain") }}</p>
     <p id="version">{{ $t("Version") }} {{ version }}</p>

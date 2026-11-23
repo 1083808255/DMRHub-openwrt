@@ -21,7 +21,7 @@
 
 <template>
   <ShadButton type="button" variant="outline" size="sm" class="h-7 px-2.5 text-[13px]" :data-copy="text" @click="copy">
-    {{ label }}
+    {{ label ?? $t('Copy') }}
   </ShadButton>
 </template>
 
@@ -30,7 +30,7 @@ import { t } from '@/i18n';
 import { Button as ShadButton } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 
-const props = withDefaults(defineProps<{ text: string | number; label?: string }>(), { label: 'Copy' });
+const props = withDefaults(defineProps<{ text: string | number; label?: string }>(), { label: undefined });
 
 const copy = async () => {
   try {

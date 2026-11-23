@@ -9,6 +9,17 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Long callsigns, URLs and IDs wrap instead of widening the page. */
+  overflow-wrap: break-word;
+}
+
+/* Headings read better when the last line is not left with one or two glyphs,
+   and Chinese lines should not start with a closing mark such as 。or ）. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+  line-break: strict;
 }
 
 :root {
@@ -59,7 +70,7 @@ body {
   --color-warn-bg: var(--warn-bg);
   --color-warn-border: var(--warn-border);
   --color-warn-fg: var(--warn-fg);
-  --font-sans: "Nunito Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Nunito Sans Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Inconsolata Variable", ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);

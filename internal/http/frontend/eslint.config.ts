@@ -43,7 +43,7 @@ export default defineConfigWithVueTs(
     files: ['src/**/*.vue'],
     rules: {
       'vue/no-undef-components': ['error', {
-        ignorePatterns: ['^RouterLink$', '^RouterView$', '^component$', '^SettingBadges$', '^SettingNote$'],
+        ignorePatterns: ['^RouterLink$', '^RouterView$', '^component$', '^SettingBadges$', '^SettingNote$', '^i18n-t$'],
       }],
     },
   },

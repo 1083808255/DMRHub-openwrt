@@ -29,7 +29,7 @@
       :aria-label="$t('Find a user')"
       :data-test="`${testPrefix}-search`"
     />
-    <div class="max-h-56 overflow-y-auto rounded-md border border-border" role="radiogroup" :aria-label="label">
+    <div class="max-h-56 overflow-y-auto rounded-md border border-border" role="radiogroup" :aria-label="label ?? $t('Users')">
       <p v-if="matches.length === 0" class="px-3 py-2.5 text-sm text-muted-foreground" :data-test="`${testPrefix}-nomatch`">{{ $t("No user matches") }}</p>
       <label
         v-for="u in matches"
@@ -60,7 +60,7 @@ const props = withDefaults(defineProps<{
   testPrefix?: string;
 }>(), {
   name: 'owner',
-  label: 'Users',
+  label: undefined,
   inputId: undefined,
   testPrefix: 'user-picker',
 });

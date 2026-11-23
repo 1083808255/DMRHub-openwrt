@@ -17,6 +17,7 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { t } from '@/i18n';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 const COLOR_MODE_KEY = 'color-mode';
@@ -97,12 +98,12 @@ export function useColorMode() {
     isDark,
     modeLabel: computed(() => {
       if (mode.value === 'system') {
-        return 'System';
+        return t('System');
       }
       if (mode.value === 'dark') {
-        return 'Dark';
+        return t('Dark');
       }
-      return 'Light';
+      return t('Light');
     }),
     setMode,
     cycleMode,

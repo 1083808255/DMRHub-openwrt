@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { t } from '@/i18n';
+import { i18n, t } from '@/i18n';
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { computed, h, type VNode } from 'vue';
 import { RouterLink } from 'vue-router';
@@ -146,35 +146,35 @@ const repeaterLink = (id: number): VNode =>
     () => String(id),
   );
 
-const userColumns: DataTableColumn<Message, unknown>[] = [
+const userColumns = (): DataTableColumn<Message, unknown>[] => [
   {
     id: 'time',
-    header: 'Time',
+    header: t('Time'),
     cell: ({ row }: Cell) => timeCell(row.original),
   },
   {
     id: 'from',
-    header: 'From',
+    header: t('From'),
     cell: ({ row }: Cell) => party(row.original.source_id, row.original.source_callsign),
   },
   {
     id: 'to',
-    header: 'To',
+    header: t('To'),
     cell: ({ row }: Cell) => destination(row.original),
   },
   {
     id: 'format',
-    header: 'Format',
+    header: t('Format'),
     cell: ({ row }: Cell) => h('span', { class: badgeClass('info') }, formatLabel(row.original.format)),
   },
   {
     id: 'text',
-    header: 'Text',
+    header: t('Text'),
     cell: ({ row }: Cell) => textCell(row.original),
   },
   {
     id: 'state',
-    header: 'State',
+    header: t('State'),
     cell: ({ row }: Cell) => {
       const state = messageState(row.original);
       return h('span', { class: badgeClass(state.tone) }, state.label);
@@ -182,23 +182,27 @@ const userColumns: DataTableColumn<Message, unknown>[] = [
   },
 ];
 
-const adminColumns: DataTableColumn<Message, unknown>[] = [
+const adminColumns = (): DataTableColumn<Message, unknown>[] => [
   {
     id: 'repeater',
-    header: 'Repeater',
+    header: t('Repeater'),
     cell: ({ row }: Cell) => repeaterLink((row.original as AdminMessage).repeater_id),
   },
   {
     id: 'slot',
-    header: 'TS',
+    header: t('TS'),
     cell: ({ row }: Cell) => String((row.original as AdminMessage).slot),
   },
   {
     id: 'network',
-    header: 'Network',
+    header: t('Network'),
     cell: ({ row }: Cell) => transportLabel((row.original as AdminMessage).transport),
   },
 ];
 
-const columns = computed(() => (props.admin ? [...userColumns, ...adminColumns] : userColumns));
+const columns = computed(() => {
+  // Read the locale so the headers follow a language switch.
+  void i18n.global.locale.value;
+  return props.admin ? [...userColumns(), ...adminColumns()] : userColumns();
+});
 </script>

@@ -28,13 +28,14 @@
 
 <script lang="ts">
 import TalkgroupTable from '@/components/TalkgroupTable.vue';
+import { t } from '@/i18n';
 
 export default {
   components: {
     TalkgroupTable,
   },
   head: {
-    title: 'Talkgroups',
+    title: t('Talkgroups'),
   },
   created() {},
   mounted() {},
