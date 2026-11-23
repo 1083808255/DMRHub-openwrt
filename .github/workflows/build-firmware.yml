@@ -117,7 +117,9 @@ jobs:
           # Take the view from the same feed the image installs, then patch it.
           # The patch fails loudly when the view changes, so an upstream LuCI
           # update cannot silently drop the section.
-          LUCI_FEED="https://downloads.openwrt.org/releases/${OP_VERSION}/packages/${OP_TARGET}/luci"
+          # The packages tree uses an underscore where the targets tree uses a
+          # slash: packages/x86_64/luci, not packages/x86/64/luci.
+          LUCI_FEED="https://downloads.openwrt.org/releases/${OP_VERSION}/packages/${OP_TARGET//\//_}/luci"
           curl -fsSL --retry 3 "$LUCI_FEED/Packages.gz" -o /tmp/luci-Packages.gz
           gunzip -f /tmp/luci-Packages.gz
           LUCIPKG=$(awk '/^Package: luci-mod-system$/ {found=1} found && /^Filename:/ {print $2; exit}' /tmp/luci-Packages)
