@@ -165,7 +165,8 @@ jobs:
           EOF
           mkdir -p "$TMP/data/usr/bin"
           cp -a files/. "$TMP/data/"
-          cp artifacts/dmrhub "$TMP/data/usr/bin/dmrhub"
+          # The working directory is $PKG now, so use an absolute path.
+          cp "$GITHUB_WORKSPACE/artifacts/dmrhub" "$TMP/data/usr/bin/dmrhub"
           (cd "$TMP/data" && tar -czf ../data.tar.gz .)
           (cd "$TMP/control" && tar -czf ../control.tar.gz .)
           # OpenWrt ipk = gzip-compressed tar, NOT Debian ar archive.
