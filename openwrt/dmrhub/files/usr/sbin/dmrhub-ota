@@ -14,12 +14,20 @@
 set -eu
 
 REPO="${DMRHUB_OTA_REPO:-1083808255/DMRHub-openwrt}"
-# The manifest lives next to the release assets; "latest" always points at the
-# newest release, so the script needs no configuration after an install.
+GITEE_REPO="${DMRHUB_OTA_GITEE_REPO:-xyinmaster/DMRHub-ota}"
+GITEE_BRANCH="${DMRHUB_OTA_GITEE_BRANCH:-master}"
+
+# Gitee carries the OTA releases: github.com is unreachable from many networks
+# here, and Gitee answers on the same continent. CI rewrites version.json in
+# that repository on every release, so this URL always names the newest build.
+GITEE_MANIFEST_URL="https://gitee.com/$GITEE_REPO/raw/$GITEE_BRANCH/version.json"
+# The GitHub copy stays as the second source, for networks where Gitee is the
+# one that is slow or blocked.
 MANIFEST_URL="${DMRHUB_OTA_MANIFEST:-https://github.com/$REPO/releases/latest/download/version.json}"
-# Extra sources to try when the first one cannot be reached. Empty by default:
-# the Gitee mirror this script used to fall back on no longer exists.
-MIRROR_URL="${DMRHUB_OTA_MIRROR:-}"
+# Extra sources to try when the first two cannot be reached.
+MIRROR_URL="${DMRHUB_OTA_MIRROR_SOURCE:-}"
+# Which host served the manifest; the assets are taken from the same one.
+MANIFEST_HOST=""
 
 # github.com is not reachable from every network: DNS answers and ICMP get
 # through, but the TLS handshake is reset, so every download fails with
@@ -117,10 +125,15 @@ json() {
 # load_manifest - put the newest manifest in $MANIFEST.
 load_manifest() {
 	_ok=0
-	for _base in "$MANIFEST_URL" "$MIRROR_URL"; do
+	MANIFEST_HOST=""
+	for _base in "$GITEE_MANIFEST_URL" "$MANIFEST_URL" "$MIRROR_URL"; do
 		[ -n "$_base" ] || continue
 		log "正在获取版本清单：$_base"
 		if fetch "$_base" "$MANIFEST" && [ -s "$MANIFEST" ]; then
+			case "$_base" in
+			*gitee.com*) MANIFEST_HOST="gitee" ;;
+			*) MANIFEST_HOST="github" ;;
+			esac
 			_ok=1
 			break
 		fi
@@ -134,12 +147,21 @@ load_manifest() {
 resolve_url() {
 	_file_field="$1"
 	_url_field="$2"
+	_file="$(json "@.$_file_field")"
+	_tag="$(json '@.release_tag')"
+	[ -n "$_tag" ] || _tag="$(json '@.build_tag')"
+	# The assets live next to the manifest, so a Gitee manifest means Gitee
+	# assets even when the file carries GitHub URLs written by CI.
+	if [ "$MANIFEST_HOST" = "gitee" ]; then
+		[ -n "$_file" ] && [ -n "$_tag" ] || return 1
+		echo "https://gitee.com/$GITEE_REPO/releases/download/$_tag/$_file"
+		return 0
+	fi
 	_url="$(json "@.$_url_field")"
 	if [ -n "$_url" ]; then
 		echo "$_url"
 		return 0
 	fi
-	_file="$(json "@.$_file_field")"
 	[ -n "$_file" ] || return 1
 	_release="$(json '@.release_url')"
 	case "$_release" in
@@ -188,6 +210,46 @@ save_version() {
 	echo "$1" > "$VERSION_FILE" 2>/dev/null || true
 }
 
+# feed_line - the opkg feed line. It goes through the configured mirror when
+# there is one, because an install on a network that blocks github.com could
+# otherwise never see a package update.
+feed_line() {
+	_base="https://github.com/$REPO/releases/latest/download"
+	for _m in $(mirrors); do
+		[ -n "$_m" ] || continue
+		_base="$_m/$_base"
+		break
+	done
+	echo "src/gz dmrhub $_base"
+}
+
+# apply_feed - put that line into customfeeds.conf, leaving every other feed
+# and the comments untouched.
+apply_feed() {
+	_line="$(feed_line)"
+	_conf="/etc/opkg/customfeeds.conf"
+	_tmp="/tmp/customfeeds.conf.$$"
+	mkdir -p /etc/opkg
+	[ -f "$_conf" ] || : > "$_conf"
+	grep -v '^src/gz dmrhub ' "$_conf" > "$_tmp" 2>/dev/null || true
+	printf '%s\n' "$_line" >> "$_tmp"
+	# Skip the rewrite when nothing changed, so a boot is not reported as a
+	# configuration update.
+	if cmp -s "$_tmp" "$_conf"; then
+		rm -f "$_tmp"
+		return 0
+	fi
+	mv "$_tmp" "$_conf"
+}
+
+cmd_feed() {
+	if [ "${1:-}" = "--apply" ]; then
+		apply_feed
+	else
+		feed_line
+	fi
+}
+
 cmd_check() {
 	load_release
 	if up_to_date; then
@@ -204,8 +266,8 @@ cmd_status() {
 	else
 		_state="available"
 	fi
-	printf '{"local":"%s","remote":"%s","state":"%s","app_url":"%s","app_sha256":"%s","firmware_url":"%s","firmware_sha256":"%s"}\n' \
-		"$LOCAL_LABEL" "$REMOTE_VERSION" "$_state" \
+	printf '{"local":"%s","remote":"%s","state":"%s","source":"%s","app_url":"%s","app_sha256":"%s","firmware_url":"%s","firmware_sha256":"%s"}\n' \
+		"$LOCAL_LABEL" "$REMOTE_VERSION" "$_state" "$MANIFEST_HOST" \
 		"$REMOTE_APP_URL" "$REMOTE_APP_SHA" "$REMOTE_FW_URL" "$REMOTE_FW_SHA"
 }
 
@@ -261,8 +323,11 @@ app)
 firmware)
 	cmd_firmware "${2:-}"
 	;;
+feed)
+	cmd_feed "${2:-}"
+	;;
 *)
-	echo "用法：$0 {check|status|app|firmware}"
+	echo "用法：$0 {check|status|app|firmware|feed}"
 	exit 1
 	;;
 esac

@@ -4,12 +4,16 @@
 mkdir -p /opt/dmrhub/data
 chmod 755 /opt/dmrhub
 
-# Add the DMRHub release feed to opkg. The signing key is installed in
-# /etc/opkg/keys, so "option check_signature" stays on for this feed too.
-FEED="src/gz dmrhub https://github.com/1083808255/DMRHub-openwrt/releases/latest/download"
-if [ -f /etc/opkg/customfeeds.conf ]; then
-	grep -q '^src/gz dmrhub ' /etc/opkg/customfeeds.conf || echo "$FEED" >> /etc/opkg/customfeeds.conf
-else
-	echo "$FEED" > /etc/opkg/customfeeds.conf
+# Add the DMRHub release feed to opkg. The line follows "option ota_mirror",
+# so an install on a network that blocks github.com can still fetch packages;
+# the signing key in /etc/opkg/keys keeps "option check_signature" meaningful
+# for this feed too.
+if ! /usr/sbin/dmrhub-ota feed --apply 2>/dev/null; then
+	FEED="src/gz dmrhub https://github.com/1083808255/DMRHub-openwrt/releases/latest/download"
+	if [ -f /etc/opkg/customfeeds.conf ]; then
+		grep -q '^src/gz dmrhub ' /etc/opkg/customfeeds.conf || echo "$FEED" >> /etc/opkg/customfeeds.conf
+	else
+		echo "$FEED" > /etc/opkg/customfeeds.conf
+	fi
 fi
 exit 0

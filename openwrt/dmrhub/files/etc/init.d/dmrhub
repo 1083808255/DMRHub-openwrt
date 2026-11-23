@@ -11,6 +11,7 @@ CONF_DIR=/opt/dmrhub
 BIN=/usr/bin/dmrhub
 
 start_service() {
+    refreshOpkgFeed
     installLuciFlashView
 
     # Ensure persistent data/config directory exists
@@ -40,6 +41,14 @@ EOF
     procd_set_param stderr 1
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
     procd_close_instance
+}
+
+# refreshOpkgFeed keeps the DMRHub feed on the mirror "option ota_mirror"
+# names, so changing that option takes effect at the next start instead of
+# only on a fresh install.
+refreshOpkgFeed() {
+    [ -x /usr/sbin/dmrhub-ota ] || return 0
+    /usr/sbin/dmrhub-ota feed --apply 2>/dev/null || true
 }
 
 # installLuciFlashView puts the patched LuCI "Backup / Flash Firmware" view in
