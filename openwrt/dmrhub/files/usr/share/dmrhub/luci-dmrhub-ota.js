@@ -145,7 +145,9 @@ function handleDmrhubOtaFirmware(ev) {
 	if (!confirm('刷写固件会重启设备，是否继续？')) {
 		return Promise.resolve();
 	}
-	return dmrhubOtaCall(['job', 'start', 'firmware']).then(function (res) {
+	/* --yes is required: the detached runner has no stdin to answer cmd_firmware's
+	 * interactive "type yes" prompt. The confirm() above is the user's consent. */
+	return dmrhubOtaCall(['job', 'start', 'firmware', '--yes']).then(function (res) {
 		if (!res.ok) {
 			dmrhubOtaNotify('无法启动固件更新：\n' + res.text, 'error');
 			return;

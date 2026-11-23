@@ -361,6 +361,14 @@ cmd_job_start() {
 	*) die "后台任务只支持 app 或 firmware" ;;
 	esac
 	shift
+	# A detached runner has no stdin, so cmd_firmware's interactive "type yes"
+	# prompt would read EOF and abort. The LuCI page already asked the user to
+	# confirm, so inject --yes for firmware jobs as a safety net.
+	if [ "$_kind" = "firmware" ]; then
+		_has_yes=0
+		for _a in "$@"; do [ "$_a" = "--yes" ] && _has_yes=1; done
+		[ "$_has_yes" -eq 1 ] || set -- "$@" --yes
+	fi
 	mkdir -p "$JOB_DIR" 2>/dev/null || die "无法创建任务目录"
 	# A tiny runner records state around a direct call back into this script.
 	# Args are fixed (--force / --yes), so no shell-quoting of user data.
