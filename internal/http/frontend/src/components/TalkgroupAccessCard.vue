@@ -40,7 +40,7 @@
           <span v-for="r in draft.repeaters" :key="r.id" class="chip">
             <span class="font-mono">{{ r.id }}</span>
             <span>{{ r.callsign }}</span>
-            <button type="button" class="chip-x" :aria-label="`Remove ${r.id}`" @click="removeRepeater(r.id)">&times;</button>
+            <button type="button" class="chip-x" :aria-label="$t('Remove {id}', { id: r.id })" @click="removeRepeater(r.id)">&times;</button>
           </span>
         </div>
         <form class="flex flex-wrap items-center gap-2" novalidate @submit.prevent="addRepeater">
@@ -83,8 +83,8 @@ type Access = { mode: Mode; repeaters: RepeaterRef[] };
 const props = defineProps<{ talkgroupId: number }>();
 
 const modeOptions = [
-  { value: 'open', label: 'Open' },
-  { value: 'approved', label: 'Approved repeaters' },
+  { value: 'open', label: t('Open') },
+  { value: 'approved', label: t('Approved repeaters') },
 ];
 
 const loaded = ref(false);
@@ -123,7 +123,7 @@ const addRepeater = async () => {
   const q = query.value.trim();
   if (!q) return;
   if (!/^\d+$/.test(q)) {
-    addError.value = 'No such repeater';
+    addError.value = t('No such repeater');
     return;
   }
   try {
@@ -135,7 +135,7 @@ const addRepeater = async () => {
     query.value = '';
     addError.value = '';
   } catch {
-    addError.value = 'No such repeater';
+    addError.value = t('No such repeater');
   }
 };
 
@@ -158,7 +158,7 @@ const save = async () => {
       repeaters: draft.repeaters.map((r) => r.id),
     });
     load(res.data as Access);
-    message.value = 'Saved.';
+    message.value = t('Saved.');
   } catch (err) {
     failed.value = true;
     message.value = errorText(err, t('Could not save. Try again later.'));

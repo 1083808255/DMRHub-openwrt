@@ -35,7 +35,7 @@
     </CardHeader>
     <CardContent>
       <p v-if="loaded && shown.length === 0" class="text-sm text-muted-foreground" data-test="log-empty">
-        {{ problemsOnly ? 'No problems in the last 24 hours.' : 'Nothing in the last 24 hours.' }}
+        {{ problemsOnly ? $t('No problems in the last 24 hours.') : $t('Nothing in the last 24 hours.') }}
       </p>
       <ol v-else class="divide-y">
         <li v-for="line in shown" :key="line.id" class="grid gap-1 py-3 sm:grid-cols-[8rem_1fr]" :data-test="`log-${line.id}`">

@@ -27,6 +27,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import TalkgroupTable from '@/components/TalkgroupTable.vue';
 
 export default {
@@ -34,7 +35,7 @@ export default {
     TalkgroupTable,
   },
   head: {
-    title: 'Owned Talkgroups',
+    title: t('Owned Talkgroups'),
   },
   created() {},
   mounted() {},

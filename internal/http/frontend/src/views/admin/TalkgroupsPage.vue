@@ -27,6 +27,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import TalkgroupTable from '@/components/TalkgroupTable.vue';
 
 export default {
@@ -34,8 +35,8 @@ export default {
     TalkgroupTable,
   },
   head: {
-    title: 'Talkgroups',
-    titleTemplate: 'Admin | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
+    title: t('Talkgroups'),
+    titleTemplate: t('Admin') + ' | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
   },
   created() {},
   mounted() {},

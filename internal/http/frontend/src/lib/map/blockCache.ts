@@ -16,6 +16,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
+import { t } from '@/i18n';
 import type { RangeResponse, Source } from 'pmtiles';
 
 /** BLOCK_BYTES is the size of one cached block of an archive, as Squallar caches them. */
@@ -191,7 +192,7 @@ export class BlockCachedSource implements Source {
       }
     }
     if (filled === 0) {
-      throw new Error('range starts past the end of the archive');
+      throw new Error(t('range starts past the end of the archive'));
     }
     return { data: (filled === length ? out : out.slice(0, filled)).buffer as ArrayBuffer, cacheControl: 'max-age=31536000' };
   }

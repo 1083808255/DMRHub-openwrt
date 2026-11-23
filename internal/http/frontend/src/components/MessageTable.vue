@@ -39,6 +39,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n';
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { computed, h, type VNode } from 'vue';
 import { RouterLink } from 'vue-router';
@@ -70,7 +71,7 @@ const props = withDefaults(
   }>(),
   {
     loading: false,
-    emptyText: 'No messages yet',
+    emptyText: t('No messages yet'),
     summary: '',
     admin: false,
     selectedId: null,
@@ -123,7 +124,7 @@ const textCell = (m: Message): VNode => {
     parts.push(h('span', m.text));
   }
   if (!m.checksum_ok) {
-    parts.push(h('span', { class: `ml-1 ${badgeClass('warn')}` }, 'Checksum bad'));
+    parts.push(h('span', { class: `ml-1 ${badgeClass('warn')}` }, t('Checksum bad')));
   }
   return h('div', { class: 'min-w-48 max-w-md whitespace-normal [overflow-wrap:anywhere]' }, parts);
 };

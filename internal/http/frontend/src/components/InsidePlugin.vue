@@ -163,7 +163,7 @@ const save = async () => {
   fileErrors.value = [];
   const ranges = parseIDs(ids.value);
   if (ranges === null) {
-    error.value = 'Use IDs and ranges such as 9990, 5050-5059.';
+    error.value = t('Use IDs and ranges such as 9990, 5050-5059.');
     return;
   }
   busy.value = true;

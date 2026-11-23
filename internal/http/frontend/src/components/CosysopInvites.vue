@@ -35,7 +35,7 @@
         :data-test="`invite-${inv.repeater_id}`"
       >
         <span class="mr-auto text-sm">
-          <strong>{{ inv.owner ? inv.owner.callsign : 'The owner' }}</strong>
+          <strong>{{ inv.owner ? inv.owner.callsign : $t('The owner') }}</strong>
           {{ $t("invited you to manage") }}
           <strong>{{ inv.repeater_callsign || 'repeater' }} {{ inv.repeater_id }}</strong>.
           <span class="text-muted-foreground">{{ $t("Answer by") }} {{ day(inv.expires_at) }}.</span>

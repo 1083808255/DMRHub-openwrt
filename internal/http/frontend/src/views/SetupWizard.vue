@@ -173,7 +173,7 @@ const listNames = (names: string[]): string => {
   if (names.length <= 1) {
     return names.join('');
   }
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(', ')}${$t(' and ')}${names[names.length - 1]}`;
 };
 
 const flatErrors = (v: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> => {
@@ -210,13 +210,17 @@ const showApplyError = (e: ApplyError, self: boolean): ShownApplyError => {
   const replica = e.replica ? replicaName(e.replica) : '';
   if (e.field) {
     return {
-      summary: `Replica ${replica} cannot run with the saved ${settingLabel(e.field)}. It keeps its previous settings.`,
+      summary: $t('Replica {replica} cannot run with the saved {setting}. It keeps its previous settings.', {
+        replica, setting: settingLabel(e.field),
+      }),
       detail: e.error,
     };
   }
-  const state = e.running ? 'It keeps running with its previous settings.' : 'It is not running.';
-  const of = self || !replica ? '' : ` of replica ${replica}`;
-  return { summary: `The ${serverName(e.server)} server${of} could not start with the new settings. ${state}`, detail: e.error };
+  const state = e.running ? $t('It keeps running with its previous settings.') : $t('It is not running.');
+  const target = self || !replica
+    ? $t('The {server} server', { server: serverName(e.server) })
+    : $t('The {server} server of replica {replica}', { server: serverName(e.server), replica });
+  return { summary: $t('{target} could not start with the new settings. {state}', { target, state }), detail: e.error };
 };
 
 const fieldsByPath: Record<string, FieldDef> = Object.fromEntries(TABS.flatMap(tabFields).map((f) => [f.path, f]));
@@ -224,7 +228,7 @@ const fieldsByPath: Record<string, FieldDef> = Object.fromEntries(TABS.flatMap(t
 export default defineComponent({
   components: { SetupMenu, ShadButton },
   head() {
-    return { title: 'Setup' };
+    return { title: $t('Setup') };
   },
   provide() {
     return { [setupStateKey as symbol]: this.setupState };
@@ -293,53 +297,60 @@ export default defineComponent({
       }
       const onTabs = paths.filter((p) => tabOfPath(p));
       if (onTabs.length === 0) {
-        return { text: `Some settings are not valid: ${listNames(paths.map(settingLabel))}.`, error: true };
+        return { text: $t('Some settings are not valid: {settings}.', { settings: listNames(paths.map(settingLabel)) }), error: true };
       }
       const names = this.tabs.filter((t) => onTabs.some((p) => tabOfPath(p)?.id === t.id)).map((t) => t.name);
       const only = onTabs[0] as string;
       if (onTabs.length === 1 && this.shownErrors[only] === 'Required.') {
-        return { text: `Set the ${fieldsByPath[only]?.label ?? settingLabel(only)} on the ${names[0]} tab.`, error: true };
+        return {
+          text: $t('Set the {field} on the {tab} tab.', {
+            field: fieldsByPath[only]?.label ?? settingLabel(only), tab: names[0],
+          }),
+          error: true,
+        };
       }
-      const which = names.length === 1 ? `the ${names[0]} tab` : `the ${listNames(names)} tabs`;
-      return { text: `Fix the marked settings on ${which}.`, error: true };
+      const which = names.length === 1 ? $t('the {tab} tab', { tab: names[0] }) : $t('the {tabs} tabs', { tabs: listNames(names) });
+      return { text: $t('Fix the marked settings on {where}.', { where: which }), error: true };
     },
     databaseAdvice(): string {
       const w = this.setupState.wizard;
       if (w?.database_locked) {
-        return 'The deployment sets the database. Fix it in the config file or the environment, then restart DMRHub.';
+        return $t('The deployment sets the database. Fix it in the config file or the environment, then restart DMRHub.');
       }
       if (w?.store_error) {
-        return `The setup wizard cannot keep a database setting here: ${w.store_error}. Set the database in the config file or the environment of the deployment, then restart DMRHub.`;
+        return $t('The setup wizard cannot keep a database setting here: {error}. Set the database in the config file or the environment of the deployment, then restart DMRHub.', { error: w.store_error });
       }
-      return `Fix the settings on the Database tab and save. DMRHub tries them at once and keeps them in ${w?.database_file ?? 'its working directory'}. The other tabs open once DMRHub reaches its database.`;
+      return $t('Fix the settings on the Database tab and save. DMRHub tries them at once and keeps them in {file}. The other tabs open once DMRHub reaches its database.', { file: w?.database_file ?? $t('its working directory') });
     },
     closedText(): { heading: string; advice: string } {
       if (this.closed === 'database') {
         return {
-          heading: 'DMRHub cannot reach its database.',
-          advice: 'A database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub.',
+          heading: $t('DMRHub cannot reach its database.'),
+          advice: $t('A database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub.'),
         };
       }
       return {
-        heading: 'DMRHub needs an admin to fix its settings.',
-        advice: 'DMRHub has an admin, so the setup wizard cannot change the settings. An admin must fix them in the config file, the environment or the flags, then restart DMRHub.',
+        heading: $t('DMRHub needs an admin to fix its settings.'),
+        advice: $t('DMRHub has an admin, so the setup wizard cannot change the settings. An admin must fix them in the config file, the environment or the flags, then restart DMRHub.'),
       };
     },
     applyHeading(): string {
       if (this.failedReplicas.length === 0) {
-        return 'The settings were saved, but some could not be put into effect.';
+        return $t('The settings were saved, but some could not be put into effect.');
       }
       const names = this.failedReplicas.map(replicaName);
-      const who = names.length === 1 ? `replica ${names[0]}` : `replicas ${listNames(names)}`;
-      return `The settings were saved, but ${who} could not put all of them into effect.`;
+      const who = names.length === 1 ? $t('replica {name}', { name: names[0] }) : $t('replicas {names}', { names: listNames(names) });
+      return $t('The settings were saved, but {who} could not put all of them into effect.', { who });
     },
     differText(): string {
       const paths = Object.entries(this.setupState.settings).filter(([, s]) => s.disagree).map(([p]) => settingLabel(p));
       const n = paths.length;
-      return `${n} ${n === 1 ? 'setting differs' : 'settings differ'} between replicas: ${listNames(paths)}.`;
+      return $t('{n} setting differs between replicas: {settings}. | {n} settings differ between replicas: {settings}.', {
+        n, settings: listNames(paths),
+      });
     },
     unansweredText(): string {
-      return `Replica ${listNames(this.unanswered.map(replicaName))} did not report in time.`;
+      return $t('Replica {replica} did not report in time.', { replica: listNames(this.unanswered.map(replicaName)) });
     },
   },
   watch: {
@@ -450,16 +461,16 @@ export default defineComponent({
         const res = await API.post('/setupwizard/database-test', allPayload(this.original, this.edited));
         const data = asRecord(res.data) ?? {};
         if (data.reached === true) {
-          this.tested = { reached: true, text: 'Connected.' };
+          this.tested = { reached: true, text: $t('Connected.') };
         } else {
-          this.tested = { reached: false, text: typeof data.error === 'string' ? data.error : 'DMRHub cannot reach this database.' };
+          this.tested = { reached: false, text: typeof data.error === 'string' ? data.error : $t('DMRHub cannot reach this database.') };
         }
       } catch (error: unknown) {
         const data = asRecord(asRecord(asRecord(error)?.response)?.data);
         if (data?.errors) {
           this.errors = flatErrors(data.errors);
         }
-        this.tested = { reached: false, text: typeof data?.error === 'string' ? data.error : 'The test did not run.' };
+        this.tested = { reached: false, text: typeof data?.error === 'string' ? data.error : $t('The test did not run.') };
       } finally {
         this.testing = false;
       }
@@ -492,7 +503,7 @@ export default defineComponent({
           this.afterDatabase(asRecord(response?.data)?.phase);
           return;
         }
-        this.$toast.add({ severity: 'success', summary: 'Success', detail: $t('The settings were saved'), life: 3000 });
+        this.$toast.add({ severity: 'success', summary: $t('Success'), detail: $t('The settings were saved'), life: 3000 });
         this.$router.push('/setup/user');
       } catch (error: unknown) {
         const res = asRecord(asRecord(error)?.response);
@@ -506,11 +517,11 @@ export default defineComponent({
           this.failedReplicas = [...new Set(failures.map((e) => e.replica ?? ''))].filter((r) => r !== '' && r !== self);
           const selfFailed = failures.some((e) => !e.replica || e.replica === self);
           this.applyOK = self && !selfFailed && this.failedReplicas.length > 0
-            ? `Replica ${replicaName(self)} runs with the new settings.`
+            ? $t('Replica {replica} runs with the new settings.', { replica: replicaName(self) })
             : '';
           this.unanswered = replicas.filter((r) => !r.self && !r.answered).map((r) => r.id);
           await this.load();
-          this.failMsg = 'The settings were saved, but some could not be put into effect.';
+          this.failMsg = $t('The settings were saved, but some could not be put into effect.');
           return;
         }
         this.saveFailed(data);
@@ -523,7 +534,9 @@ export default defineComponent({
         this.errors = flatErrors(data.errors);
         this.showFirstError();
       }
-      this.failMsg = typeof data?.error === 'string' ? `The settings were not saved: ${data.error}` : 'The settings were not saved.';
+      this.failMsg = typeof data?.error === 'string'
+        ? $t('The settings were not saved: {error}', { error: data.error })
+        : $t('The settings were not saved.');
       this.$toast.add({ severity: 'error', summary: $t('Error'), detail: $t('Failed to save the settings'), life: 3000 });
     },
     pollDatabaseFix(misses = 0) {
@@ -568,14 +581,14 @@ export default defineComponent({
     },
     afterDatabase(phase: unknown) {
       if (phase === 'done') {
-        this.$toast.add({ severity: 'success', summary: 'Success', detail: $t('DMRHub reached its database and is starting'), life: 5000 });
+        this.$toast.add({ severity: 'success', summary: $t('Success'), detail: $t('DMRHub reached its database and is starting'), life: 5000 });
         setTimeout(() => {
           window.location.href = '/';
         }, 3000);
         return;
       }
       this.$toast.add({
-        severity: 'success', summary: 'Success', detail: $t('DMRHub reached its database. Check the other settings and save.'), life: 5000,
+        severity: 'success', summary: $t('Success'), detail: $t('DMRHub reached its database. Check the other settings and save.'), life: 5000,
       });
       this.load();
     },

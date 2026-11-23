@@ -17,6 +17,7 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { t } from '@/i18n';
 import type { App } from 'vue';
 import { defineComponent, h } from 'vue';
 
@@ -46,7 +47,7 @@ const runCallback = (callback: ConfirmCallback) => {
 
 const asMessage = (options: ConfirmOptions) => {
   const header = options.header ? `${options.header}\n\n` : '';
-  const message = options.message || 'Are you sure?';
+  const message = options.message || t('Are you sure?');
   return `${header}${message}`;
 };
 

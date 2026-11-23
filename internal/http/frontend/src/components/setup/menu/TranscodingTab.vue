@@ -38,7 +38,7 @@
         >
           <ShadInput
             :disabled="locked"
-            :aria-label="`Address of server ${i + 1}`"
+            :aria-label="$t('Address of server {n}', { n: i + 1 })"
             placeholder="ambeserver.example.org:2460"
             :model-value="row.address"
             :aria-invalid="invalidAddress(row) ? true : undefined"

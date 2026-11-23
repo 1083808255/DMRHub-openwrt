@@ -31,8 +31,8 @@
       :columns="columns"
       :data="talkgroups"
       :loading="loading"
-      :loading-text="'Loading...'"
-      :empty-text="'No talkgroups found'"
+      :loading-text="$t('Loading...')"
+      :empty-text="$t('No talkgroups found')"
       :manual-pagination="true"
       :page-index="page - 1"
       :page-size="rows"
@@ -222,17 +222,17 @@ export default {
     deleteTalkgroup(talkgroup: TalkgroupRow) {
       // First, show a confirmation dialog
       this.$confirm.require({
-        message: 'Are you sure you want to delete this talkgroup?',
-        header: 'Delete Talkgroup',
+        message: t('Are you sure you want to delete this talkgroup?'),
+        header: t('Delete Talkgroup'),
         icon: 'pi pi-exclamation-triangle',
         acceptClass: 'p-button-danger',
         accept: () => {
           API.delete('/talkgroups/' + talkgroup.id)
             .then(() => {
               this.$toast.add({
-                summary: 'Confirmed',
+                summary: t('Confirmed'),
                 severity: 'success',
-                detail: `Talkgroup ${talkgroup.id} deleted`,
+                detail: t('Talkgroup {id} deleted', { id: talkgroup.id }),
                 life: 3000,
               });
               // Immediately remove the deleted talkgroup from the local array
@@ -249,7 +249,7 @@ export default {
               this.$toast.add({
                 severity: 'error',
                 summary: t('Error'),
-                detail: `Error deleting talkgroup ${talkgroup.id}`,
+                detail: t('Error deleting talkgroup {id}', { id: talkgroup.id }),
                 life: 3000,
               });
             });
@@ -267,7 +267,7 @@ export default {
         .then(() => {
           this.$toast.add({
             severity: 'success',
-            summary: 'Success',
+            summary: t('Success'),
             detail: t('Talkgroup updated'),
             life: 3000,
           });
@@ -296,8 +296,7 @@ export default {
                       severity: 'error',
                       summary: t('Error'),
                       detail:
-                        'Failed to update talkgroup admins: ' +
-                        err.response.data.error,
+                        t('Failed to update talkgroup admins: {error}', { error: err.response.data.error }),
                       life: 3000,
                     });
                     return;
@@ -322,8 +321,7 @@ export default {
                   severity: 'error',
                   summary: t('Error'),
                   detail:
-                    'Failed to update talkgroup admins: ' +
-                    err.response.data.error,
+                    t('Failed to update talkgroup admins: {error}', { error: err.response.data.error }),
                   life: 3000,
                 });
                 return;
@@ -343,7 +341,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: 'Failed to update talkgroup: ' + err.response.data.error,
+              detail: t('Failed to update talkgroup: {error}', { error: err.response.data.error }),
               life: 3000,
             });
             return;
@@ -378,14 +376,14 @@ export default {
               }, label);
             };
             if (!talkgroup.editable) {
-              actions.push(actionButton('Edit', () => this.startEdit(talkgroup)));
+              actions.push(actionButton(t('Edit'), () => this.startEdit(talkgroup)));
             }
             if (talkgroup.editable) {
-              actions.push(actionButton('Save', () => this.saveTalkgroup(talkgroup)));
-              actions.push(actionButton('Cancel', () => this.cancelEdit(talkgroup)));
+              actions.push(actionButton(t('Save'), () => this.saveTalkgroup(talkgroup)));
+              actions.push(actionButton(t('Cancel'), () => this.cancelEdit(talkgroup)));
             }
             if (this.admin && !talkgroup.editable) {
-              actions.push(actionButton('Delete', () => this.deleteTalkgroup(talkgroup)));
+              actions.push(actionButton(t('Delete'), () => this.deleteTalkgroup(talkgroup)));
             }
             return h('div', { class: 'flex gap-2' }, actions);
           },
@@ -395,7 +393,7 @@ export default {
       columns.push(
         {
           accessorKey: 'id',
-          header: 'Channel',
+          header: t('Channel'),
           cell: ({ row }: { row: { original: TalkgroupRow } }) =>
             h(
               RouterLink,
@@ -405,7 +403,7 @@ export default {
         },
         {
           accessorKey: 'name',
-          header: 'Name',
+          header: t('Name'),
           cell: ({ row }: { row: { original: TalkgroupRow } }) => {
             const talkgroup = row.original;
             if (!talkgroup.editable) {
@@ -421,7 +419,7 @@ export default {
         },
         {
           accessorKey: 'description',
-          header: 'Description',
+          header: t('Description'),
           cell: ({ row }: { row: { original: TalkgroupRow } }) => {
             const talkgroup = row.original;
             if (!talkgroup.editable) {
@@ -440,12 +438,12 @@ export default {
       if (!this.owner) {
         columns.push({
           accessorKey: 'admins',
-          header: 'Admins',
+          header: t('Admins'),
           cell: ({ row }: { row: { original: TalkgroupRow } }) => {
             const talkgroup = row.original;
             if (!talkgroup.editable) {
               if (talkgroup.admins.length === 0) {
-                return 'None';
+                return t('None');
               }
               return h('div', { class: 'flex flex-wrap gap-2' }, talkgroup.admins.map((adminUser) => h(User, { user: adminUser, key: adminUser.id })));
             }
@@ -480,12 +478,12 @@ export default {
       columns.push(
         {
           accessorKey: 'ncos',
-          header: 'Net Control Operators',
+          header: t('Net Control Operators'),
           cell: ({ row }: { row: { original: TalkgroupRow } }) => {
             const talkgroup = row.original;
             if (!talkgroup.editable) {
               if (!talkgroup.ncos || talkgroup.ncos.length === 0) {
-                return 'None';
+                return t('None');
               }
               return h('div', { class: 'flex flex-wrap gap-2' }, talkgroup.ncos.map((nco) => h(User, { user: nco, key: nco.id })));
             }
@@ -517,7 +515,7 @@ export default {
         },
         {
           accessorKey: 'created_at',
-          header: 'Created',
+          header: t('Created'),
           cell: ({ row }: { row: { original: TalkgroupRow } }) => {
             const talkgroup = row.original;
             return h(RelativeTimestamp, { time: talkgroup.created_at });

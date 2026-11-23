@@ -86,7 +86,7 @@
         class="flex flex-col gap-2 rounded-lg border border-primary bg-primary/5 px-4 py-3"
         data-test="token-secret"
       >
-        <b class="text-sm font-semibold">{{ shown.rotated ? `Copy the new token of ${shown.name} now` : 'Copy the token now' }}</b>
+        <b class="text-sm font-semibold">{{ shown.rotated ? $t('Copy the new token of {name} now', { name: shown.name }) : $t('Copy the token now') }}</b>
         <div class="flex flex-wrap gap-2">
           <ShadInput
             :model-value="shown.secret"
@@ -98,7 +98,7 @@
           <CopyButton :text="shown.secret" class="h-9" />
         </div>
         <span class="text-xs text-muted-foreground">
-          {{ shown.rotated ? 'The old token stopped working. DMRHub shows the new one only once.' : 'DMRHub shows it only once.' }}
+          {{ shown.rotated ? $t('The old token stopped working. DMRHub shows the new one only once.') : $t('DMRHub shows it only once.') }}
         </span>
       </div>
 
@@ -194,10 +194,10 @@ const day = (value: string) => format(new Date(value), 'MMM d, yyyy');
 const when = (value: string) => format(new Date(value), 'MMM d, HH:mm');
 const expiryText = (d: number) => {
   if (d === 0) {
-    return 'Never';
+    return t('Never');
   }
   if (d === 365) {
-    return 'In 1 year';
+    return t('In 1 year');
   }
   return `In ${d} days`;
 };
@@ -236,12 +236,12 @@ const make = async () => {
   error.value = '';
   const full = access.value === 'full';
   if (name.value.trim() === '') {
-    error.value = 'Enter a name.';
+    error.value = t('Enter a name.');
     return;
   }
   const chosen = scopes.value.map((s) => s.name).filter((n) => picked.value.includes(n));
   if (!full && chosen.length === 0) {
-    error.value = 'Pick at least one thing the token can use, or full account access.';
+    error.value = t('Pick at least one thing the token can use, or full account access.');
     return;
   }
   busy.value = true;

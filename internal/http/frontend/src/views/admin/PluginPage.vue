@@ -24,9 +24,9 @@
   <div v-else class="flex flex-col gap-6">
     <div class="flex flex-col gap-1.5">
       <RouterLink to="/admin/plugins" class="text-sm text-primary underline-offset-4 hover:underline">{{ $t("Plugins") }}</RouterLink>
-      <h1 class="text-2xl font-semibold">{{ isNew ? 'Add a plugin' : saved?.name }}</h1>
+      <h1 class="text-2xl font-semibold">{{ isNew ? $t('Add a plugin') : saved?.name }}</h1>
       <p v-if="saved" class="text-sm text-muted-foreground" data-test="plugin-subtitle">
-        {{ status(saved) }} · {{ saved.calls_today }} {{ saved.calls_today === 1 ? 'call' : 'calls' }} today
+        {{ status(saved) }} · {{ saved.calls_today === 1 ? $t('1 call today') : $t('{n} calls today', { n: saved.calls_today }) }}
       </p>
     </div>
 
@@ -45,7 +45,7 @@
               <ShadInput id="plugin-name" v-model="form.name" maxlength="64" />
             </div>
             <fieldset class="flex flex-col gap-2">
-              <legend class="mb-2 text-sm font-medium">IDs</legend>
+              <legend class="mb-2 text-sm font-medium">{{ $t("IDs") }}</legend>
               <div v-for="(r, i) in form.ranges" :key="i" class="flex flex-wrap items-center gap-2" :data-test="`range-${i}`">
                 <label :for="`from-${i}`" class="text-sm text-muted-foreground">{{ $t("From") }}</label>
                 <ShadInput :id="`from-${i}`" v-model="r.first" inputmode="numeric" class="w-32" />
@@ -85,7 +85,7 @@
           <CardContent class="flex flex-col gap-4">
             <dl class="grid grid-cols-[140px_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-sm" data-test="connection">
               <dt class="text-muted-foreground">{{ $t("Address") }}</dt>
-              <dd class="font-mono">{{ connection?.address || 'Set the URL of the hub in Setup' }}</dd>
+              <dd class="font-mono">{{ connection?.address || $t('Set the URL of the hub in Setup') }}</dd>
               <template v-if="connection?.own_certificate && connection.fingerprint">
                 <dt class="text-muted-foreground">{{ $t("Certificate") }}</dt>
                 <dd class="break-all font-mono">SHA-256 {{ connection.fingerprint }}</dd>
@@ -124,11 +124,11 @@
         <div class="flex gap-2">
           <label for="plugin-token" class="sr-only">{{ $t("Token") }}</label>
           <ShadInput id="plugin-token" ref="tokenInput" :model-value="token" readonly class="min-w-0 grow bg-muted/40 font-mono" />
-          <ShadButton type="button" variant="outline" data-test="copy-token" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</ShadButton>
+          <ShadButton type="button" variant="outline" data-test="copy-token" @click="copy">{{ copied ? $t('Copied') : $t('Copy') }}</ShadButton>
         </div>
         <dl class="grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
           <dt class="text-muted-foreground">{{ $t("Address") }}</dt>
-          <dd class="font-mono">{{ connection?.address || 'Set the URL of the hub in Setup' }}</dd>
+          <dd class="font-mono">{{ connection?.address || $t('Set the URL of the hub in Setup') }}</dd>
           <template v-if="connection?.own_certificate && connection.fingerprint">
             <dt class="text-muted-foreground">{{ $t("Certificate") }}</dt>
             <dd class="break-all font-mono">SHA-256 {{ connection.fingerprint }}</dd>
@@ -220,7 +220,7 @@ const save = async () => {
   failed.value = false;
   const rs = ranges();
   if (rs === null) {
-    fail('IDs are whole numbers.');
+    fail(t('IDs are whole numbers.'));
     return;
   }
   busy.value = true;
@@ -235,7 +235,7 @@ const save = async () => {
       token.value = made.token;
     } else if (saved.value) {
       fill(await updatePlugin(saved.value.id, { name: form.name.trim(), enabled: form.enabled, ranges: rs }));
-      message.value = 'Saved.';
+      message.value = t('Saved.');
     }
   } catch (err) {
     fail(errorText(err, t('Could not save. Try again later.')));
@@ -262,7 +262,7 @@ const rotate = async () => {
 };
 
 const remove = async () => {
-  if (!saved.value || !window.confirm(`Delete ${saved.value.name}? Its IDs are free again.`)) {
+  if (!saved.value || !window.confirm(t('Delete {name}? Its IDs are free again.', { name: saved.value.name }))) {
     return;
   }
   busy.value = true;

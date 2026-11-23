@@ -27,15 +27,15 @@
     <CodeBlock :title="$t('Hosts tab')" :segments="hostLine" />
     <h3>{{ $t("2. Set the DMR fields") }}</h3>
     <StepTable
-      :head="['Tab', 'Field', 'Value']"
+      :head="[$t('Tab'), $t('Field'), $t('Value')]"
       :rows="[
-        ['Settings', 'Callsign', val(values.callsign)],
-        ['Settings', 'DMRID', val(values.ownerId)],
-        ['Settings', 'ESSID', val(values.essid)],
-        ['Settings', 'DMR+ Opts', val('TS1=91;TS2=3100;')],
-        ['Main', 'Mode', 'DMR'],
-        ['Main', 'Host', val('DMRHub')],
-        ['Main', 'TGID', val('3100')],
+        [$t('Settings'), $t('Callsign'), val(values.callsign)],
+        [$t('Settings'), $t('DMRID'), val(values.ownerId)],
+        [$t('Settings'), $t('ESSID'), val(values.essid)],
+        [$t('Settings'), $t('DMR+ Opts'), val('TS1=91;TS2=3100;')],
+        [$t('Main'), $t('Mode'), $t('DMR')],
+        [$t('Main'), $t('Host'), val('DMRHub')],
+        [$t('Main'), $t('TGID'), val('3100')],
       ]"
     />
     <h3>{{ $t("3. Connect") }}</h3>

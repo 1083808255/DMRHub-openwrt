@@ -215,7 +215,7 @@ const cancelSetup = () => {
 
 const validCode = () => {
   if (!/^\d{6}$/.test(code.value.replace(/\s/g, ''))) {
-    error.value = 'Enter the 6-digit code from your app.';
+    error.value = t('Enter the 6-digit code from your app.');
     return false;
   }
   return true;
@@ -231,7 +231,7 @@ const turnOn = async () => {
     show(await turnOnAirCodeOn(code.value.replace(/\s/g, '')));
     setup.value = null;
     code.value = '';
-    note.value = 'The on-air code is on.';
+    note.value = t('The on-air code is on.');
   } catch (err) {
     error.value = errorText(err, t('Could not turn the on-air code on.'));
   } finally {
@@ -253,7 +253,7 @@ const turnOff = async () => {
   try {
     show(await turnOnAirCodeOff(code.value.replace(/\s/g, '')));
     code.value = '';
-    note.value = 'The on-air code is off.';
+    note.value = t('The on-air code is off.');
   } catch (err) {
     error.value = errorText(err, t('Could not turn the on-air code off.'));
   } finally {

@@ -118,7 +118,7 @@ const onSwitch = async (value: boolean) => {
       await loadHeld();
     }
   } catch (err) {
-    error.value = errorText(err, value ? 'Could not turn on store and forward.' : 'Could not turn off store and forward.');
+    error.value = errorText(err, value ? t('Could not turn on store and forward.') : t('Could not turn off store and forward.'));
   } finally {
     saving.value = false;
   }

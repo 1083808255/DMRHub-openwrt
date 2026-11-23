@@ -327,7 +327,7 @@ function dataLines(row: CallRow): string[] {
     let sub = `SAP ${sap} ${sapName(sap)}`.trim();
     const extra = DATA_SUBS[row.sub_kind || ''];
     if (extra) {
-      sub += ` · ${extra}`;
+      sub += ` · ${t(extra)}`;
     }
     lines.push(sub);
   }
@@ -347,7 +347,8 @@ function csbkLines(row: CallRow): string[] {
   if (sub === 'preamble') {
     lines.push(i18n.global.t('{count} burst | {count} bursts', { count: row.bursts ?? 1 }));
   } else if (row.fid === MOTOROLA_FID) {
-    lines.push(`Motorola FID ${hex(MOTOROLA_FID)}${row.response === 'ack' ? ', ACK' : ''}`);
+    const ack = row.response === 'ack' ? t(', ACK') : '';
+    lines.push(t('Motorola FID {fid}', { fid: hex(MOTOROLA_FID) }) + ack);
   }
   return lines.filter((l) => l !== '');
 }

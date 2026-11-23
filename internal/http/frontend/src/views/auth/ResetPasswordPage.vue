@@ -61,7 +61,7 @@ import { errorText } from '@/services/settings';
 
 useHead({ title: t('Choose a new password') });
 
-const badLink = 'This link does not work. It is older than 1 hour or was used already. Ask for a new one.';
+const badLink = () => t('This link does not work. It is older than 1 hour or was used already. Ask for a new one.');
 
 const state = ref<'loading' | 'ready' | 'bad'>('loading');
 const token = ref('');
@@ -76,7 +76,7 @@ onMounted(async () => {
   token.value = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
   window.history.replaceState(window.history.state, '', window.location.pathname);
   if (!token.value) {
-    error.value = badLink;
+    error.value = badLink();
     state.value = 'bad';
     return;
   }
@@ -84,7 +84,7 @@ onMounted(async () => {
     callsign.value = await checkResetLink(token.value);
     state.value = 'ready';
   } catch (err) {
-    error.value = errorText(err, badLink);
+    error.value = errorText(err, badLink());
     state.value = 'bad';
   }
 });
@@ -92,11 +92,11 @@ onMounted(async () => {
 const submit = async () => {
   error.value = '';
   if (!next.value) {
-    error.value = 'Enter a new password.';
+    error.value = t('Enter a new password.');
     return;
   }
   if (next.value !== confirm.value) {
-    error.value = 'The new passwords do not match.';
+    error.value = t('The new passwords do not match.');
     return;
   }
   saving.value = true;

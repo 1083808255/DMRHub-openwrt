@@ -33,7 +33,7 @@
     >
       <option v-if="value === '' && !typing" value="" disabled>{{ $t("Choose a port") }}</option>
       <template v-if="grouped">
-        <optgroup v-for="g in groups" :key="g.replica" :label="`Replica ${replicaName(g.replica)}`">
+        <optgroup v-for="g in groups" :key="g.replica" :label="`${$t('Replica')} ${replicaName(g.replica)}`">
           <option v-for="p in g.ports" :key="p.path" :value="key(g.replica, p.path)">{{ portLabel(p) }}</option>
         </optgroup>
       </template>
@@ -46,7 +46,7 @@
       <ShadInput
         :id="ports.length > 0 ? `${id}-path` : id"
         :class="boxClass"
-        :aria-label="ports.length > 0 ? 'Path of the serial port' : undefined"
+        :aria-label="ports.length > 0 ? $t('Path of the serial port') : undefined"
         :placeholder="placeholder"
         :disabled="disabled"
         :model-value="value"

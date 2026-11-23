@@ -145,11 +145,12 @@ const fix = async () => {
   busy.value = true;
   try {
     const res = await fixRadioIDDrift(d.radio_id, d.can_notify && notify.value);
-    message.value = `${d.username} is now ${res.callsign}.` + (res.notified ? ' Email sent.' : '');
+    message.value = t('{user} is now {callsign}.', { user: d.username, callsign: res.callsign }) +
+      (res.notified ? ' ' + t('Email sent.') : '');
     fixing.value = null;
     await load(page.value);
   } catch (err) {
-    error.value = errorText(err, `Could not fix ${d.radio_id}.`);
+    error.value = errorText(err, t('Could not fix {radioID}.', { radioID: d.radio_id }));
     fixing.value = null;
   } finally {
     busy.value = false;

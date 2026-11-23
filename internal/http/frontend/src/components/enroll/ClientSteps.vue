@@ -36,13 +36,13 @@
       </p>
       <h3>{{ $t("3. Set the DMR fields") }}</h3>
       <StepTable
-        :head="['Section', 'Field', 'Value']"
+        :head="[$t('Section'), $t('Field'), $t('Value')]"
         :rows="[
-          ['General Configuration', 'Node Callsign', val(values.callsign)],
-          ['General Configuration', 'CCS7/DMR ID', val(values.ownerId)],
-          ['DMR Configuration', 'DMR Master', val('HB_DMRHub')],
-          ['DMR Configuration', 'DMR ESSID', val(values.essid)],
-          ['DMR Configuration', 'DMR Colour Code', 'The color code of your radio'],
+          [$t('General Configuration'), $t('Node Callsign'), val(values.callsign)],
+          [$t('General Configuration'), $t('CCS7/DMR ID'), val(values.ownerId)],
+          [$t('DMR Configuration'), $t('DMR Master'), val('HB_DMRHub')],
+          [$t('DMR Configuration'), $t('DMR ESSID'), val(values.essid)],
+          [$t('DMR Configuration'), $t('DMR Colour Code'), $t('The color code of your radio')],
         ]"
       />
       <p>{{ $t("Click") }} <b>{{ $t("Apply Changes") }}</b>.</p>
@@ -69,27 +69,27 @@
       <h3>{{ $t("2. Add DMRHub as the custom network") }}</h3>
       <p>{{ $t("In") }} <b>{{ $t("DMR Configuration") }}</b>{{ $t(", go to") }} <b>{{ $t("Custom DMR Network Settings") }}</b>:</p>
       <StepTable
-        :head="['Field', 'Value']"
+        :head="[$t('Field'), $t('Value')]"
         :rows="[
-          ['Custom DMR Network Enable', 'On'],
-          ['Server Name', val('DMRHub')],
-          ['Server Address', val(values.host)],
-          ['Port', val(values.port)],
-          ['ESSID', val(values.essid)],
-          ['Password', val(values.password)],
-          ['Network Options', val('TS2=3100;')],
-          ['TG List File', 'Leave empty'],
-          ['Automatic Rewrite Rules', 'On'],
+          [$t('Custom DMR Network Enable'), $t('On')],
+          [$t('Server Name'), val('DMRHub')],
+          [$t('Server Address'), val(values.host)],
+          [$t('Port'), val(values.port)],
+          [$t('ESSID'), val(values.essid)],
+          [$t('Password'), val(values.password)],
+          [$t('Network Options'), val('TS2=3100;')],
+          [$t('TG List File'), $t('Leave empty')],
+          [$t('Automatic Rewrite Rules'), $t('On')],
         ]"
       />
       <p>{{ $t("Click") }} <b>{{ $t("Apply Changes") }}</b>.</p>
       <h3>{{ $t("3. Pick how you dial DMRHub talkgroups") }}</h3>
       <p><b>{{ $t("Primary DMR Network") }}</b>{{ $t(", next to") }} <b>{{ $t("DMR Mode") }}</b>{{ $t(", decides the prefix:") }}</p>
       <StepTable
-        :head="['Primary DMR Network', 'WPSD shows', 'To reach TG 3100', 'To reach the parrot']"
+        :head="[$t('Primary DMR Network'), $t('WPSD shows'), $t('To reach TG 3100'), $t('To reach the parrot')]"
         :rows="[
-          ['Custom DMR Network', 'Primary Network - No talkgroup prefix', val('3100'), val('9990')],
-          ['Any other network', 'Uses &quot;9&quot; talkgroup prefix', val('9003100'), val('9009990')],
+          [$t('Custom DMR Network'), $t('Primary Network - No talkgroup prefix'), val('3100'), val('9990')],
+          [$t('Any other network'), $t('Uses &quot;9&quot; talkgroup prefix'), val('9003100'), val('9009990')],
         ]"
       />
     </template>
@@ -136,13 +136,13 @@
     <template v-else-if="tab === 'other'">
       <p>{{ $t("Any program that speaks the MMDVM network protocol works. Give it these values:") }}</p>
       <StepTable
-        :head="['Setting', 'Value']"
+        :head="[$t('Setting'), $t('Value')]"
         :rows="[
-          ['Server address', val(values.host)],
-          ['Port', val(values.port)],
-          ['ID', val(values.id)],
-          ['Password', val(values.password)],
-          ['Options text', val('TS1=91;TS2=3100;')],
+          [$t('Server address'), val(values.host)],
+          [$t('Port'), val(values.port)],
+          [$t('ID'), val(values.id)],
+          [$t('Password'), val(values.password)],
+          [$t('Options text'), val('TS1=91;TS2=3100;')],
         ]"
       />
     </template>
@@ -153,13 +153,13 @@
         {{ $t("In the CPS of the repeater, open") }} <b>{{ $t("Network") }}</b> {{ $t("and set up an IPSC link with these values. Then write the codeplug to the repeater.") }}
       </p>
       <StepTable
-        :head="['Field', 'Value']"
+        :head="[$t('Field'), $t('Value')]"
         :rows="[
-          ['Radio ID', val(values.id)],
-          ['Link Type', 'Peer'],
-          ['Master IP', val(values.host)],
-          ['Master UDP Port', val(values.port)],
-          ['Authentication Key', val(values.password)],
+          [$t('Radio ID'), val(values.id)],
+          [$t('Link Type'), $t('Peer')],
+          [$t('Master IP'), val(values.host)],
+          [$t('Master UDP Port'), val(values.port)],
+          [$t('Authentication Key'), val(values.password)],
         ]"
       />
     </template>
@@ -167,12 +167,12 @@
     <template v-else-if="tab === 'ipsc-other'">
       <p>{{ $t("Any program that speaks Motorola IPSC works. Give it these values:") }}</p>
       <StepTable
-        :head="['Setting', 'Value']"
+        :head="[$t('Setting'), $t('Value')]"
         :rows="[
-          ['Server address', val(values.host)],
-          ['Port', val(values.port)],
-          ['ID', val(values.id)],
-          ['Auth key', val(values.password)],
+          [$t('Server address'), val(values.host)],
+          [$t('Port'), val(values.port)],
+          [$t('ID'), val(values.id)],
+          [$t('Auth key'), val(values.password)],
         ]"
       />
     </template>

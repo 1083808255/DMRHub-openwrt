@@ -23,7 +23,7 @@
   <div data-test="modem-test">
     <div>
       <ShadButton type="button" variant="outline" size="sm" :disabled="running" data-test="modem-test-run" @click="run">
-        {{ running ? 'Testing the modem' : 'Test the modem' }}
+        {{ running ? $t('Testing the modem') : $t('Test the modem') }}
       </ShadButton>
     </div>
     <div
@@ -51,6 +51,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n';
 import { ref } from 'vue';
 import { Button as ShadButton } from '@/components/ui/button';
 import { portReplica, testView, type ModemTest, type ResultView } from '@/lib/modem';
@@ -94,11 +95,11 @@ const run = async () => {
     const res = asRecord(asRecord(error)?.response);
     const data = asRecord(res?.data);
     if (res?.status === 400 && data?.errors) {
-      view.value = { tone: 'bad', title: 'Fix these settings first', rows: [], text: errorList(data.errors) };
+      view.value = { tone: 'bad', title: t('Fix these settings first'), rows: [], text: errorList(data.errors) };
     } else if (res?.status === 409) {
-      view.value = { tone: 'bad', title: 'Another test runs now', rows: [], text: 'Try again in a few seconds.' };
+      view.value = { tone: 'bad', title: t('Another test runs now'), rows: [], text: t('Try again in a few seconds.') };
     } else {
-      view.value = { tone: 'bad', title: 'The test did not run', rows: [], text: typeof data?.error === 'string' ? data.error : undefined };
+      view.value = { tone: 'bad', title: t('The test did not run'), rows: [], text: typeof data?.error === 'string' ? data.error : undefined };
     }
   } finally {
     running.value = false;

@@ -28,7 +28,7 @@
     >
       <template v-for="g in groups" :key="g.name">
         <h4 class="mx-2.5 mt-2.5 mb-1 hidden text-[11px] font-bold tracking-[0.06em] text-muted-foreground uppercase first:mt-0.5 md:block">
-          {{ g.name }}
+          {{ $t(g.name) }}
         </h4>
         <RouterLink
           v-for="t in g.tabs"
@@ -111,6 +111,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n';
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import SetupCard from '@/components/setup/menu/SetupCard.vue';
@@ -142,8 +143,8 @@ const groups = computed(() =>
 const startOnly = (t: TabDef): boolean => tabStartOnly(t, props.state) && tabReadOnly(t, props.state);
 
 const startNote = computed(() => (props.wizard
-  ? 'DMRHub reads these at start, and the setup wizard changes them only while DMRHub cannot reach its database. Change them in the config file or the environment, then restart DMRHub.'
-  : 'DMRHub reads these at start. Change them in the config file or the environment, then restart DMRHub.'));
+  ? t('DMRHub reads these at start, and the setup wizard changes them only while DMRHub cannot reach its database. Change them in the config file or the environment, then restart DMRHub.')
+  : t('DMRHub reads these at start. Change them in the config file or the environment, then restart DMRHub.')));
 
 const forward = (path: string, value: unknown) => emit('set', path, value);
 </script>

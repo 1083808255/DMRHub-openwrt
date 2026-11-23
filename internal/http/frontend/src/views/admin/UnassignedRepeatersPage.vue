@@ -173,9 +173,9 @@ const assign = async () => {
   busy.value = true;
   try {
     await assignRepeaterOwner(r.id, owner.id);
-    message.value = `${owner.callsign} now owns repeater ${r.id}.`;
+    message.value = t('{callsign} now owns repeater {id}.', { callsign: owner.callsign, id: r.id });
   } catch (err) {
-    error.value = errorText(err, `Could not assign the owner of ${r.id}.`);
+    error.value = errorText(err, t('Could not assign the owner of {id}.', { id: r.id }));
   } finally {
     assigning.value = null;
     busy.value = false;

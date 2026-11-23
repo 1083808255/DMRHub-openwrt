@@ -31,8 +31,8 @@
       :columns="columns"
       :data="peers"
       :loading="loading"
-      :loading-text="'Loading...'"
-      :empty-text="'No peers found'"
+      :loading-text="$t('Loading...')"
+      :empty-text="$t('No peers found')"
       :manual-pagination="true"
       :page-index="page - 1"
       :page-size="rows"
@@ -120,7 +120,7 @@ export default {
       return [
         {
           accessorKey: 'id',
-          header: 'Peer ID',
+          header: t('Peer ID'),
           cell: ({ row }: { row: { original: PeerRow } }) => h(RouterLink, {
             to: `/admin/peers/${row.original.id}`,
             class: 'text-primary underline',
@@ -128,15 +128,15 @@ export default {
         },
         {
           accessorKey: 'last_ping_time',
-          header: 'Last Ping',
+          header: t('Last Ping'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
-            return this.hasTimestamp(peer.last_ping_time) ? this.relativeTime(peer.last_ping_time) : 'Never';
+            return this.hasTimestamp(peer.last_ping_time) ? this.relativeTime(peer.last_ping_time) : t('Never');
           },
         },
         {
           accessorKey: 'ingress',
-          header: 'Ingress',
+          header: t('Ingress'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
             return h('input', {
@@ -149,7 +149,7 @@ export default {
         },
         {
           accessorKey: 'egress',
-          header: 'Egress',
+          header: t('Egress'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
             return h('input', {
@@ -162,13 +162,13 @@ export default {
         },
         {
           accessorKey: 'enhanced',
-          header: 'Enhanced',
+          header: t('Enhanced'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
             return h('input', {
               id: 'enhanced',
               type: 'checkbox',
-              title: 'FreeDMR enhanced OpenBridge',
+              title: t('FreeDMR enhanced OpenBridge'),
               checked: peer.enhanced,
               disabled: !this.admin,
               onChange: (e: Event) => this.setEnhanced(peer, (e.target as HTMLInputElement).checked),
@@ -177,14 +177,14 @@ export default {
         },
         {
           accessorKey: 'codec2',
-          header: 'Codec2',
+          header: t('Codec2'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
             return h('input', {
               id: 'codec2',
               type: 'checkbox',
-              title: 'This peer carries Codec2',
-              'aria-label': 'This peer carries Codec2',
+              title: t('This peer carries Codec2'),
+              'aria-label': t('This peer carries Codec2'),
               checked: peer.codec2,
               disabled: !this.admin,
               onChange: (e: Event) => this.setCodec2(peer, e.target as HTMLInputElement),
@@ -193,7 +193,7 @@ export default {
         },
         {
           accessorKey: 'created_at',
-          header: 'Created',
+          header: t('Created'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
             return h('span', { title: this.absoluteTime(peer.created_at) }, this.relativeTime(peer.created_at));
@@ -201,7 +201,7 @@ export default {
         },
         {
           accessorKey: 'actions',
-          header: 'Actions',
+          header: t('Actions'),
           cell: ({ row }: { row: { original: PeerRow } }) => {
             const peer = row.original;
             if (peer.editable) {
@@ -210,7 +210,7 @@ export default {
             return h('button', {
               class: buttonVariants({ variant: 'outline', size: 'sm' }),
               onClick: () => this.deletePeer(peer),
-            }, 'Delete');
+            }, t('Delete'));
           },
         },
       ] as DataTableColumn<PeerRow, unknown>[];
@@ -314,8 +314,8 @@ export default {
             summary: t('Saved'),
             severity: 'success',
             detail: enhanced ?
-              `Peer ${peer.id} now uses enhanced OpenBridge` :
-              `Peer ${peer.id} now uses OpenBridge version 1`,
+              t('Peer {id} now uses enhanced OpenBridge', { id: peer.id }) :
+              t('Peer {id} now uses OpenBridge version 1', { id: peer.id }),
             life: 3000,
           });
         })
@@ -325,7 +325,7 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: `Error saving peer ${peer.id}`,
+            detail: t('Error saving peer {id}', { id: peer.id }),
             life: 3000,
           });
         });
@@ -339,8 +339,8 @@ export default {
             summary: t('Saved'),
             severity: 'success',
             detail: codec2 ?
-              'The peer now gets calls in their own codec.' :
-              'The peer now gets every call as AMBE.',
+              t('The peer now gets calls in their own codec.') :
+              t('The peer now gets every call as AMBE.'),
             life: 3000,
           });
         })
@@ -351,7 +351,7 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: `Error saving peer ${peer.id}`,
+            detail: t('Error saving peer {id}', { id: peer.id }),
             life: 3000,
           });
         });
@@ -359,18 +359,18 @@ export default {
     deletePeer(peer: Record<string, unknown>) {
       // First, show a confirmation dialog
       this.$confirm.require({
-        message: 'Are you sure you want to delete this peer?' +
-          (this.admin ? '':' Only admins may create them.'),
-        header: 'Delete Peer',
+        message: t('Are you sure you want to delete this peer?') +
+          (this.admin ? '': ' ' + t('Only admins may create them.')),
+        header: t('Delete Peer'),
         icon: 'pi pi-exclamation-triangle',
         acceptClass: 'p-button-danger',
         accept: () => {
           API.delete('/peers/' + peer.id)
             .then(() => {
               this.$toast.add({
-                summary: 'Confirmed',
+                summary: t('Confirmed'),
                 severity: 'success',
-                detail: `Peer ${peer.id} deleted`,
+                detail: t('Peer {id} deleted', { id: peer.id }),
                 life: 3000,
               });
               // Immediately remove the deleted peer from the local array
@@ -386,7 +386,7 @@ export default {
               this.$toast.add({
                 severity: 'error',
                 summary: t('Error'),
-                detail: `Error deleting peer ${peer.id}`,
+                detail: t('Error deleting peer {id}', { id: peer.id }),
                 life: 3000,
               });
             });

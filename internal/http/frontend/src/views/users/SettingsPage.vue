@@ -50,7 +50,7 @@
             <div class="flex flex-col gap-1">
               <span id="sms-storage-label" class="font-medium">{{ $t("SMS Storage") }}</span>
               <p class="text-sm" :class="smsStorage ? '' : 'text-muted-foreground'" data-test="sms-status">
-                {{ smsStorage ? 'On.' : 'Off.' }}
+                {{ smsStorage ? $t('On.') : $t('Off.') }}
               </p>
             </div>
             <Switch
@@ -79,7 +79,7 @@
           <p v-if="justEnabled" class="text-sm text-green-600 dark:text-green-500">{{ $t("SMS Storage is on.") }}</p>
           <p v-if="smsError" class="text-sm text-destructive">{{ smsError }}</p>
           <p class="max-w-[70ch] border-l-[3px] border-border py-1 pl-3.5 text-sm" data-test="sms-privacy">
-            {{ privacyText }}
+            {{ privacyText() }}
           </p>
         </CardContent>
       </Card>
@@ -209,9 +209,8 @@ import { useUserStore } from '@/store';
 
 useHead({ title: t('Settings') });
 
-const privacyText =
-  'When SMS Storage is on, the text messages sent to and from the radio IDs that you own appear on your ' +
-  'Messages page, up to the 250 newest in each box.';
+const privacyText = () =>
+  t('When SMS Storage is on, the text messages sent to and from the radio IDs that you own appear on your Messages page, up to the 250 newest in each box.');
 
 const state = ref<'loading' | 'anon' | 'ready' | 'error'>('loading');
 const userID = ref(0);
@@ -308,12 +307,12 @@ const add = async () => {
   idOK.value = '';
   const value = newID.value.trim();
   if (!/^\d{7}$/.test(value)) {
-    idError.value = 'Enter a 7-digit DMR ID. Hotspot and repeater IDs go on the Repeaters page.';
+    idError.value = t('Enter a 7-digit DMR ID. Hotspot and repeater IDs go on the Repeaters page.');
     return;
   }
   const id = Number(value);
   if (radioIDs.value.some((rid) => rid.id === id)) {
-    idError.value = `${id} is already on your list.`;
+    idError.value = t('{id} is already on your list.', { id });
     return;
   }
   saving.value = true;
@@ -321,9 +320,9 @@ const add = async () => {
     const rid = await addRadioID(id);
     radioIDs.value = [...radioIDs.value, rid];
     newID.value = '';
-    idOK.value = `Added ${id}.`;
+    idOK.value = t('Added {id}.', { id });
   } catch (err) {
-    idError.value = errorText(err, `Could not add ${id}.`);
+    idError.value = errorText(err, t('Could not add {id}.', { id }));
   } finally {
     saving.value = false;
   }
@@ -336,9 +335,9 @@ const remove = async (id: number) => {
   try {
     await removeRadioID(id);
     radioIDs.value = radioIDs.value.filter((rid) => rid.id !== id);
-    idOK.value = `Removed ${id}.`;
+    idOK.value = t('Removed {id}.', { id });
   } catch (err) {
-    idError.value = errorText(err, `Could not remove ${id}.`);
+    idError.value = errorText(err, t('Could not remove {id}.', { id }));
   } finally {
     saving.value = false;
   }

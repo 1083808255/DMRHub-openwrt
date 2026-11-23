@@ -27,6 +27,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import PeerTable from '@/components/PeerTable.vue';
 
 export default {
@@ -34,7 +35,7 @@ export default {
     PeerTable,
   },
   head: {
-    title: 'OpenBridge Peers',
+    title: t('OpenBridge Peers'),
   },
   created() {},
   mounted() {},

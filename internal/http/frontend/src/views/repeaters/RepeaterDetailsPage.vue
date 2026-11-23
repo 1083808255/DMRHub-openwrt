@@ -52,13 +52,13 @@
         <CardHeader>
           <div class="flex items-center justify-between">
             <div>
-              <CardTitle>{{ repeater.callsign || 'Repeater' }} — {{ repeater.id }}</CardTitle>
+              <CardTitle>{{ repeater.callsign || $t('Repeater') }} — {{ repeater.id }}</CardTitle>
               <CardDescription v-if="repeater.description">{{ repeater.description }}</CardDescription>
             </div>
             <div class="flex items-center gap-2">
               <span class="inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-medium"
                 :class="isOnline ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground'">
-                {{ isOnline ? 'Online' : 'Offline' }}
+                {{ isOnline ? $t('Online') : $t('Offline') }}
               </span>
               <span class="inline-flex items-center rounded-md bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
                 {{ protocol || (repeater.type || 'mmdvm').toUpperCase() }}
@@ -93,7 +93,7 @@
         </p>
         <p class="text-sm">
           {{ $t("Calls to TG") }} {{ ask.talkgroup }} {{ $t("on timeslot") }} {{ ask.slot }} {{ $t("here then go to the") }}
-          {{ ask.repeaters === 1 ? 'repeater' : `${ask.repeaters} repeaters` }} {{ $t("of the group.") }}
+          {{ $t('{n} repeater | {n} repeaters', { n: ask.repeaters }) }} {{ $t("of the group.") }}
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <ShadButton type="button" size="sm" :disabled="localBusy" data-test="local-accept" @click="acceptAsk(ask.id)">{{ $t("Add it") }}</ShadButton>
@@ -104,7 +104,7 @@
 
       <ShadDialog :open="resetOpen" @update:open="resetOpen = $event">
         <DialogContent data-test="reset-dialog">
-          <DialogTitle>{{ $t("Reset the connection of") }} {{ repeater.callsign || 'Repeater' }} — {{ repeater.id }}?</DialogTitle>
+          <DialogTitle>{{ $t("Reset the connection of") }} {{ repeater.callsign || $t('Repeater') }} — {{ repeater.id }}?</DialogTitle>
           <DialogDescription>{{ resetDescription }}</DialogDescription>
           <p v-if="resetMessage" class="text-sm text-destructive" data-test="reset-message">{{ resetMessage }}</p>
           <div class="flex flex-wrap justify-end gap-2">
@@ -389,8 +389,8 @@
             :columns="columns"
             :data="lastheard"
             :loading="lastheardLoading"
-            :loading-text="'Loading...'"
-            :empty-text="'No transmissions match these types'"
+            :loading-text="$t('Loading...')"
+            :empty-text="$t('No transmissions match these types')"
             :manual-pagination="true"
             :page-index="page - 1"
             :page-size="rows"
@@ -510,7 +510,7 @@ const COSYSOPS_RETRY_MS = 1_000;
 const COSYSOPS_RETRY_MAX_MS = 30_000;
 
 const CODEC_OPTIONS: { value: SlotCodec; label: string }[] = [
-  { value: 'auto', label: 'Automatic' },
+  { value: 'auto', label: t('Automatic') },
   { value: 'codec2', label: 'Codec2' },
   { value: 'ambe', label: 'AMBE' },
 ];
@@ -548,7 +548,7 @@ export default {
     User,
   },
   head: {
-    title: 'Repeater Details',
+    title: t('Repeater Details'),
   },
   created() {},
   mounted() {
@@ -659,12 +659,12 @@ export default {
       return [
         {
           key: 'ts1',
-          title: 'Timeslot 1',
+          title: t('Timeslot 1'),
           heard: r ? heardLine(r.ts1_heard_codec, r.ts1_heard_codec2_mode, r.ts1_heard_at) : '',
         },
         {
           key: 'ts2',
-          title: 'Timeslot 2',
+          title: t('Timeslot 2'),
           heard: r ? heardLine(r.ts2_heard_codec, r.ts2_heard_codec2_mode, r.ts2_heard_at) : '',
         },
       ];
@@ -737,7 +737,7 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          this.error = 'Failed to load repeater details. You may not have permission to view this repeater.';
+          this.error = t('Failed to load repeater details. You may not have permission to view this repeater.');
           this.loading = false;
         });
     },
@@ -802,7 +802,7 @@ export default {
           if (this.repeater) {
             this.repeater = { ...this.repeater, ...body };
           }
-          this.codecMessage = 'Saved.';
+          this.codecMessage = t('Saved.');
         })
         .catch((err) => {
           console.error(err);

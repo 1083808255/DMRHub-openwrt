@@ -24,7 +24,7 @@
     <form @submit.prevent="handleSubmit(!v$.$invalid)">
       <Card>
         <CardHeader>
-          <CardTitle>{{ isEdit ? 'Edit Scheduled Net' : 'New Scheduled Net' }}</CardTitle>
+          <CardTitle>{{ isEdit ? $t('Edit Scheduled Net') : $t('New Scheduled Net') }}</CardTitle>
           <CardDescription>
             {{ $t("Times are entered in your local timezone and converted to UTC for storage.") }}
           </CardDescription>
@@ -154,7 +154,7 @@
         <CardFooter>
           <div class="card-footer">
             <ShadButton type="submit" variant="outline" size="sm">
-              {{ isEdit ? 'Update' : 'Create' }}
+              {{ isEdit ? $t('Update') : $t('Create') }}
             </ShadButton>
           </div>
         </CardFooter>
@@ -220,7 +220,7 @@ export default {
     SelectValue,
   },
   head: {
-    title: 'Scheduled Net',
+    title: t('Scheduled Net'),
   },
   setup: () => ({ v$: useVuelidate() }),
   mounted() {
@@ -253,7 +253,7 @@ export default {
       enabled: true,
       talkgroups: [] as TalkgroupOption[],
       submitted: false,
-      dayOptions: dayNames.map((label, value) => ({ label, value })),
+      dayOptions: dayNames.map((label, value) => ({ label: t(label), value })),
     };
   },
   computed: {
@@ -268,7 +268,8 @@ export default {
     utcDayPreview(): string | null {
       if (this.dayOfWeekLocal === '' || !this.timeOfDayLocal) return null;
       const { dayOfWeek } = localToUTC(Number(this.dayOfWeekLocal), this.timeOfDayLocal);
-      return dayNames[dayOfWeek] ?? null;
+      const name = dayNames[dayOfWeek];
+      return name ? t(name) : null;
     },
   },
   validations() {
@@ -340,7 +341,7 @@ export default {
         })
           .then(() => {
             this.$toast.add({
-              summary: 'Success',
+              summary: t('Success'),
               severity: 'success',
               detail: t('Scheduled net updated'),
               life: 3000,
@@ -349,7 +350,7 @@ export default {
           })
           .catch((err) => {
             console.error(err);
-            const msg = err?.response?.data?.error || 'Failed to update scheduled net';
+            const msg = err?.response?.data?.error || t('Failed to update scheduled net');
             this.$toast.add({ summary: t('Error'), severity: 'error', detail: msg, life: 3000 });
           });
       } else {
@@ -366,7 +367,7 @@ export default {
         })
           .then(() => {
             this.$toast.add({
-              summary: 'Success',
+              summary: t('Success'),
               severity: 'success',
               detail: t('Scheduled net created'),
               life: 3000,
@@ -375,7 +376,7 @@ export default {
           })
           .catch((err) => {
             console.error(err);
-            const msg = err?.response?.data?.error || 'Failed to create scheduled net';
+            const msg = err?.response?.data?.error || t('Failed to create scheduled net');
             this.$toast.add({ summary: t('Error'), severity: 'error', detail: msg, life: 3000 });
           });
       }

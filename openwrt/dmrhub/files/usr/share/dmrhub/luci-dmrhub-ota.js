@@ -6,6 +6,9 @@
  * which reads the release manifest, installs the application package and
  * flashes the firmware.
  *
+ * The strings are written in Chinese because this is the zh-CN build; the
+ * LuCI translation catalogue ships no entry for our own section.
+ *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -18,7 +21,7 @@ function dmrhubOtaNotify(text, kind) {
 function dmrhubOtaExec(button, args) {
 	button.disabled = true;
 	var label = button.textContent;
-	button.textContent = _('Working...');
+	button.textContent = '处理中…';
 	return fs.exec(DMRHUB_OTA_SCRIPT, args).then(function (res) {
 		var out = [];
 		if (res.stdout) out.push(res.stdout);
@@ -39,9 +42,9 @@ function handleDmrhubOtaCheck(ev) {
 		try {
 			var info = JSON.parse(res.text);
 			if (info.state === 'current') {
-				text = _('DMRHub is up to date: ') + info.remote;
+				text = 'DMRHub 已是最新版本：' + info.remote;
 			} else {
-				text = _('A newer DMRHub is available: ') + info.remote + _(' (installed: ') + info.local + _(')');
+				text = '发现新版本：' + info.remote + '（当前：' + info.local + '）';
 			}
 		} catch (e) {
 			/* Keep the raw output when it is not JSON. */
@@ -54,30 +57,30 @@ function handleDmrhubOtaCheck(ev) {
 function handleDmrhubOtaApp(ev) {
 	return dmrhubOtaExec(ev.target, ['app']).then(function (res) {
 		dmrhubOtaNotify(res.ok
-			? _('DMRHub was updated and the service has been restarted.')
-			: _('The application update failed.') + '\n' + res.text, res.ok ? 'info' : 'error');
+			? 'DMRHub 已更新，服务已重启。'
+			: '应用更新失败。\n' + res.text, res.ok ? 'info' : 'error');
 	});
 }
 
 /* handleDmrhubOtaFirmware flashes the whole firmware image. */
 function handleDmrhubOtaFirmware(ev) {
-	if (!confirm(_('Flashing the firmware reboots the device. Continue?'))) {
+	if (!confirm('刷写固件会重启设备，是否继续？')) {
 		return Promise.resolve();
 	}
 	var button = ev.target;
 	button.disabled = true;
-	button.textContent = _('Downloading...');
-	dmrhubOtaNotify(_('Downloading the firmware image. This can take a few minutes.'), 'info');
+	button.textContent = '下载中…';
+	dmrhubOtaNotify('正在下载固件镜像，可能需要几分钟。', 'info');
 	fs.exec(DMRHUB_OTA_SCRIPT, ['firmware', '--yes']).then(function () {
-		ui.showModal(_('Flashing...'), [
+		ui.showModal('正在刷写…', [
 			E('p', { 'class': 'spinning' },
-				_('The system is flashing now. DO NOT POWER OFF THE DEVICE! Wait a few minutes before you try to reconnect.'))
+				'系统正在刷写固件，请勿断电！请等待几分钟后再尝试重新连接。')
 		]);
 		ui.awaitReconnect(window.location.host);
 	}).catch(function (e) {
 		button.disabled = false;
-		button.textContent = _('Flash firmware...');
-		dmrhubOtaNotify(_('The firmware update failed.') + '\n' + String(e.message || e), 'error');
+		button.textContent = '刷写固件…';
+		dmrhubOtaNotify('固件更新失败。\n' + String(e.message || e), 'error');
 	});
 }
 
@@ -87,19 +90,19 @@ function handleDmrhubOtaFirmware(ev) {
  */
 function dmrhubOtaSection(m, form) {
 	var s = m.section(form.NamedSection, 'dmrhub_ota', 'dmrhub_ota',
-		_('DMRHub OTA'),
-		_('Check for a newer DMRHub release, update the application, or flash a new firmware image that includes DMRHub.'));
-	var o = s.option(form.Button, 'dmrhub_ota_check', _('Check for updates'));
+		'DMRHub 固件升级',
+		'检查 DMRHub 新版本、更新应用程序，或刷写包含 DMRHub 的新固件。');
+	var o = s.option(form.Button, 'dmrhub_ota_check', '检查更新');
 	o.inputstyle = 'action';
-	o.inputtitle = _('Check...');
+	o.inputtitle = '检查更新';
 	o.onclick = handleDmrhubOtaCheck;
-	o = s.option(form.Button, 'dmrhub_ota_app', _('Update the DMRHub application'));
+	o = s.option(form.Button, 'dmrhub_ota_app', '更新 DMRHub 应用程序');
 	o.inputstyle = 'action important';
-	o.inputtitle = _('Update application...');
+	o.inputtitle = '更新应用…';
 	o.onclick = handleDmrhubOtaApp;
-	o = s.option(form.Button, 'dmrhub_ota_firmware', _('Flash a new DMRHub firmware'));
+	o = s.option(form.Button, 'dmrhub_ota_firmware', '刷写新的 DMRHub 固件');
 	o.inputstyle = 'action important';
-	o.inputtitle = _('Flash firmware...');
+	o.inputtitle = '刷写固件…';
 	o.onclick = handleDmrhubOtaFirmware;
 	return m;
 }

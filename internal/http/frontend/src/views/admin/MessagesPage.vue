@@ -158,8 +158,8 @@ import {
 import { errorStatus, errorText } from '@/services/settings';
 
 useHead({
-  title: 'Messages',
-  titleTemplate: 'Admin | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
+  title: t('Messages'),
+  titleTemplate: t('Admin') + ' | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
 });
 
 const pageSize = 25;
@@ -187,7 +187,11 @@ const formatChoice = computed({
 const filtered = computed(() => Object.values(applied.value).some((v) => v));
 
 const summary = computed(() =>
-  `${rows.value.length} of ${total.value} ${filtered.value ? 'matching' : 'stored'} messages`,
+  t('{shown} of {total} {what} messages', {
+    shown: rows.value.length,
+    total: total.value,
+    what: filtered.value ? t('matching') : t('stored'),
+  }),
 );
 
 const longTime = (value: string) =>
@@ -208,10 +212,10 @@ const detailRows = computed(() => {
   }
   return [
     { label: 'SAP', value: sapLabel(m.sap) },
-    { label: 'Blocks / octets', value: `${m.blocks} / ${m.octets}` },
-    { label: 'Response', value: m.confirmed ? m.response.toUpperCase() : 'Unconfirmed' },
-    { label: 'Checksum', value: m.checksum_ok ? 'OK' : 'Bad' },
-    { label: 'Network / repeater / slot', value: `${transportLabel(m.transport)} / ${m.repeater_id} / TS${m.slot}` },
+    { label: t('Blocks / octets'), value: `${m.blocks} / ${m.octets}` },
+    { label: t('Response'), value: m.confirmed ? m.response.toUpperCase() : t('Unconfirmed') },
+    { label: t('Checksum'), value: m.checksum_ok ? t('OK') : t('Bad') },
+    { label: t('Network / repeater / slot'), value: `${transportLabel(m.transport)} / ${m.repeater_id} / TS${m.slot}` },
   ];
 });
 
@@ -253,7 +257,7 @@ const select = async (id: number) => {
     selected.value = await getAdminMessage(id);
   } catch (err) {
     selected.value = null;
-    detailError.value = errorText(err, `Could not load message ${id}.`);
+    detailError.value = errorText(err, t('Could not load message {id}.', { id }));
   }
 };
 

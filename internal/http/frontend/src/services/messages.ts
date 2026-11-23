@@ -115,7 +115,7 @@ export function messageState(m: Pick<Message, 'confirmed' | 'response' | 'held'>
     return heldState(m.held);
   }
   if (!m.confirmed) {
-    return { label: 'Unconfirmed', tone: 'none' };
+    return { get label() { return t('Unconfirmed'); }, tone: 'none' };
   }
   switch (m.response) {
   case 'ack':
@@ -130,7 +130,7 @@ export function messageState(m: Pick<Message, 'confirmed' | 'response' | 'held'>
 }
 
 export function notTextLabel(m: Pick<Message, 'octets'>): string {
-  return `Not text: ${m.octets} octets of data`;
+  return t('Not text: {octets} octets of data', { octets: m.octets });
 }
 
 export function boxPageCount(total: number, limit: number): number {
@@ -232,22 +232,24 @@ export function transportLabel(transport: string): string {
   return TRANSPORT_LABELS[transport] ?? transport;
 }
 
+// Keys only: sapLabel() translates them where they are used, so the text is
+// evaluated when the label is read, not when this module is imported.
 const SAP_NAMES: Record<number, string> = {
   0: 'UDT',
-  2: t('TCP/IP header compression'),
-  3: t('UDP/IP header compression'),
+  2: 'TCP/IP header compression',
+  3: 'UDP/IP header compression',
   4: 'IP',
   5: 'ARP',
   9: 'Proprietary',
-  10: t('Short data'),
+  10: 'Short data',
 };
 
 export function sapLabel(sap: number | null | undefined): string {
   if (sap === null || sap === undefined) {
-    return 'None';
+    return t('None');
   }
   const name = SAP_NAMES[sap];
-  return name ? `${name} (${sap})` : `SAP ${sap}`;
+  return name ? `${t(name)} (${sap})` : `SAP ${sap}`;
 }
 
 /** hexDump formats a hex string as lines of 16 octets, each line led by its offset. */

@@ -27,6 +27,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import RepeaterTable from '@/components/RepeaterTable.vue';
 
 export default {
@@ -34,8 +35,8 @@ export default {
     RepeaterTable,
   },
   head: {
-    title: 'Repeaters',
-    titleTemplate: 'Admin | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
+    title: t('Repeaters'),
+    titleTemplate: t('Admin') + ' | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
   },
   created() {},
   mounted() {},

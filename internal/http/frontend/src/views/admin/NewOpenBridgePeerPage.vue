@@ -60,7 +60,7 @@
           />
           <span v-if="v$.id.$error && submitted">
             <span v-for="(error, index) of v$.id.$errors" :key="index">
-              <small class="p-error">{{ error.$message.replace("Value", "Peer ID") }}</small>
+              <small class="p-error">{{ error.$message.replace('Value', $t('Peer ID')) }}</small>
             </span>
             <br />
           </span>
@@ -68,7 +68,7 @@
             <small
               v-if="(v$.id.$invalid && submitted) || v$.id.$pending.$response"
               class="p-error"
-              >{{ v$.id.required.$message.replace("Value", "Peer ID") }}</small
+              >{{ v$.id.required.$message.replace('Value', $t('Peer ID')) }}</small
             >
           </span>
           <br />
@@ -82,7 +82,7 @@
           />
           <span v-if="v$.ip.$error && submitted">
             <span v-for="(error, index) of v$.ip.$errors" :key="index">
-              <small class="p-error">{{ error.$message.replace("Value", "IP Address") }}</small>
+              <small class="p-error">{{ error.$message.replace('Value', $t('IP Address')) }}</small>
             </span>
             <br />
           </span>
@@ -90,7 +90,7 @@
             <small
               v-if="(v$.ip.$invalid && submitted) || v$.ip.$pending.$response"
               class="p-error"
-              >{{ v$.ip.required.$message.replace("Value", "IP Address") }}</small
+              >{{ v$.ip.required.$message.replace('Value', $t('IP Address')) }}</small
             >
           </span>
           <br />
@@ -183,7 +183,7 @@ export default {
     ShadInput,
   },
   head: {
-    title: 'New OpenBridge Peer',
+    title: t('New OpenBridge Peer'),
   },
   setup: () => ({ v$: useVuelidate() }),
   created() {
@@ -274,7 +274,7 @@ export default {
             this.$toast.add({
               summary: t('Error'),
               severity: 'error',
-              detail: `Error registering peer`,
+              detail: t('Error registering peer'),
               life: 3000,
             });
           } else {
@@ -295,7 +295,7 @@ export default {
             this.$toast.add({
               summary: t('Error'),
               severity: 'error',
-              detail: `Error creating peer`,
+              detail: t('Error creating peer'),
               life: 3000,
             });
           }

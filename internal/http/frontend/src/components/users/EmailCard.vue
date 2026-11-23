@@ -34,7 +34,7 @@
       <template v-else>
         <p v-if="saved" class="text-sm" data-test="email-status">
           {{ saved }}
-          <span :class="badgeClass(verified ? 'ok' : 'warn')" class="ml-1">{{ verified ? 'Confirmed' : 'Not confirmed' }}</span>
+          <span :class="badgeClass(verified ? 'ok' : 'warn')" class="ml-1">{{ verified ? $t('Confirmed') : $t('Not confirmed') }}</span>
         </p>
         <p v-else class="text-sm text-muted-foreground" data-test="email-status">{{ $t("No email address.") }}</p>
         <form class="flex flex-wrap items-end gap-2" novalidate @submit.prevent="save">

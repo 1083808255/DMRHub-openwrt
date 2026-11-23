@@ -34,7 +34,7 @@
     <ul
       v-if="setting.disagree && setting.replicas && setting.replicas.length > 0"
       class="mt-1 flex flex-col gap-0.5 rounded-md bg-amber-500/10 px-3 py-2 text-xs"
-      :aria-label="`${label} on each replica`"
+      :aria-label="$t('{label} on each replica', { label })"
       data-test="setting-replicas"
     >
       <li v-for="r in setting.replicas" :key="r.replica" class="flex flex-wrap items-center gap-3">
@@ -49,6 +49,7 @@
 
 <script lang="ts">
 import { defineComponent, h, inject } from 'vue';
+import { t } from '@/i18n';
 import {
   deploymentPart, formatValue, replicaName, replicaNotInEffect, setupStateKey, settingLabel, sourceText,
   type ReplicaValue, type Setting,
@@ -56,7 +57,7 @@ import {
 
 const SettingBadge = () => h('span', {
   class: 'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-destructive/50 px-2 text-xs font-medium leading-5 text-destructive',
-}, [h('span', { class: 'size-1.5 shrink-0 rounded-full bg-destructive' }), 'Not in effect']);
+}, [h('span', { class: 'size-1.5 shrink-0 rounded-full bg-destructive' }), t('Not in effect')]);
 
 export default defineComponent({
   components: { SettingBadge },
@@ -83,22 +84,22 @@ export default defineComponent({
       }
       const out: string[] = [];
       if (s.source === 'generated') {
-        out.push('DMRHub made a random value at its first start and keeps it in the database.');
+        out.push(t('DMRHub made a random value at its first start and keeps it in the database.'));
       } else if (s.source === 'wizard') {
-        out.push('The setup wizard set this. Change it in the config file or the environment of the deployment, then restart DMRHub.');
+        out.push(t('The setup wizard set this. Change it in the config file or the environment of the deployment, then restart DMRHub.'));
       } else if (s.locked) {
-        let line = `The ${deploymentPart(s.source)} of the deployment sets this. Change it there and restart DMRHub.`;
+        let line = t('The {part} of the deployment sets this. Change it there and restart DMRHub.', { part: deploymentPart(s.source) });
         if (s.saved !== undefined) {
-          line += ` A value saved in Setup, ${formatValue(s.saved)}, comes back if the deployment stops setting it.`;
+          line += t(' A value saved in Setup, {value}, comes back if the deployment stops setting it.', { value: formatValue(s.saved) });
         }
         out.push(line);
       } else if (s.start_only && !s.editable) {
-        out.push('DMRHub reads this at start. Set it in the config file or the environment of the deployment, then restart DMRHub.');
+        out.push(t('DMRHub reads this at start. Set it in the config file or the environment of the deployment, then restart DMRHub.'));
       } else if (s.source === 'setup' && s.default !== undefined && !this.menu) {
-        out.push(`Saved in Setup. Set it back to the default, ${formatValue(s.default)}, to follow the default.`);
+        out.push(t('Saved in Setup. Set it back to the default, {value}, to follow the default.', { value: formatValue(s.default) }));
       }
       if (s.not_in_effect) {
-        out.push('This replica could not put this value into effect and keeps its previous value.');
+        out.push(t('This replica could not put this value into effect and keeps its previous value.'));
       }
       return out;
     },

@@ -26,8 +26,8 @@
       :columns="columns"
       :data="nets"
       :loading="loading"
-      :loading-text="'Loading nets...'"
-      :empty-text="'No nets found'"
+      :loading-text="$t('Loading nets...')"
+      :empty-text="$t('No nets found')"
       :manual-pagination="true"
       :page-index="page - 1"
       :page-size="rows"
@@ -41,8 +41,8 @@
       :columns="scheduledColumns"
       :data="scheduledNets"
       :loading="scheduledLoading"
-      :loading-text="'Loading scheduled nets...'"
-      :empty-text="'No scheduled nets'"
+      :loading-text="$t('Loading scheduled nets...')"
+      :empty-text="$t('No scheduled nets')"
       :manual-pagination="true"
       :page-index="scheduledPage - 1"
       :page-size="scheduledRows"
@@ -80,8 +80,8 @@ export default {
     DataTable,
   },
   head: {
-    title: 'Nets',
-    titleTemplate: 'Admin | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
+    title: t('Nets'),
+    titleTemplate: t('Admin') + ' | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
   },
   mounted() {
     this.fetchNets();
@@ -106,7 +106,7 @@ export default {
       return [
         {
           accessorKey: 'id',
-          header: 'ID',
+          header: t('ID'),
           cell: ({ row }: { row: { original: Net } }) =>
             h(
               RouterLink,
@@ -116,7 +116,7 @@ export default {
         },
         {
           accessorKey: 'talkgroup',
-          header: 'Talkgroup',
+          header: t('Talkgroup'),
           cell: ({ row }: { row: { original: Net } }) =>
             h(
               RouterLink,
@@ -126,26 +126,26 @@ export default {
         },
         {
           accessorKey: 'active',
-          header: 'Status',
+          header: t('Status'),
           cell: ({ row }: { row: { original: Net } }) =>
             row.original.active
-              ? h('span', { class: 'text-green-600 font-semibold' }, 'Active')
-              : 'Ended',
+              ? h('span', { class: 'text-green-600 font-semibold' }, t('Active'))
+              : t('Ended'),
         },
         {
           accessorKey: 'start_time',
-          header: 'Started',
+          header: t('Started'),
           cell: ({ row }: { row: { original: Net } }) =>
             h(RelativeTimestamp, { time: row.original.start_time }),
         },
         {
           accessorKey: 'check_in_count',
-          header: 'Check-Ins',
+          header: t('Check-Ins'),
           cell: ({ row }: { row: { original: Net } }) => String(row.original.check_in_count),
         },
         {
           accessorKey: 'showcase',
-          header: 'Showcase',
+          header: t('Showcase'),
           cell: ({ row }: { row: { original: Net } }) => {
             const net = row.original;
             return h(Switch, {
@@ -160,17 +160,17 @@ export default {
       return [
         {
           accessorKey: 'id',
-          header: 'ID',
+          header: t('ID'),
           cell: ({ row }: { row: { original: ScheduledNet } }) => String(row.original.id),
         },
         {
           accessorKey: 'name',
-          header: 'Name',
+          header: t('Name'),
           cell: ({ row }: { row: { original: ScheduledNet } }) => row.original.name,
         },
         {
           accessorKey: 'talkgroup',
-          header: 'Talkgroup',
+          header: t('Talkgroup'),
           cell: ({ row }: { row: { original: ScheduledNet } }) =>
             h(
               RouterLink,
@@ -180,7 +180,7 @@ export default {
         },
         {
           accessorKey: 'schedule',
-          header: 'Schedule',
+          header: t('Schedule'),
           cell: ({ row }: { row: { original: ScheduledNet } }) => {
             const sn = row.original;
             return netSchedule(sn.day_of_week, sn.time_of_day, sn.timezone);
@@ -188,15 +188,15 @@ export default {
         },
         {
           accessorKey: 'enabled',
-          header: 'Enabled',
+          header: t('Enabled'),
           cell: ({ row }: { row: { original: ScheduledNet } }) =>
             row.original.enabled
-              ? h('span', { class: 'text-green-600' }, 'Yes')
-              : h('span', { class: 'text-muted-foreground' }, 'No'),
+              ? h('span', { class: 'text-green-600' }, t('Yes'))
+              : h('span', { class: 'text-muted-foreground' }, t('No')),
         },
         {
           accessorKey: 'showcase',
-          header: 'Showcase',
+          header: t('Showcase'),
           cell: ({ row }: { row: { original: ScheduledNet } }) => {
             const sn = row.original;
             return h(Switch, {
@@ -216,7 +216,7 @@ export default {
                   to: `/nets/scheduled/${row.original.id}/edit`,
                   class: 'text-primary hover:underline text-sm',
                 },
-                () => h(ShadButton, { variant: 'outline', size: 'sm' }, () => 'Edit')
+                () => h(ShadButton, { variant: 'outline', size: 'sm' }, () => t('Edit'))
               ),
               h(
                 ShadButton,
@@ -225,7 +225,7 @@ export default {
                   size: 'sm',
                   onClick: () => this.handleDeleteScheduledNet(row.original.id),
                 },
-                () => 'Delete',
+                () => t('Delete'),
               ),
             ]),
         },

@@ -51,7 +51,7 @@
               <span class="text-muted-foreground">
                 {{ $t("Started by") }} {{ net.started_by_user.callsign }}
               </span>
-              <span class="font-medium">{{ net.check_in_count }} check-ins</span>
+              <span class="font-medium">{{ $t('{n} check-in | {n} check-ins', { n: net.check_in_count }) }}</span>
             </div>
             <div class="mt-2">
               <RouterLink
@@ -112,8 +112,8 @@
           :columns="columns"
           :data="nets"
           :loading="loading"
-          :loading-text="'Loading nets...'"
-          :empty-text="'No nets found'"
+          :loading-text="$t('Loading nets...')"
+          :empty-text="$t('No nets found')"
           :manual-pagination="true"
           :page-index="page - 1"
           :page-size="rows"
@@ -127,6 +127,8 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
+
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { h } from 'vue';
 import { RouterLink } from 'vue-router';
@@ -150,7 +152,7 @@ export default {
     DataTable,
   },
   head: {
-    title: 'Nets',
+    title: t('Nets'),
   },
   mounted() {
     this.fetchNets();
@@ -180,7 +182,7 @@ export default {
       return [
         {
           accessorKey: 'talkgroup',
-          header: 'Talkgroup',
+          header: t('Talkgroup'),
           cell: ({ row }: { row: { original: Net } }) => {
             const net = row.original;
             return h(
@@ -192,26 +194,26 @@ export default {
         },
         {
           accessorKey: 'description',
-          header: 'Description',
+          header: t('Description'),
           cell: ({ row }: { row: { original: Net } }) => row.original.description || '—',
         },
         {
           accessorKey: 'active',
-          header: 'Status',
+          header: t('Status'),
           cell: ({ row }: { row: { original: Net } }) =>
             row.original.active
-              ? h('span', { class: 'text-green-600 font-semibold' }, 'Active')
-              : 'Ended',
+              ? h('span', { class: 'text-green-600 font-semibold' }, t('Active'))
+              : t('Ended'),
         },
         {
           accessorKey: 'start_time',
-          header: 'Started',
+          header: t('Started'),
           cell: ({ row }: { row: { original: Net } }) =>
             h(RelativeTimestamp, { time: row.original.start_time }),
         },
         {
           accessorKey: 'check_in_count',
-          header: 'Check-Ins',
+          header: t('Check-Ins'),
           cell: ({ row }: { row: { original: Net } }) => String(row.original.check_in_count),
         },
         {
@@ -221,7 +223,7 @@ export default {
             return h(
               RouterLink,
               { to: `/nets/${row.original.id}`, class: 'text-primary hover:underline' },
-              () => 'View',
+              () => t('View'),
             );
           },
         },

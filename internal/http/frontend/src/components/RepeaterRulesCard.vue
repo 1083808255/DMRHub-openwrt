@@ -49,7 +49,7 @@
                 <span v-for="u in draft.users[slot]" :key="u.id" class="chip">
                   <span class="font-mono">{{ u.id }}</span>
                   <span>{{ u.callsign }}</span>
-                  <button type="button" class="chip-x" :aria-label="`Remove ${u.id}`" @click="removeUser(slot, u.id)">&times;</button>
+                  <button type="button" class="chip-x" :aria-label="$t('Remove {id}', { id: u.id })" @click="removeUser(slot, u.id)">&times;</button>
                 </span>
               </div>
               <form class="flex flex-wrap items-center gap-2" novalidate @submit.prevent="addUser(slot)">
@@ -57,7 +57,7 @@
                   v-model="userQuery[slot]"
                   class="h-8 min-w-0 flex-[1_1_9rem] font-mono"
                   :placeholder="$t('DMR ID or callsign')"
-                  :aria-label="`Add user to ${slotTitle(slot)}`"
+                  :aria-label="$t('Add user to {slot}', { slot: slotTitle(slot) })"
                   :aria-invalid="!!userError[slot]"
                   :data-test="`${slot}-add-user`"
                 />
@@ -85,7 +85,7 @@
             <span v-for="tg in draft.talkgroups" :key="tg.id" class="chip">
               <span class="font-mono">{{ tg.id }}</span>
               <span v-if="tg.name">{{ tg.name }}</span>
-              <button type="button" class="chip-x" :aria-label="`Remove ${tg.id}`" @click="removeTalkgroup(tg.id)">&times;</button>
+              <button type="button" class="chip-x" :aria-label="$t('Remove {id}', { id: tg.id })" @click="removeTalkgroup(tg.id)">&times;</button>
             </span>
           </div>
           <form class="flex flex-wrap items-center gap-2" novalidate @submit.prevent="addTalkgroup">
@@ -139,13 +139,13 @@ const props = defineProps<{ repeaterId: number }>();
 
 const slots: Slot[] = ['ts1', 'ts2'];
 const lockOptions = [
-  { value: 'open', label: 'Open' },
-  { value: 'lock', label: 'Listed users' },
+  { value: 'open', label: t('Open') },
+  { value: 'lock', label: t('Listed users') },
 ];
 const modeOptions = [
-  { value: 'off', label: 'Off' },
-  { value: 'block', label: 'Block' },
-  { value: 'allow', label: 'Allow only' },
+  { value: 'off', label: t('Off') },
+  { value: 'block', label: t('Block') },
+  { value: 'allow', label: t('Allow only') },
 ];
 
 const loaded = ref(false);
@@ -159,7 +159,7 @@ const userError = reactive<Record<Slot, string>>({ ts1: '', ts2: '' });
 const tgQuery = ref('');
 const tgError = ref('');
 
-const slotTitle = (slot: Slot) => (slot === 'ts1' ? 'Timeslot 1' : 'Timeslot 2');
+const slotTitle = (slot: Slot) => (slot === 'ts1' ? t('Timeslot 1') : t('Timeslot 2'));
 
 const load = (rules: Rules) => {
   saved.value = rules;
@@ -221,7 +221,7 @@ const addTalkgroup = async () => {
   const q = tgQuery.value.trim();
   if (!q) return;
   if (!/^\d+$/.test(q)) {
-    tgError.value = 'No such talkgroup';
+    tgError.value = t('No such talkgroup');
     return;
   }
   try {
@@ -233,7 +233,7 @@ const addTalkgroup = async () => {
     tgQuery.value = '';
     tgError.value = '';
   } catch {
-    tgError.value = 'No such talkgroup';
+    tgError.value = t('No such talkgroup');
   }
 };
 
@@ -251,7 +251,7 @@ const save = async () => {
   failed.value = false;
   if (draft.mode !== 'off' && draft.talkgroups.length === 0) {
     failed.value = true;
-    message.value = 'List at least one talkgroup';
+    message.value = t('List at least one talkgroup');
     return;
   }
   busy.value = true;
@@ -263,7 +263,7 @@ const save = async () => {
       talkgroups: draft.mode === 'off' ? [] : draft.talkgroups.map((t) => t.id),
     });
     load(res.data as Rules);
-    message.value = 'Saved.';
+    message.value = t('Saved.');
   } catch (err) {
     failed.value = true;
     message.value = errorText(err, t('Could not save. Try again later.'));

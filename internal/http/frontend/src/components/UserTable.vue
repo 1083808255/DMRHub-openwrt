@@ -24,8 +24,8 @@
     :columns="columns"
     :data="users"
     :loading="loading"
-    :loading-text="'Loading...'"
-    :empty-text="'No users found'"
+    :loading-text="$t('Loading...')"
+    :empty-text="$t('No users found')"
     :manual-pagination="true"
     :page-index="page - 1"
     :page-size="rows"
@@ -37,12 +37,12 @@
       <TableRow v-if="(row as UserRow).radioIDCallsign !== undefined" class="bg-warn-bg text-warn-fg hover:bg-warn-bg" data-test="user-radioid-prompt">
         <TableCell :colspan="colspan" class="whitespace-normal">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <span v-if="(row as UserRow).radioIDCallsign">{{ $t("RadioID lists") }} {{ (row as UserRow).id }} as <b>{{ (row as UserRow).radioIDCallsign }}</b>.</span>
-            <span v-else>{{ $t("RadioID does not list") }} {{ (row as UserRow).id }}.</span>
+            <span v-if="(row as UserRow).radioIDCallsign">{{ $t("RadioID lists {id} as", { id: (row as UserRow).id }) }} <b>{{ (row as UserRow).radioIDCallsign }}</b>.</span>
+            <span v-else>{{ $t("RadioID does not list {id}.", { id: (row as UserRow).id }) }}</span>
             <span class="flex gap-2">
               <ShadButton variant="outline" size="sm" type="button" @click="cancelEditingUser(row as UserRow)">{{ $t("Cancel") }}</ShadButton>
               <ShadButton size="sm" type="button" data-test="user-radioid-override" @click="finishEditingUser(row as UserRow, true)">
-                {{ $t("Save") }} {{ (row as UserRow).callsign.toUpperCase() }} anyway
+                {{ $t("Save {callsign} anyway", { callsign: (row as UserRow).callsign.toUpperCase() }) }}
               </ShadButton>
             </span>
           </div>
@@ -190,8 +190,8 @@ export default {
     },
     resetOnAirCode(user: UserRow) {
       this.$confirm.require({
-        message: `Turn off the on-air code of ${user.callsign}? Anyone can then transmit with their radio IDs.`,
-        header: 'Turn off on-air code',
+        message: t('Turn off the on-air code of {callsign}? Anyone can then transmit with their radio IDs.', { callsign: user.callsign }),
+        header: t('Turn off on-air code'),
         icon: 'pi pi-exclamation-triangle',
         acceptClass: 'p-button-danger',
         accept: () => {
@@ -201,7 +201,7 @@ export default {
               this.$toast.add({
                 summary: t('On-air code off'),
                 severity: 'success',
-                detail: `The on-air code of ${user.callsign} is off.`,
+                detail: t('The on-air code of {callsign} is off.', { callsign: user.callsign }),
                 life: 3000,
               });
             })
@@ -219,8 +219,8 @@ export default {
     },
     handleApprovePage(user: UserRow) {
       this.$confirm.require({
-        message: 'Are you sure you want to approve this user?',
-        header: 'Approve User',
+        message: t('Are you sure you want to approve this user?'),
+        header: t('Approve User'),
         icon: 'pi pi-exclamation-triangle',
         acceptClass: 'p-button-danger',
         accept: () => {
@@ -228,9 +228,9 @@ export default {
             .then(() => {
               this.fetchData();
               this.$toast.add({
-                summary: 'Confirmed',
+                summary: t('Confirmed'),
                 severity: 'success',
-                detail: `User ${user.id} approved`,
+                detail: t('User {id} approved', { id: user.id }),
                 life: 3000,
               });
             })
@@ -239,7 +239,7 @@ export default {
               this.$toast.add({
                 summary: t('Error'),
                 severity: 'error',
-                detail: `Error approving user ${user.id}`,
+                detail: t('Error approving user {id}', { id: user.id }),
                 life: 3000,
               });
             });
@@ -263,14 +263,15 @@ export default {
     },
     handleSuspend(_event: Event, user: UserRow) {
       const action = user.suspended ? 'suspend' : 'unsuspend';
-      const actionVerb = user.suspended ? 'suspended' : 'unsuspended';
       // Don't allow the user to uncheck the admin box
       API.post(`/users/${action}/${user.id}`, {})
         .then(() => {
           this.$toast.add({
-            summary: 'Confirmed',
+            summary: t('Confirmed'),
             severity: 'success',
-            detail: `User ${user.id} ${actionVerb}`,
+            detail: user.suspended
+              ? t('User {id} suspended', { id: user.id })
+              : t('User {id} unsuspended', { id: user.id }),
             life: 3000,
           });
           this.fetchData();
@@ -297,15 +298,16 @@ export default {
     },
     handleAdmin(_event: Event, user: UserRow) {
       const action = user.admin ? 'promote' : 'demote';
-      const actionVerb = user.admin ? 'promoted' : 'demoted';
       // Don't allow the user to uncheck the admin box
       if (this.userStore.superAdmin) {
         API.post(`/users/${action}/${user.id}`, {})
           .then(() => {
             this.$toast.add({
-              summary: 'Confirmed',
+              summary: t('Confirmed'),
               severity: 'success',
-              detail: `User ${user.id} ${actionVerb}`,
+              detail: user.admin
+                ? t('User {id} promoted', { id: user.id })
+                : t('User {id} demoted', { id: user.id }),
               life: 3000,
             });
             this.fetchData();
@@ -333,7 +335,7 @@ export default {
         this.$toast.add({
           summary: t('Only the System Admin can do this.'),
           severity: 'error',
-          detail: `Standard Admins cannot promote other users.`,
+          detail: t('Standard Admins cannot promote other users.'),
           life: 3000,
         });
         this.fetchData();
@@ -374,9 +376,9 @@ export default {
             }
           }
           this.$toast.add({
-            summary: 'Confirmed',
+            summary: t('Confirmed'),
             severity: 'success',
-            detail: `User ${user.id} updated`,
+            detail: t('User {id} updated', { id: user.id }),
             life: 3000,
           });
           this.fetchData();
@@ -391,7 +393,7 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: err.response?.data?.error ?? `Error updating user ${user.id}`,
+            detail: err.response?.data?.error ?? t('Error updating user {id}', { id: user.id }),
             life: 3000,
           });
         });
@@ -404,17 +406,17 @@ export default {
     deleteUser(user: UserRow) {
       if (this.userStore.superAdmin) {
         this.$confirm.require({
-          message: 'Are you sure you want to delete this user?',
-          header: 'Delete User',
+          message: t('Are you sure you want to delete this user?'),
+          header: t('Delete User'),
           icon: 'pi pi-exclamation-triangle',
           acceptClass: 'p-button-danger',
           accept: () => {
             API.delete('/users/' + user.id)
               .then(() => {
                 this.$toast.add({
-                  summary: 'Confirmed',
+                  summary: t('Confirmed'),
                   severity: 'success',
-                  detail: `User ${user.id} deleted`,
+                  detail: t('User {id} deleted', { id: user.id }),
                   life: 3000,
                 });
                 this.fetchData();
@@ -424,7 +426,7 @@ export default {
                 this.$toast.add({
                   severity: 'error',
                   summary: t('Error'),
-                  detail: `Error deleting user ${user.id}`,
+                  detail: t('Error deleting user {id}', { id: user.id }),
                   life: 3000,
                 });
               });
@@ -435,7 +437,7 @@ export default {
         this.$toast.add({
           summary: t('Only the System Admin can do this.'),
           severity: 'error',
-          detail: `Standard admins cannot delete other users.`,
+          detail: t('Standard admins cannot delete other users.'),
           life: 3000,
         });
       }
@@ -463,17 +465,17 @@ export default {
             }
             return h('div', { class: 'flex gap-2' }, [
               !user.editing
-                ? actionButton('Edit', () => this.editUser(user.id))
-                : actionButton('Save Changes', () => this.finishEditingUser(user)),
+                ? actionButton(t('Edit'), () => this.editUser(user.id))
+                : actionButton(t('Save Changes'), () => this.finishEditingUser(user)),
               !user.editing && this.mayRequirePasswordChange(user)
-                ? actionButton('Require password change', () => this.requirePasswordChange(user))
+                ? actionButton(t('Require password change'), () => this.requirePasswordChange(user))
                 : null,
               !user.editing && user.onAirCode
-                ? actionButton('Turn off on-air code', () => this.resetOnAirCode(user))
+                ? actionButton(t('Turn off on-air code'), () => this.resetOnAirCode(user))
                 : null,
               user.editing
-                ? actionButton('Cancel', () => this.cancelEditingUser(user))
-                : actionButton('Delete', () => this.deleteUser(user)),
+                ? actionButton(t('Cancel'), () => this.cancelEditingUser(user))
+                : actionButton(t('Delete'), () => this.deleteUser(user)),
             ]);
           },
         });
@@ -481,12 +483,12 @@ export default {
 
       columns.push({
           accessorKey: 'id',
-          header: 'DMR ID',
+          header: t('DMR ID'),
           cell: ({ row }: { row: { original: UserRow } }) => `${row.original.id}`,
         },
         {
           accessorKey: 'callsign',
-          header: 'Callsign',
+          header: t('Callsign'),
           cell: ({ row }: { row: { original: UserRow } }) => {
             const user = row.original;
             if (!user.editing) {
@@ -503,7 +505,7 @@ export default {
         },
         {
           accessorKey: 'username',
-          header: 'Username',
+          header: t('Username'),
           cell: ({ row }: { row: { original: UserRow } }) => {
             const user = row.original;
             if (!user.editing) {
@@ -520,16 +522,16 @@ export default {
         },
         {
           accessorKey: 'approved',
-          header: this.approval ? 'Approve?' : 'Approved',
+          header: this.approval ? t('Approve?') : t('Approved'),
           cell: ({ row }: { row: { original: UserRow } }) => {
             const user = row.original;
             if (this.approval) {
               return h('button', {
                 class: buttonVariants({ variant: 'outline', size: 'sm' }),
                 onClick: () => this.handleApprovePage(user),
-              }, 'Approve');
+              }, t('Approve'));
             }
-            return user.approved ? 'Yes' : 'No';
+            return user.approved ? t('Yes') : t('No');
           },
         },
       );
@@ -538,7 +540,7 @@ export default {
         columns.push(
           {
             accessorKey: 'suspended',
-            header: 'Suspend?',
+            header: t('Suspend?'),
             cell: ({ row }: { row: { original: UserRow } }) => {
               const user = row.original;
               return h('input', {
@@ -554,7 +556,7 @@ export default {
           },
           {
             accessorKey: 'admin',
-            header: 'Admin?',
+            header: t('Admin?'),
             cell: ({ row }: { row: { original: UserRow } }) => {
               const user = row.original;
               return h('input', {
@@ -570,7 +572,7 @@ export default {
           },
           {
             accessorKey: 'repeaters',
-            header: 'Repeater Count',
+            header: t('Repeater Count'),
             cell: ({ row }: { row: { original: UserRow } }) => `${row.original.repeaters}`,
           },
         );
@@ -578,7 +580,7 @@ export default {
 
       columns.push({
         accessorKey: 'created_at',
-        header: 'Created',
+        header: t('Created'),
         cell: ({ row }: { row: { original: UserRow } }) => {
           const user = row.original;
           return h(RelativeTimestamp, { time: user.created_at });

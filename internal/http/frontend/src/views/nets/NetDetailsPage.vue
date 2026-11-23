@@ -87,7 +87,7 @@
               </div>
               <div v-if="net.duration_minutes" class="detail-row">
                 <dt class="detail-label">{{ $t("Duration Limit") }}</dt>
-                <dd class="detail-value">{{ net.duration_minutes }} minutes</dd>
+                <dd class="detail-value">{{ $t('{n} minute | {n} minutes', { n: net.duration_minutes }) }}</dd>
               </div>
               <div class="detail-row">
                 <dt class="detail-label">{{ $t("Check-Ins") }}</dt>
@@ -121,6 +121,8 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -152,7 +154,7 @@ export default {
     User,
   },
   head: {
-    title: 'Net Details',
+    title: t('Net Details'),
   },
   mounted() {
     const id = this.$route.params.id;
@@ -210,7 +212,7 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          this.error = 'Failed to load net details.';
+          this.error = t('Failed to load net details.');
           this.loading = false;
         });
     },

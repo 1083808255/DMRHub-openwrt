@@ -17,6 +17,7 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
+import { t } from '@/i18n';
 import type { AddProtocolAction } from 'maplibre-gl';
 
 import type { TileAnswer } from './terrain.worker';
@@ -42,7 +43,7 @@ function start(): Worker {
       } else if (e.data.bitmap) {
         w.resolve(e.data.bitmap);
       } else {
-        w.reject(new Error(e.data.error ?? 'no terrain tile'));
+        w.reject(new Error(e.data.error ?? t('no terrain tile')));
       }
     };
   }
@@ -53,7 +54,7 @@ function start(): Worker {
 export const terrainTile: AddProtocolAction = (params, abort) => {
   const m = /^hillshade:\/\/(\d+)\/(\d+)\/(\d+)$/.exec(params.url);
   if (!m) {
-    return Promise.reject(new Error(`not a terrain tile: ${params.url}`));
+    return Promise.reject(new Error(t('not a terrain tile: {url}', { url: params.url })));
   }
   const id = ++next;
   const [z, x, y] = [Number(m[1]), Number(m[2]), Number(m[3])];

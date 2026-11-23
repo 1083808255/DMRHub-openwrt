@@ -49,7 +49,7 @@ export default {
     UserRegistrationCard,
   },
   head: {
-    title: 'Create the first admin',
+    title: t('Create the first admin'),
   },
   methods: {
     complete() {
@@ -70,7 +70,7 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: err.response?.data?.error ?? 'Failed to complete setup wizard',
+            detail: err.response?.data?.error ?? t('Failed to complete setup wizard'),
             life: 3000,
           });
         });
@@ -91,7 +91,7 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: err.response?.data?.error ?? 'An unknown error occurred',
+            detail: err.response?.data?.error ?? t('An unknown error occurred'),
             life: 3000,
           });
           if (err.response?.status === 409) {

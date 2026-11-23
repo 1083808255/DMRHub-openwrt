@@ -25,7 +25,7 @@
     :key="c.kind"
     class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 text-xs font-semibold leading-5"
     :class="tone(c.kind)"
-    :title="c.kind === 'lock' ? 'Set by the deployment' : undefined"
+    :title="c.kind === 'lock' ? $t('Set by the deployment') : undefined"
     :data-test="`source-chip-${c.kind}`"
   >
     <Lock v-if="c.kind === 'lock'" class="size-3" aria-hidden="true" />

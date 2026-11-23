@@ -65,7 +65,7 @@
                 class="rounded-md border bg-muted px-2.5 py-1 font-mono text-xl font-semibold tracking-[0.04em] break-all"
                 data-test="secret"
               >{{ secret }}</span>
-              <CopyButton :text="secret" :label="`Copy ${secretWord}`" />
+              <CopyButton :text="secret" :label="$t('Copy {name}', { name: secretWord })" />
             </div>
             <div v-else class="details-v justify-between">
               <span class="text-muted-foreground" data-test="secret-hidden">{{ $t("Hidden") }}</span>
@@ -83,7 +83,7 @@
           <template v-if="secret">
             <div class="mt-3.5 rounded-[10px] border border-warn-border bg-warn-bg px-3.5 py-3 text-sm text-warn-fg" data-test="copy-now">
               <b>{{ $t("Copy the") }} {{ secretWord }} {{ $t("now. This page shows it only once.") }}</b> {{ $t("When you leave this page, DMRHub does not show it again. If you lose it, open this") }} {{ noun }} {{ $t("on the Repeaters page and click") }}
-              <b>{{ $t("Rotate") }} {{ secretWord }}</b>. DMRHub then makes a new one and shows it once.
+              <b>{{ $t("Rotate") }} {{ secretWord }}</b>. {{ $t("DMRHub then makes a new one and shows it once.") }}
             </div>
             <div v-if="rotatedAt" class="mt-3.5 rounded-[10px] border bg-muted px-3.5 py-3 text-sm" data-test="rotated">
               {{ $t("The old") }} {{ secretWord }} {{ $t("stopped working. Put the new") }} {{ secretWord }} {{ $t("in your software and it logs in again.") }}
@@ -222,7 +222,7 @@ export default {
     TabsTrigger,
   },
   head: {
-    title: 'Connect',
+    title: $t('Connect'),
   },
   data() {
     return {
@@ -264,13 +264,13 @@ export default {
       return this.repeater ? connectKind(this.repeater.type || 'mmdvm', this.repeater.id) : null;
     },
     noun(): string {
-      return this.kind ? deviceNoun(this.kind) : 'repeater';
+      return this.kind ? deviceNoun(this.kind) : $t('repeater');
     },
     secretWord(): string {
-      return this.kind ? secretName(this.kind) : 'password';
+      return this.kind ? secretName(this.kind) : $t('password');
     },
     secretLabel(): string {
-      return this.kind === 'ipsc' ? 'Auth key' : 'Password';
+      return this.kind === 'ipsc' ? $t('Auth key') : $t('Password');
     },
     tabs(): ClientTab[] {
       return this.kind ? clientTabs(this.kind) : [];
@@ -284,9 +284,9 @@ export default {
     },
     details(): { label: string; value: string }[] {
       return [
-        { label: 'Server address', value: this.host },
-        { label: 'Port', value: String(this.port) },
-        { label: this.kind === 'hotspot' ? 'Hotspot ID' : 'Repeater ID', value: String(this.repeater?.id ?? '') },
+        { label: $t('Server address'), value: this.host },
+        { label: $t('Port'), value: String(this.port) },
+        { label: this.kind === 'hotspot' ? $t('Hotspot ID') : $t('Repeater ID'), value: String(this.repeater?.id ?? '') },
       ];
     },
     values(): ConnectValues {
@@ -297,20 +297,23 @@ export default {
         port: this.port,
         id: r.id,
         password: this.secret || secretPlaceholder(this.kind!),
-        callsign: r.owner?.callsign || '<callsign>',
-        ownerId: r.owner?.id || '<DMR ID>',
+        callsign: r.owner?.callsign || $t('<callsign>'),
+        ownerId: r.owner?.id || $t('<DMR ID>'),
         essid: essid(r.id),
       };
     },
     title(): string {
-      const name = `${this.kind === 'hotspot' ? 'Hotspot' : 'Repeater'} ${this.repeater?.id}`;
-      return this.firstVisit && !this.rotatedAt ? `${name} is enrolled` : `${name}: connect`;
+      const name = `${this.kind === 'hotspot' ? $t('Hotspot') : $t('Repeater')} ${this.repeater?.id}`;
+      return this.firstVisit && !this.rotatedAt ? $t('{name} is enrolled', { name }) : $t('{name}: connect', { name });
     },
     lead(): string {
-      const owner = this.repeater?.owner?.id ? `Owner ${this.repeater.owner.callsign} (${this.repeater.owner.id}). ` : '';
+      const owner = this.repeater?.owner?.id
+        ? $t('Owner {callsign} ({id}).', { callsign: this.repeater.owner.callsign, id: this.repeater.owner.id }) + ' '
+        : '';
       if (this.firstVisit) {
-        const where = this.kind === 'ipsc' ? 'CPS of the repeater' : `program that runs your ${this.noun}`;
-        return `${owner}Put the values below in the ${where}.`;
+        const where =
+          this.kind === 'ipsc' ? $t('CPS of the repeater') : $t('program that runs your {device}', { device: this.noun });
+        return owner + $t('Put the values below in the {where}.', { where });
       }
       return owner.trim();
     },
@@ -324,11 +327,11 @@ export default {
     liveText(): string {
       if (this.connected) {
         const s = Math.max(0, Math.round((this.now - this.lastPing) / 1000));
-        return `Connected now. Last ping ${s} ${s === 1 ? 'second' : 'seconds'} ago`;
+        return $t('Connected now. Last ping {n} second ago | Connected now. Last ping {n} seconds ago', { n: s });
       }
-      if (this.rotatedAt) return `Waiting for a login with the new ${this.secretWord}`;
-      if (this.lastPing) return `Not connected. Last ping ${formatDistanceStrict(this.lastPing, this.now)} ago`;
-      return 'Waiting for the first login';
+      if (this.rotatedAt) return $t('Waiting for a login with the new {secret}', { secret: this.secretWord });
+      if (this.lastPing) return $t('Not connected. Last ping {when} ago', { when: formatDistanceStrict(this.lastPing, this.now) });
+      return $t('Waiting for the first login');
     },
     canRotate(): boolean {
       const user = useUserStore();
@@ -337,9 +340,9 @@ export default {
     },
     next(): { label: string; to: string }[] {
       return [
-        { label: 'Pick your talkgroups', to: '/repeaters' },
-        { label: 'Check the connection', to: `/repeaters/${this.repeaterID}` },
-        { label: 'Call the parrot', to: '/lastheard' },
+        { label: $t('Pick your talkgroups'), to: '/repeaters' },
+        { label: $t('Check the connection'), to: `/repeaters/${this.repeaterID}` },
+        { label: $t('Call the parrot'), to: '/lastheard' },
       ];
     },
   },
@@ -354,7 +357,7 @@ export default {
         .then((res) => {
           this.repeater = res.data;
           if (this.repeater && !connectKind(this.repeater.type || 'mmdvm', this.repeater.id)) {
-            this.error = 'This repeater does not connect over the network.';
+            this.error = $t('This repeater does not connect over the network.');
           }
         })
         .catch((err) => {
@@ -373,7 +376,9 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          toast.error('Error', { description: errorText(err, `Could not rotate the ${this.secretWord}. Try again later.`) });
+          toast.error($t('Error'), {
+            description: errorText(err, $t('Could not rotate the {secret}. Try again later.', { secret: this.secretWord })),
+          });
         })
         .finally(() => {
           this.rotating = false;

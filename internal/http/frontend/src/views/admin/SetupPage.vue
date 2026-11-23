@@ -141,7 +141,7 @@ const listNames = (names: string[]): string => {
   if (names.length <= 1) {
     return names.join('');
   }
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(', ')}${t(' and ')}${names[names.length - 1]}`;
 };
 
 const flatErrors = (v: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> => {
@@ -164,13 +164,13 @@ const showApplyError = (e: ApplyError, self: boolean): ShownApplyError => {
   const replica = e.replica ? replicaName(e.replica) : '';
   if (e.field) {
     return {
-      summary: `Replica ${replica} cannot run with the saved ${settingLabel(e.field)}. It keeps its previous settings.`,
+      summary: t('Replica {replica} cannot run with the saved {setting}. It keeps its previous settings.', { replica, setting: settingLabel(e.field) }),
       detail: e.error,
     };
   }
-  const state = e.running ? 'It keeps running with its previous settings.' : 'It is not running.';
-  const of = self || !replica ? '' : ` of replica ${replica}`;
-  return { summary: `The ${serverName(e.server)} server${of} could not start with the new settings. ${state}`, detail: e.error };
+  const state = e.running ? t('It keeps running with its previous settings.') : t('It is not running.');
+  const of = self || !replica ? '' : t(' of replica {replica}', { replica });
+  return { summary: t('The {server} server{of} could not start with the new settings. {state}', { server: serverName(e.server), of, state }), detail: e.error };
 };
 
 const fieldsByPath: Record<string, FieldDef> = Object.fromEntries(TABS.flatMap(tabFields).map((f) => [f.path, f]));
@@ -180,7 +180,7 @@ const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '
 export default defineComponent({
   components: { Lock, SetupMenu, ShadButton },
   head() {
-    return { title: 'Admin Setup' };
+    return { title: t('Admin Setup') };
   },
   provide() {
     return { [setupStateKey as symbol]: this.setupState };
@@ -220,7 +220,7 @@ export default defineComponent({
     },
     saveText(): string {
       if (this.readOnly) {
-        return 'Nothing on this tab can change while DMRHub runs.';
+        return t('Nothing on this tab can change while DMRHub runs.');
       }
       if (this.savedMsg[this.tab.id]) {
         return this.savedMsg[this.tab.id] as string;
@@ -229,45 +229,45 @@ export default defineComponent({
         return this.failMsg;
       }
       const extra = this.tab.saveNote ?? '';
-      return this.dirty[this.tab.id] ? `You have unsaved changes on this tab. ${extra}`.trim() : extra;
+      return this.dirty[this.tab.id] ? t('You have unsaved changes on this tab. {extra}', { extra }).trim() : extra;
     },
     allCurrent(): boolean {
       return this.setupState.replicas.every((r) => r.current);
     },
     replicaCount(): string {
       const n = this.setupState.replicas.length;
-      return n === 1 ? '1 replica' : `${n} replicas`;
+      return n === 1 ? t('1 replica') : t('{n} replicas', { n });
     },
     revisionText(): string {
       const rev = this.setupState.revision;
       if (rev === 0) {
-        return 'Nothing is saved in Setup yet.';
+        return t('Nothing is saved in Setup yet.');
       }
       const n = this.setupState.replicas.length;
       if (!this.allCurrent) {
         const behind = this.setupState.replicas.filter((r) => !r.current).map((r) => replicaName(r.id));
-        return `The latest save is revision ${rev}. Replica ${listNames(behind)} does not run it yet.`;
+        return t('The latest save is revision {rev}. Replica {behind} does not run it yet.', { rev, behind: listNames(behind) });
       }
       if (n <= 1) {
-        return `It runs revision ${rev}.`;
+        return t('It runs revision {rev}.', { rev });
       }
-      return n === 2 ? `Both run revision ${rev}.` : `All run revision ${rev}.`;
+      return n === 2 ? t('Both run revision {rev}.', { rev }) : t('All run revision {rev}.', { rev });
     },
     applyHeading(): string {
       if (this.failedReplicas.length === 0) {
-        return 'The settings were saved, but some could not be put into effect.';
+        return t('The settings were saved, but some could not be put into effect.');
       }
       const names = this.failedReplicas.map(replicaName);
-      const who = names.length === 1 ? `replica ${names[0]}` : `replicas ${listNames(names)}`;
-      return `The settings were saved, but ${who} could not put all of them into effect.`;
+      const who = names.length === 1 ? t('replica {name}', { name: names[0] }) : t('replicas {names}', { names: listNames(names) });
+      return t('The settings were saved, but {who} could not put all of them into effect.', { who });
     },
     differText(): string {
       const paths = Object.entries(this.setupState.settings).filter(([, s]) => s.disagree).map(([p]) => settingLabel(p));
       const n = paths.length;
-      return `${n} ${n === 1 ? 'setting differs' : 'settings differ'} between replicas: ${listNames(paths)}.`;
+      return t('{n} {what} between replicas: {paths}.', { n, what: n === 1 ? t('setting differs') : t('settings differ'), paths: listNames(paths) });
     },
     unansweredText(): string {
-      return `Replica ${listNames(this.unanswered.map(replicaName))} did not report in time.`;
+      return t('Replica {replicas} did not report in time.', { replicas: listNames(this.unanswered.map(replicaName)) });
     },
   },
   watch: {
@@ -336,7 +336,7 @@ export default defineComponent({
       const local = this.localError(tab);
       if (Object.keys(local).length > 0) {
         this.errors = local;
-        this.failMsg = 'Some settings on this tab are not valid. Fix the marked fields and save again.';
+        this.failMsg = t('Some settings on this tab are not valid. Fix the marked fields and save again.');
         return;
       }
       const payload = tabPayload(tab, this.original, this.edited);
@@ -347,8 +347,8 @@ export default defineComponent({
           this.errors = flatErrors(check.data?.errors);
           const here = tabPaths(tab).some((p) => p in this.errors);
           this.failMsg = here
-            ? 'Some settings on this tab are not valid. Fix the marked fields and save again.'
-            : `Some saved settings on other tabs are not valid: ${listNames(Object.keys(this.errors).map(settingLabel))}.`;
+            ? t('Some settings on this tab are not valid. Fix the marked fields and save again.')
+            : t('Some saved settings on other tabs are not valid: {settings}.', { settings: listNames(Object.keys(this.errors).map(settingLabel)) });
           return;
         }
         this.errors = {};
@@ -359,9 +359,11 @@ export default defineComponent({
         this.applyOK = '';
         const replicas = (asRecord(response?.data)?.replicas ?? []) as SaveReplica[];
         this.unanswered = replicas.filter((r) => !r.self && !r.answered).map((r) => r.id);
-        const others = replicas.length > 1 ? ' Every replica that answered put it into effect.' : '';
+        const others = replicas.length > 1
+          ? ' ' + t('Every replica that answered put it into effect.')
+          : '';
         await this.load(tab);
-        this.savedMsg[tab.id] = `Saved at ${now()}.${others}`;
+        this.savedMsg[tab.id] = t('Saved at {time}.{others}', { time: now(), others });
       } catch (error: unknown) {
         const res = asRecord(asRecord(error)?.response);
         const data = asRecord(res?.data);
@@ -374,17 +376,19 @@ export default defineComponent({
           this.failedReplicas = [...new Set(failures.map((e) => e.replica ?? ''))].filter((r) => r !== '' && r !== self);
           const selfFailed = failures.some((e) => !e.replica || e.replica === self);
           this.applyOK = self && !selfFailed && this.failedReplicas.length > 0
-            ? `Replica ${replicaName(self)} runs with the new settings.`
+            ? t('Replica {replica} runs with the new settings.', { replica: replicaName(self) })
             : '';
           this.unanswered = replicas.filter((r) => !r.self && !r.answered).map((r) => r.id);
           await this.load(tab);
-          this.savedMsg[tab.id] = `Saved at ${now()}, but some settings could not be put into effect.`;
+          this.savedMsg[tab.id] = t('Saved at {time}, but some settings could not be put into effect.', { time: now() });
           return;
         }
         if (res?.status === 400 && data?.errors) {
           this.errors = flatErrors(data.errors);
         }
-        this.failMsg = typeof data?.error === 'string' ? `The settings were not saved: ${data.error}.` : 'The settings were not saved.';
+        this.failMsg = typeof data?.error === 'string'
+          ? t('The settings were not saved: {error}.', { error: data.error })
+          : t('The settings were not saved.');
         this.$toast.add({ severity: 'error', summary: t('Error'), detail: t('Failed to save the settings'), life: 3000 });
       } finally {
         this.saving = false;

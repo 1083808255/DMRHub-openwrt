@@ -312,7 +312,7 @@ export default {
     TabsTrigger,
   },
   head: {
-    title: 'OpenBridge Peer',
+    title: $t('OpenBridge Peer'),
   },
   data() {
     return {
@@ -371,9 +371,9 @@ export default {
     },
     details(): { label: string; value: string }[] {
       return [
-        { label: 'Server address', value: this.host },
-        { label: 'Port', value: String(this.port) },
-        { label: 'Peer ID', value: String(this.peer?.id ?? '') },
+        { label: $t('Server address'), value: this.host },
+        { label: $t('Port'), value: String(this.port) },
+        { label: $t('Peer ID'), value: String(this.peer?.id ?? '') },
       ];
     },
     tabs(): PeerTab[] {
@@ -381,7 +381,9 @@ export default {
     },
     setupTitle(): string {
       const first = this.tabs[0];
-      return this.tabs.length === 1 && first ? `Set up ${PEER_TABS[first].name}` : 'Set up the other server';
+      return this.tabs.length === 1 && first
+        ? $t('Set up {name}', { name: PEER_TABS[first].name })
+        : $t('Set up the other server');
     },
     values(): PeerValues {
       return {
@@ -400,11 +402,13 @@ export default {
       return this.lastPing > 0 && this.now - this.lastPing < PING_RECENT_MS;
     },
     pingText(): string {
-      if (!this.lastPing) return 'Last ping: never';
-      return `Last ping ${formatDistanceStrict(this.lastPing, Math.max(this.now, this.lastPing))} ago`;
+      if (!this.lastPing) return $t('Last ping: never');
+      return $t('Last ping {when} ago', { when: formatDistanceStrict(this.lastPing, Math.max(this.now, this.lastPing)) });
     },
     title(): string {
-      return this.firstVisit && !this.rotatedAt ? `Peer ${this.peer?.id} is added` : `Peer ${this.peer?.id}`;
+      return this.firstVisit && !this.rotatedAt
+        ? $t('Peer {id} is added', { id: this.peer?.id })
+        : $t('Peer {id}', { id: this.peer?.id });
     },
   },
   watch: {
@@ -450,7 +454,7 @@ export default {
     save() {
       const port = Number(this.form.port);
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        toast.error('Error', { description: 'Port must be between 1 and 65535' });
+        toast.error($t('Error'), { description: $t('Port must be between 1 and 65535') });
         return;
       }
       const body: Record<string, unknown> = {
@@ -467,11 +471,11 @@ export default {
       API.patch(`/peers/${this.peerID}`, body)
         .then((res) => {
           this.load(res.data);
-          toast.success('Saved', { description: `Peer ${this.peerID} saved` });
+          toast.success($t('Saved'), { description: $t('Peer {id} saved', { id: this.peerID }) });
         })
         .catch((err) => {
           console.error(err);
-          toast.error('Error', { description: errorText(err, `Could not save peer ${this.peerID}.`) });
+          toast.error($t('Error'), { description: errorText(err, $t('Could not save peer {id}.', { id: this.peerID })) });
         })
         .finally(() => {
           this.saving = false;
@@ -481,12 +485,12 @@ export default {
       API.delete(`/peers/${this.peerID}`)
         .then(() => {
           this.deleting = false;
-          toast.success('Deleted', { description: `Peer ${this.peerID} deleted` });
+          toast.success($t('Deleted'), { description: $t('Peer {id} deleted', { id: this.peerID }) });
           this.$router.push(this.listPath);
         })
         .catch((err) => {
           console.error(err);
-          toast.error('Error', { description: errorText(err, `Could not delete peer ${this.peerID}.`) });
+          toast.error($t('Error'), { description: errorText(err, $t('Could not delete peer {id}.', { id: this.peerID })) });
         });
     },
     rotate() {
@@ -499,7 +503,7 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          toast.error('Error', { description: errorText(err, $t('Could not rotate the password. Try again later.')) });
+          toast.error($t('Error'), { description: errorText(err, $t('Could not rotate the password. Try again later.')) });
         })
         .finally(() => {
           this.rotating = false;

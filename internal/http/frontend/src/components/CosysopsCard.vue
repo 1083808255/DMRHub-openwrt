@@ -107,8 +107,8 @@ const hasActions = computed(() => manages.value || props.data.cosysops.some((c) 
 const day = (iso: string | null) => (iso ? format(new Date(iso), 'MMM d, yyyy') : '');
 
 const removeLabel = (c: Cosysop) => {
-  if (c.id === props.myId) return 'Leave';
-  return c.pending ? 'Cancel invite' : 'Remove';
+  if (c.id === props.myId) return t('Leave');
+  return c.pending ? t('Cancel invite') : t('Remove');
 };
 
 const invite = async () => {
@@ -119,7 +119,7 @@ const invite = async () => {
   message.value = '';
   try {
     const res = await API.post(`/repeaters/${props.repeaterId}/cosysops`, { user });
-    message.value = `Invited ${res.data.callsign}. They see the invite on their Repeaters page.`;
+    message.value = t('Invited {callsign}. They see the invite on their Repeaters page.', { callsign: res.data.callsign });
     name.value = '';
     emit('changed');
   } catch (err) {

@@ -97,8 +97,8 @@ import { errorText } from '@/services/settings';
 
 useHead({ title: t('Upload a plugin') });
 
-const notAPlugin = 'Choose a .wasm plugin file.';
-const notWasm = "This file is not a WebAssembly module. Choose the .wasm file that the plugin's build made.";
+const notAPlugin = () => t('Choose a .wasm plugin file.');
+const notWasm = () => t("This file is not a WebAssembly module. Choose the .wasm file that the plugin's build made.");
 
 const file = ref<File | null>(null);
 const manifest = ref<PluginManifest | null>(null);
@@ -133,7 +133,7 @@ const choose = async (e: Event) => {
     return;
   }
   if (!/\.wasm$/i.test(f.name)) {
-    fileError.value = notWasm;
+    fileError.value = notWasm();
     return;
   }
   busy.value = true;
@@ -147,7 +147,7 @@ const choose = async (e: Event) => {
         show(refusal.manifest, f);
       }
     } else {
-      fileError.value = errorText(err, notAPlugin);
+      fileError.value = errorText(err, notAPlugin());
     }
   } finally {
     busy.value = false;
@@ -162,7 +162,7 @@ const upload = async () => {
   problems.value = [];
   const ranges = parseIDs(ids.value);
   if (ranges === null) {
-    saveError.value = 'Use IDs and ranges such as 9990, 5050-5059.';
+    saveError.value = t('Use IDs and ranges such as 9990, 5050-5059.');
     return;
   }
   busy.value = true;

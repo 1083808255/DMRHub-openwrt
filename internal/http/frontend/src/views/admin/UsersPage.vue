@@ -27,6 +27,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import UserTable from '@/components/UserTable.vue';
 
 export default {
@@ -34,8 +35,8 @@ export default {
     UserTable,
   },
   head: {
-    title: 'Users',
-    titleTemplate: 'Admin | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
+    title: t('Users'),
+    titleTemplate: t('Admin') + ' | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
   },
   created() {},
   mounted() {},

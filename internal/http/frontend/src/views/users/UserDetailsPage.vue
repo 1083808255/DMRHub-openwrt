@@ -67,7 +67,7 @@
               </span>
               <span class="inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-medium"
                 :class="user.approved ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500'">
-                {{ user.approved ? 'Approved' : 'Pending Approval' }}
+                {{ user.approved ? $t('Approved') : $t('Pending Approval') }}
               </span>
               <ShadButton
                 v-if="mayRequirePasswordChange"
@@ -175,8 +175,8 @@
             :columns="columns"
             :data="lastheard"
             :loading="lastheardLoading"
-            :loading-text="'Loading...'"
-            :empty-text="'No transmissions match these types'"
+            :loading-text="$t('Loading...')"
+            :empty-text="$t('No transmissions match these types')"
             :manual-pagination="true"
             :page-index="page - 1"
             :page-size="rows"
@@ -197,6 +197,8 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
+
 import { RouterLink } from 'vue-router';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -252,7 +254,7 @@ export default {
     RelativeTimestamp,
   },
   head: {
-    title: 'User Details',
+    title: t('User Details'),
   },
   created() {},
   mounted() {
@@ -333,7 +335,7 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          this.error = 'Failed to load user details. You may not have permission to view this user.';
+          this.error = t('Failed to load user details. You may not have permission to view this user.');
           this.loading = false;
         });
     },

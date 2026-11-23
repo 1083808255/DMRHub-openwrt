@@ -41,6 +41,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import CosysopInvites from '@/components/CosysopInvites.vue';
 import { RouterLink } from 'vue-router';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -49,9 +50,11 @@ import RepeaterTable from '@/components/RepeaterTable.vue';
 import SegmentPicker from '@/components/SegmentPicker.vue';
 import { useUserStore } from '@/store';
 
-const VIEWS = [
-  { value: 'mine', label: 'My repeaters' },
-  { value: 'local', label: 'Local groups' },
+// A function, so the labels are translated when they are read rather than
+// when this module loads.
+const VIEWS = () => [
+  { value: 'mine', label: t('My repeaters') },
+  { value: 'local', label: t('Local groups') },
 ];
 
 export default {
@@ -64,12 +67,15 @@ export default {
     ShadButton,
   },
   head: {
-    title: 'Repeaters',
+    title: t('Repeaters'),
   },
   data: function() {
-    return { views: VIEWS, reload: 0 };
+    return { reload: 0 };
   },
   computed: {
+    views() {
+      return VIEWS();
+    },
     view(): string {
       return this.$route.query.view === 'local' ? 'local' : 'mine';
     },

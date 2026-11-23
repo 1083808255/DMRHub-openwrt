@@ -31,8 +31,8 @@
       :columns="columns"
       :data="repeaters"
       :loading="loading"
-      :loading-text="'Loading...'"
-      :empty-text="'No repeaters found'"
+      :loading-text="$t('Loading...')"
+      :empty-text="$t('No repeaters found')"
       :manual-pagination="true"
       :page-index="page - 1"
       :page-size="rows"
@@ -157,15 +157,15 @@ export default {
 
             const repeater = row.original;
             if (!repeater.editable) {
-              return actionButton('Edit', () => this.startEdit(repeater));
+              return actionButton(t('Edit'), () => this.startEdit(repeater));
             }
 
             const actions: Array<ReturnType<typeof h>> = [
-              actionButton('Save', () => this.saveTalkgroups(repeater)),
+              actionButton(t('Save'), () => this.saveTalkgroups(repeater)),
             ];
-            actions.push(actionButton('Cancel', () => this.cancelEdit(repeater)));
+            actions.push(actionButton(t('Cancel'), () => this.cancelEdit(repeater)));
             if (!this.isCosysopRow(repeater)) {
-              actions.push(actionButton('Delete', () => this.deleteRepeater(repeater)));
+              actions.push(actionButton(t('Delete'), () => this.deleteRepeater(repeater)));
             }
 
             return h('div', { class: 'flex gap-2 whitespace-nowrap' }, actions);
@@ -173,7 +173,7 @@ export default {
         },
         {
           accessorKey: 'id',
-          header: 'DMR Radio ID',
+          header: t('DMR Radio ID'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             return h(RouterLink, {
               to: `/repeaters/${row.original.id}`,
@@ -183,56 +183,56 @@ export default {
         },
         ...(this.showOwner ? [{
           accessorKey: 'owner',
-          header: 'Owner',
+          header: t('Owner'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!this.isCosysopRow(repeater)) {
-              return 'You';
+              return t('You');
             }
             return h('span', { class: 'inline-flex items-center gap-1.5 whitespace-nowrap' }, [
               repeater.owner?.callsign ?? '',
               h('span', {
                 class: 'rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground',
                 'data-test': `cosysop-badge-${repeater.id}`,
-              }, 'Co-sysop'),
+              }, t('Co-sysop')),
             ]);
           },
         }] : []),
         {
           accessorKey: 'type',
-          header: 'Type',
+          header: t('Type'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => (row.original.type || 'mmdvm').toUpperCase(),
         },
         {
           accessorKey: 'connected_time',
-          header: 'Last Connected',
+          header: t('Last Connected'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!this.hasTimestamp(repeater.connected_time)) {
-              return 'Never';
+              return t('Never');
             }
             return h(RelativeTimestamp, { time: repeater.connected_time });
           },
         },
         {
           accessorKey: 'last_ping_time',
-          header: 'Last Ping',
+          header: t('Last Ping'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!this.hasTimestamp(repeater.last_ping_time)) {
-              return 'Never';
+              return t('Never');
             }
             return h(RelativeTimestamp, { time: repeater.last_ping_time });
           },
         },
         {
           accessorKey: 'ts1_static_talkgroups',
-          header: 'TS1 Static TGs',
+          header: t('TS1 Static TGs'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!repeater.editable) {
               const options = !carriesSlot(repeater.slots, 1) || repeater.ts1_static_talkgroups.length === 0
-                ? [{ id: 0, label: 'None' }]
+                ? [{ id: 0, label: t('None') }]
                 : repeater.ts1_static_talkgroups.map((tg) => ({ id: tg.id, label: `${tg.id} - ${tg.name}` }));
               return h(
                 'select',
@@ -279,12 +279,12 @@ export default {
         },
         {
           accessorKey: 'ts2_static_talkgroups',
-          header: 'TS2 Static TGs',
+          header: t('TS2 Static TGs'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!repeater.editable) {
               const options = !carriesSlot(repeater.slots, 2) || repeater.ts2_static_talkgroups.length === 0
-                ? [{ id: 0, label: 'None' }]
+                ? [{ id: 0, label: t('None') }]
                 : repeater.ts2_static_talkgroups.map((tg) => ({ id: tg.id, label: `${tg.id} - ${tg.name}` }));
               return h(
                 'select',
@@ -331,14 +331,14 @@ export default {
         },
         {
           accessorKey: 'ts1_dynamic_talkgroup',
-          header: 'TS1 Dynamic TG',
+          header: t('TS1 Dynamic TG'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!repeater.editable) {
               const hasDynamic = carriesSlot(repeater.slots, 1) && repeater.ts1_dynamic_talkgroup.id !== 0;
               const options = hasDynamic
                 ? [{ id: repeater.ts1_dynamic_talkgroup.id, label: `${repeater.ts1_dynamic_talkgroup.id} - ${repeater.ts1_dynamic_talkgroup.name}` }]
-                : [{ id: 0, label: 'None' }];
+                : [{ id: 0, label: t('None') }];
               return h(
                 'select',
                 {
@@ -355,7 +355,7 @@ export default {
               return '';
             }
 
-            const options = [{ id: 0, name: 'None', display: '0 - None' }, ...this.talkgroups];
+            const options = [{ id: 0, name: 'None', display: t('0 - None') }, ...this.talkgroups];
             return h(
               'select',
               {
@@ -366,7 +366,7 @@ export default {
                   const target = event.target as HTMLSelectElement;
                   const selectedID = Number(target.value);
                   const selected = options.find((tg) => tg.id === selectedID);
-                  repeater.ts1_dynamic_talkgroup = selected || { id: 0, name: 'None', display: '0 - None' };
+                  repeater.ts1_dynamic_talkgroup = selected || { id: 0, name: 'None', display: t('0 - None') };
                 },
               },
               options.map((tg) => h('option', { value: tg.id }, tg.display)),
@@ -375,14 +375,14 @@ export default {
         },
         {
           accessorKey: 'ts2_dynamic_talkgroup',
-          header: 'TS2 Dynamic TG',
+          header: t('TS2 Dynamic TG'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!repeater.editable) {
               const hasDynamic = carriesSlot(repeater.slots, 2) && repeater.ts2_dynamic_talkgroup.id !== 0;
               const options = hasDynamic
                 ? [{ id: repeater.ts2_dynamic_talkgroup.id, label: `${repeater.ts2_dynamic_talkgroup.id} - ${repeater.ts2_dynamic_talkgroup.name}` }]
-                : [{ id: 0, label: 'None' }];
+                : [{ id: 0, label: t('None') }];
               return h(
                 'select',
                 {
@@ -399,7 +399,7 @@ export default {
               return '';
             }
 
-            const options = [{ id: 0, name: 'None', display: '0 - None' }, ...this.talkgroups];
+            const options = [{ id: 0, name: 'None', display: t('0 - None') }, ...this.talkgroups];
             return h(
               'select',
               {
@@ -410,7 +410,7 @@ export default {
                   const target = event.target as HTMLSelectElement;
                   const selectedID = Number(target.value);
                   const selected = options.find((tg) => tg.id === selectedID);
-                  repeater.ts2_dynamic_talkgroup = selected || { id: 0, name: 'None', display: '0 - None' };
+                  repeater.ts2_dynamic_talkgroup = selected || { id: 0, name: 'None', display: t('0 - None') };
                 },
               },
               options.map((tg) => h('option', { value: tg.id }, tg.display)),
@@ -419,7 +419,7 @@ export default {
         },
         {
           accessorKey: 'simplex_repeater',
-          header: 'Simplex',
+          header: t('Simplex'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!repeater.editable) {
@@ -436,7 +436,7 @@ export default {
         },
         ...(this.admin ? [{
           accessorKey: 'trusted',
-          header: 'Trusted',
+          header: t('Trusted'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             if (!repeater.editable) {
@@ -453,7 +453,7 @@ export default {
         }] : []),
         {
           accessorKey: 'created_at',
-          header: 'Created',
+          header: t('Created'),
           cell: ({ row }: { row: { original: RepeaterRow } }) => {
             const repeater = row.original;
             return h(RelativeTimestamp, { time: repeater.created_at });
@@ -611,8 +611,8 @@ export default {
         .then(() => {
           this.$toast.add({
             severity: 'success',
-            summary: 'Success',
-            detail: `Repeater ${repeater.id} updated`,
+            summary: t('Success'),
+            detail: t('Repeater {id} updated', { id: repeater.id }),
             life: 3000,
           });
           repeater.editable = false;
@@ -627,14 +627,14 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: 'Failed to update repeater: ' + err.response.data.error,
+              detail: t('Failed to update repeater: {error}', { error: err.response.data.error }),
               life: 3000,
             });
           } else {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: `Error updating repeater ${repeater.id}`,
+              detail: t('Error updating repeater {id}', { id: repeater.id }),
               life: 3000,
             });
           }
@@ -654,8 +654,8 @@ export default {
         .then(() => {
           this.$toast.add({
             severity: 'success',
-            summary: 'Success',
-            detail: `Talkgroup ${tg} unlinked on TS${ts} for repeater ${repeater.id}`,
+            summary: t('Success'),
+            detail: t('Talkgroup {talkgroup} unlinked on TS{slot} for repeater {id}', { talkgroup: tg, slot: ts, id: repeater.id }),
             life: 3000,
           });
           this.fetchData();
@@ -665,7 +665,7 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: `Error unlinking talkgroup for repeater ${repeater.id}`,
+            detail: t('Error unlinking talkgroup for repeater {id}', { id: repeater.id }),
             life: 3000,
           });
         });
@@ -673,17 +673,17 @@ export default {
     deleteRepeater(repeater: RepeaterRow) {
       // First, show a confirmation dialog
       this.$confirm.require({
-        message: 'Are you sure you want to delete this repeater?',
-        header: 'Delete Repeater',
+        message: t('Are you sure you want to delete this repeater?'),
+        header: t('Delete Repeater'),
         icon: 'pi pi-exclamation-triangle',
         acceptClass: 'p-button-danger',
         accept: () => {
           API.delete('/repeaters/' + repeater.id)
             .then(() => {
               this.$toast.add({
-                summary: 'Confirmed',
+                summary: t('Confirmed'),
                 severity: 'success',
-                detail: `Repeater ${repeater.id} deleted`,
+                detail: t('Repeater {id} deleted', { id: repeater.id }),
                 life: 3000,
               });
               // Immediately remove the deleted repeater from the local array
@@ -700,7 +700,7 @@ export default {
               this.$toast.add({
                 severity: 'error',
                 summary: t('Error'),
-                detail: `Error deleting repeater ${repeater.id}`,
+                detail: t('Error deleting repeater {id}', { id: repeater.id }),
                 life: 3000,
               });
             });

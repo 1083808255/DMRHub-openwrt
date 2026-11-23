@@ -46,7 +46,7 @@ fi
 LOCAL_LABEL="$LOCAL_VERSION"
 
 log() { echo "[dmrhub-ota] $*"; }
-die() { echo "[dmrhub-ota] ERROR: $*" >&2; exit 1; }
+die() { echo "[dmrhub-ota] 错误：$*" >&2; exit 1; }
 
 # fetch <url> <outfile> - download with whatever the image provides.
 fetch() {
@@ -71,15 +71,15 @@ load_manifest() {
 	_ok=0
 	for _base in "$MANIFEST_URL" "$MIRROR_URL"; do
 		[ -n "$_base" ] || continue
-		log "fetching manifest from $_base"
+		log "正在获取版本清单：$_base"
 		if fetch "$_base" "$MANIFEST" && [ -s "$MANIFEST" ]; then
 			_ok=1
 			break
 		fi
 	done
-	[ "$_ok" = 1 ] || die "cannot fetch the version manifest from any source"
+	[ "$_ok" = 1 ] || die "无法从任何源获取版本清单，请检查设备网络连接"
 	# A manifest without a version field is not usable.
-	[ -n "$(json '@.version')" ] || die "the version manifest has no version field"
+	[ -n "$(json '@.version')" ] || die "版本清单缺少 version 字段"
 }
 
 # resolve_url <file-field> <url-field> - an absolute URL for a release asset.
@@ -143,9 +143,9 @@ save_version() {
 cmd_check() {
 	load_release
 	if up_to_date; then
-		log "already up to date ($REMOTE_VERSION)"
+		log "已是最新版本（$REMOTE_VERSION）"
 	else
-		log "update available: $LOCAL_LABEL -> $REMOTE_VERSION"
+		log "发现新版本：$LOCAL_LABEL -> $REMOTE_VERSION"
 	fi
 }
 
@@ -164,37 +164,37 @@ cmd_status() {
 cmd_app() {
 	load_release
 	if up_to_date && [ "${1:-}" != "--force" ]; then
-		log "already up to date ($REMOTE_VERSION)"
+		log "已是最新版本（$REMOTE_VERSION）"
 		return 0
 	fi
-	[ -n "$REMOTE_APP_URL" ] || die "the version manifest names no application package"
-	log "downloading $REMOTE_APP_URL"
-	fetch "$REMOTE_APP_URL" "$APP_FILE" || die "download failed"
+	[ -n "$REMOTE_APP_URL" ] || die "版本清单中没有应用程序包信息"
+	log "正在下载应用包：$REMOTE_APP_URL"
+	fetch "$REMOTE_APP_URL" "$APP_FILE" || die "下载失败"
 	if [ -n "$REMOTE_APP_SHA" ]; then
-		echo "$REMOTE_APP_SHA  $APP_FILE" | sha256sum -c - >/dev/null || die "sha256 mismatch"
+		echo "$REMOTE_APP_SHA  $APP_FILE" | sha256sum -c - >/dev/null || die "SHA256 校验不通过，文件可能已损坏"
 	fi
-	log "installing the application package"
-	opkg install --force-reinstall "$APP_FILE" || die "opkg install failed"
+	log "正在安装应用程序包"
+	opkg install --force-reinstall "$APP_FILE" || die "opkg 安装失败"
 	save_version "$REMOTE_TAG"
 	/etc/init.d/dmrhub restart
-	log "application updated to $REMOTE_VERSION"
+	log "应用程序已更新至 $REMOTE_VERSION"
 }
 
 cmd_firmware() {
 	load_release
-	[ -n "$REMOTE_FW_URL" ] || die "the version manifest names no firmware image"
+	[ -n "$REMOTE_FW_URL" ] || die "版本清单中没有固件镜像信息"
 	if [ "${1:-}" != "--yes" ]; then
-		log "WARNING: flashing the firmware reboots the device"
-		printf "Type 'yes' to continue: "
+		log "警告：刷写固件会重启设备"
+		printf "输入 yes 继续： "
 		read -r ans
-		[ "$ans" = "yes" ] || die "aborted"
+		[ "$ans" = "yes" ] || die "已取消"
 	fi
-	log "downloading $REMOTE_FW_URL"
-	fetch "$REMOTE_FW_URL" "$FW_FILE" || die "download failed"
+	log "正在下载固件：$REMOTE_FW_URL"
+	fetch "$REMOTE_FW_URL" "$FW_FILE" || die "下载失败"
 	if [ -n "$REMOTE_FW_SHA" ]; then
-		echo "$REMOTE_FW_SHA  $FW_FILE" | sha256sum -c - >/dev/null || die "sha256 mismatch"
+		echo "$REMOTE_FW_SHA  $FW_FILE" | sha256sum -c - >/dev/null || die "SHA256 校验不通过，文件可能已损坏"
 	fi
-	log "flashing the firmware; the device will reboot"
+	log "正在刷写固件，设备即将重启"
 	# -k keeps the current configuration, -u skips backup files that already
 	# match what is in /rom.
 	sysupgrade -k -u "$FW_FILE"
@@ -214,7 +214,7 @@ firmware)
 	cmd_firmware "${2:-}"
 	;;
 *)
-	echo "Usage: $0 {check|status|app|firmware}"
+	echo "用法：$0 {check|status|app|firmware}"
 	exit 1
 	;;
 esac

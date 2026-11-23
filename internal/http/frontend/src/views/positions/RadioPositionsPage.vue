@@ -55,14 +55,14 @@
           <div class="flex items-center justify-between gap-4">
             <div class="flex flex-col gap-0.5">
               <span id="track-label" class="text-sm font-medium">{{ $t("Position tracking") }}</span>
-              <span class="text-[13px] text-muted-foreground">{{ form.tracking ? 'On.' : 'Off.' }}</span>
+              <span class="text-[13px] text-muted-foreground">{{ form.tracking ? $t('On.') : $t('Off.') }}</span>
             </div>
             <Switch v-model="form.tracking" aria-labelledby="track-label" data-test="tracking-switch" />
           </div>
           <div class="flex flex-col gap-1.5">
             <label for="interval" class="text-sm font-medium">{{ $t("Report every") }}</label>
             <select id="interval" v-model.number="form.interval_minutes" class="h-10 rounded-md border bg-background px-3 text-sm">
-              <option v-for="m in choices.intervals" :key="m" :value="m">{{ m }} minutes</option>
+              <option v-for="m in choices.intervals" :key="m" :value="m">{{ $t('{n} minute | {n} minutes', { n: m }) }}</option>
             </select>
           </div>
           <div class="flex flex-col gap-1.5">
@@ -181,7 +181,7 @@ import { errorStatus, errorText } from '@/services/settings';
 const route = useRoute();
 const radio = Number(route.params.id);
 
-useHead({ title: `Positions of ${radio}` });
+useHead({ title: t('Positions of {id}', { id: radio }) });
 
 const downloads = [
   { format: 'gpx', label: 'GPX' },
@@ -210,22 +210,30 @@ const saving = ref(false);
 const message = ref('');
 const failed = ref(false);
 
-const ssids = computed(() =>
-  SSIDS.some((s) => s.value === form.aprs_ssid) ? SSIDS : [...SSIDS, { value: form.aprs_ssid, label: `-${form.aprs_ssid}` }],
-);
+const ssids = computed(() => {
+  const list = SSIDS.some((s) => s.value === form.aprs_ssid)
+    ? [...SSIDS]
+    : [...SSIDS, { value: form.aprs_ssid, label: `-${form.aprs_ssid}` }];
+  // The labels live in the catalogue, so translate them where they are shown.
+  return list.map((s) => ({ value: s.value, label: t(s.label) }));
+});
 
 const subtitle = computed(() => {
-  const when = latest.value ? `last report ${formatAgo(latest.value.received_at)}` : 'no report in the last day';
+  const when = latest.value
+    ? t('last report {when}', { when: formatAgo(latest.value.received_at) })
+    : t('no report in the last day');
   return `${choices.value.callsign} · ${when}`;
 });
 
 const reportedSymbol = computed(() => {
   const name = latest.value ? serviceSymbol(latest.value.service_id) : undefined;
-  return name ? `As the radio reports it (${symbolLabel(name).toLowerCase()})` : 'As the radio reports it';
+  return name
+    ? t('As the radio reports it ({symbol})', { symbol: symbolLabel(name).toLowerCase() })
+    : t('As the radio reports it');
 });
 
 const aprsStatus = computed(() =>
-  form.aprs && form.tracking ? `On, as ${aprsName(choices.value.callsign, form.aprs_ssid)}.` : 'Off.',
+  form.aprs && form.tracking ? t('On, as {call}.', { call: aprsName(choices.value.callsign, form.aprs_ssid) }) : t('Off.'),
 );
 
 watch(
@@ -252,7 +260,7 @@ const save = async () => {
       aprs_symbol: s.aprs_symbol,
       aprs_comment: s.aprs_comment,
     });
-    message.value = 'Saved.';
+    message.value = t('Saved.');
   } catch (err) {
     failed.value = true;
     message.value = errorText(err, t('Could not save. Try again later.'));

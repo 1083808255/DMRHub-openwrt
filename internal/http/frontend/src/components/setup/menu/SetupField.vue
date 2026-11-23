@@ -45,7 +45,7 @@
       <div class="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 font-semibold">
         <label v-if="labelFor" :for="id">{{ field.label }}</label>
         <span v-else :id="`${id}-label`">{{ field.label }}</span>
-        <span v-if="field.count && entries > 0" class="text-xs font-medium text-muted-foreground" data-test="field-count">{{ entries }} {{ entries === 1 ? 'entry' : 'entries' }}</span>
+        <span v-if="field.count && entries > 0" class="text-xs font-medium text-muted-foreground" data-test="field-count">{{ $t('{n} entry | {n} entries', { n: entries }) }}</span>
         <SourceChips :setting="setting" />
       </div>
       <select
@@ -84,7 +84,7 @@
             @change="set(String(o.value))"
           />
           <span>
-            <b class="block">{{ o.label }}<span v-if="isDefault(o.value)" class="ml-1.5 text-[11px] font-bold text-primary">DEFAULT</span></b>
+            <b class="block">{{ o.label }}<span v-if="isDefault(o.value)" class="ml-1.5 text-[11px] font-bold text-primary">{{ $t('DEFAULT') }}</span></b>
             <span v-if="o.description" class="text-sm text-muted-foreground">{{ o.description }}</span>
           </span>
         </label>
@@ -155,8 +155,8 @@
           data-test="duration-unit"
           @change="(e) => setDuration(durationCount, Number((e.target as HTMLSelectElement).value))"
         >
-          <option :value="String(HOUR)">hours</option>
-          <option :value="String(DAY)">days</option>
+          <option :value="String(HOUR)">{{ $t('hours') }}</option>
+          <option :value="String(DAY)">{{ $t('days') }}</option>
         </select>
       </div>
       <ShadInput
@@ -191,6 +191,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { t } from '@/i18n';
 import SettingNote from '@/components/setup/SettingNote.vue';
 import ModemPortSelect from '@/components/setup/menu/ModemPortSelect.vue';
 import SourceChips from '@/components/setup/menu/SourceChips.vue';
@@ -226,8 +227,8 @@ const entries = computed(() => (Array.isArray(normalized.value) ? normalized.val
 const help = computed(() => (typeof props.field.help === 'function' ? props.field.help(props.read) : props.field.help));
 const defaultText = computed(() => defaultNote(props.field, props.setting, props.value));
 const modes = [
-  { value: false, label: 'Hotspot (simplex)' },
-  { value: true, label: 'Repeater (duplex)' },
+  { value: false, get label() { return t('Hotspot (simplex)'); } },
+  { value: true, get label() { return t('Repeater (duplex)'); } },
 ];
 const segments = computed(() => (props.field.kind === 'segment' ? props.field.options ?? [] : modes));
 

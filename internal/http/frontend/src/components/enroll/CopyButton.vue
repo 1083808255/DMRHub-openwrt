@@ -26,6 +26,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n';
 import { Button as ShadButton } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 
@@ -36,7 +37,7 @@ const copy = async () => {
     await navigator.clipboard.writeText(String(props.text));
     toast.success('Copied');
   } catch {
-    toast.error('Could not copy. Select the text and copy it.');
+    toast.error(t('Could not copy. Select the text and copy it.'));
   }
 };
 </script>

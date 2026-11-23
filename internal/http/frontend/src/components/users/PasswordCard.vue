@@ -80,13 +80,13 @@ const saving = ref(false);
 
 const check = (): string => {
   if (!current.value) {
-    return 'Enter your current password.';
+    return t('Enter your current password.');
   }
   if (!next.value) {
-    return 'Enter a new password.';
+    return t('Enter a new password.');
   }
   if (next.value !== confirm.value) {
-    return 'The new passwords do not match.';
+    return t('The new passwords do not match.');
   }
   return '';
 };

@@ -93,7 +93,7 @@ const play = async () => {
   try {
     await playPrompt(previewURL(voice.value || defaultVoice.value, 'talkgroup-not-found'));
   } catch {
-    error.value = 'Could not play the prompt.';
+    error.value = t('Could not play the prompt.');
   }
 };
 </script>

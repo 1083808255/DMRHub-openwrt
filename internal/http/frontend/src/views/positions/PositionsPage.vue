@@ -273,11 +273,11 @@ const rows = computed<Row[]>(() => {
     return [];
   }
   const own: Row[] = r.radios.map((s, i) => {
-    let status = 'Tracking is off';
+    let status = $t('Tracking is off');
     if (s.tracking) {
-      status = `Tracking every ${s.interval_minutes} min`;
+      status = $t('Tracking every {minutes} min', { minutes: s.interval_minutes });
       if (s.aprs) {
-        status += ` · APRS-IS as ${aprsName(r.callsign, s.aprs_ssid)}`;
+        status += $t(' · APRS-IS as {call}', { call: aprsName(r.callsign, s.aprs_ssid) });
       }
     }
     return {
@@ -307,7 +307,7 @@ const rows = computed<Row[]>(() => {
       shared: true,
       tracking: true,
       latest: p,
-      status: p.callsign ? `Shared by ${p.callsign}` : 'Shared',
+      status: p.callsign ? $t('Shared by {callsign}', { callsign: p.callsign }) : $t('Shared'),
     }));
   return [...own, ...shared];
 });

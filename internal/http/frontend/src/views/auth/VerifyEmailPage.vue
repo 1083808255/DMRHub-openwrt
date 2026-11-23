@@ -45,7 +45,7 @@ import { errorText } from '@/services/settings';
 
 useHead({ title: t('Confirm your email address') });
 
-const badLink = 'This link does not work. It is older than 24 hours, was used already, or is for an older address.';
+const badLink = () => t('This link does not work. It is older than 24 hours, was used already, or is for an older address.');
 
 const state = ref<'loading' | 'done' | 'bad'>('loading');
 const message = ref('');
@@ -54,7 +54,7 @@ onMounted(async () => {
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
   window.history.replaceState(window.history.state, '', window.location.pathname);
   if (!token) {
-    message.value = badLink;
+    message.value = badLink();
     state.value = 'bad';
     return;
   }
@@ -62,7 +62,7 @@ onMounted(async () => {
     message.value = await verifyEmail(token);
     state.value = 'done';
   } catch (err) {
-    message.value = errorText(err, badLink);
+    message.value = errorText(err, badLink());
     state.value = 'bad';
   }
 });

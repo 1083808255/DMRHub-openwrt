@@ -140,7 +140,7 @@ const answer = async (approve: boolean) => {
     state.value = approve ? 'allowed' : 'denied';
     goTo(redirect);
   } catch {
-    error.value = 'Could not send your answer. Try again.';
+    error.value = t('Could not send your answer. Try again.');
   } finally {
     busy.value = false;
   }

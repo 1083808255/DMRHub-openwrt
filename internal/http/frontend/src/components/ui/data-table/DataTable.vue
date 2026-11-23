@@ -31,8 +31,8 @@ const props = withDefaults(
   }>(),
   {
     loading: false,
-    loadingText: "Loading...",
-    emptyText: "No results.",
+    loadingText: "",
+    emptyText: "",
     pageIndex: 0,
     pageSize: 30,
     pageCount: -1,
@@ -136,10 +136,10 @@ const visibleRows = computed(() => {
       </TableHeader>
       <TableBody>
         <TableRow v-if="loading">
-          <TableCell :colspan="columns.length" class="text-center">{{ loadingText }}</TableCell>
+          <TableCell :colspan="columns.length" class="text-center">{{ loadingText || $t('Loading...') }}</TableCell>
         </TableRow>
         <TableRow v-else-if="visibleRows.length === 0">
-          <TableCell :colspan="columns.length" class="text-center">{{ emptyText }}</TableCell>
+          <TableCell :colspan="columns.length" class="text-center">{{ emptyText || $t('No results.') }}</TableCell>
         </TableRow>
         <template v-for="row in visibleRows" :key="row.id">
           <TableRow

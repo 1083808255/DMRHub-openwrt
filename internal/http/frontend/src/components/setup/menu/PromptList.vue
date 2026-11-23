@@ -37,7 +37,7 @@
                 type="button"
                 variant="outline"
                 size="sm"
-                :aria-label="`Play ${r.text}`"
+                :aria-label="$t('Play {text}', { text: r.text })"
                 data-test="prompt-play"
                 @click="play(r.clip)"
               >
@@ -55,6 +55,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { t } from '@/i18n';
 import { Button as ShadButton } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { playPrompt, SPOKEN_REFUSALS } from '@/lib/prompts';
@@ -71,7 +72,7 @@ const play = async (clip: string) => {
   try {
     await playPrompt(setupPreviewURL(clip, typeof voice === 'string' ? voice : undefined));
   } catch {
-    error.value = 'Could not play the prompt.';
+    error.value = t('Could not play the prompt.');
   }
 };
 </script>

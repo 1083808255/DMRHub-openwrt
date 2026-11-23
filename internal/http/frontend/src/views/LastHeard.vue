@@ -27,6 +27,7 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
 import LastHeardTable from '@/components/LastHeardTable.vue';
 
 export default {
@@ -34,7 +35,7 @@ export default {
     LastHeardTable,
   },
   head: {
-    title: 'Last Heard',
+    title: t('Last Heard'),
   },
   created() {},
   mounted() {},

@@ -35,7 +35,7 @@
         />
         <span v-if="v$.dmr_id.$error && submitted">
           <span v-for="(error, index) of v$.dmr_id.$errors" :key="index">
-            <small class="field-error">{{ error.$message.replace("Value", "DMR ID") }}</small>
+            <small class="field-error">{{ error.$message.replace('Value', $t('DMR ID')) }}</small>
             <br />
           </span>
         </span>
@@ -46,7 +46,7 @@
               v$.dmr_id.$pending.$response
             "
             class="field-error"
-            >{{ v$.dmr_id.required.$message.replace("Value", "DMR ID") }}
+            >{{ v$.dmr_id.required.$message.replace('Value', $t('DMR ID')) }}
             <br />
           </small>
         </span>
@@ -148,7 +148,7 @@
             v-for="(error, index) of v$.confirmPassword.$errors"
             :key="index"
           >
-            <small class="field-error">{{ error.$message.replace("Value", "Confirm Password") }}</small>
+            <small class="field-error">{{ error.$message.replace('Value', $t('Confirm Password')) }}</small>
             <br />
           </span>
         </span>
@@ -159,7 +159,7 @@
               v$.confirmPassword.$pending.$response
             "
             class="field-error"
-            >{{ v$.confirmPassword.required.$message.replace("Value", "Confirm Password") }}
+            >{{ v$.confirmPassword.required.$message.replace('Value', $t('Confirm Password')) }}
             <br />
           </small>
         </span>
@@ -203,7 +203,7 @@ export default {
   props: {
     'title': {
       type: String,
-      default: 'Register User',
+      default: t('Register User'),
     },
     'emailMode': {
       type: String,
@@ -255,7 +255,7 @@ export default {
         this.$toast.add({
           severity: 'error',
           summary: t('Error'),
-          detail: `DMR ID must be a number`,
+          detail: t('DMR ID must be a number'),
           life: 3000,
         });
         return;
@@ -264,7 +264,7 @@ export default {
         this.$toast.add({
           severity: 'error',
           summary: t('Error'),
-          detail: `Passwords do not match`,
+          detail: t('Passwords do not match'),
           life: 3000,
         });
         return;

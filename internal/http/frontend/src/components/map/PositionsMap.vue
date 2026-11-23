@@ -58,6 +58,7 @@
 import type { GeoJSONSource, Map as MapLibre, MapLayerMouseEvent, Marker } from 'maplibre-gl';
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
+import { t as $t } from '@/i18n';
 import BaseMap from '@/components/map/BaseMap.vue';
 import { blipElement, setBlipMode } from '@/lib/blip';
 import type { TxMode } from '@/lib/txActivity';
@@ -349,7 +350,7 @@ const repeaterCard = () => {
     left: at.x > width - CARD_ROOM,
     title: r.title,
     where: r.location ? `${formatCoordinates(r)} · ${r.location}` : formatCoordinates(r),
-    when: `Repeater · connected ${formatAgo(r.connected_time)}`,
+    when: $t('Repeater · connected {when}', { when: formatAgo(r.connected_time) }),
   };
 };
 
@@ -374,7 +375,7 @@ const card = computed(() => {
     left: at.x > width - CARD_ROOM,
     title: t.title,
     where: formatCoordinates(p) + accuracy,
-    when: `${formatAgo(p.received_at)} via ${p.repeater_id} TS${p.slot}`,
+    when: $t('{when} via {repeater} TS{slot}', { when: formatAgo(p.received_at), repeater: p.repeater_id, slot: p.slot }),
   };
 });
 

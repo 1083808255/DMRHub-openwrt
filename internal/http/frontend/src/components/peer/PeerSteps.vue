@@ -42,16 +42,16 @@
 
     <template v-else-if="tab === 'other'">
       <StepTable
-        :head="['Setting', 'Value']"
+        :head="[$t('Setting'), $t('Value')]"
         :rows="[
-          ['Protocol', 'OpenBridge version 1'],
-          ['Both slots', 'On'],
-          ['Network ID', val(values.id)],
-          ['Passphrase', val(values.password)],
-          ['Target address', val(values.host)],
-          ['Target port', val(values.port)],
-          ['Listen address', val(values.ip)],
-          ['Listen port', val(values.peerPort)],
+          [$t('Protocol'), $t('OpenBridge version 1')],
+          [$t('Both slots'), $t('On')],
+          [$t('Network ID'), val(values.id)],
+          [$t('Passphrase'), val(values.password)],
+          [$t('Target address'), val(values.host)],
+          [$t('Target port'), val(values.port)],
+          [$t('Listen address'), val(values.ip)],
+          [$t('Listen port'), val(values.peerPort)],
         ]"
       />
     </template>

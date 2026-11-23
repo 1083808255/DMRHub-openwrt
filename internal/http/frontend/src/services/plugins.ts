@@ -154,7 +154,7 @@ export async function deletePlugin(id: number): Promise<void> {
 /** formatRanges is the IDs of a plugin as the list shows them: 990001–990009, 9998. */
 export function formatRanges(ranges: PluginRange[]): string {
   if (ranges.length === 0) {
-    return 'None';
+    return t('None');
   }
   return ranges.map((r) => (r.first === r.last ? `${r.first}` : `${r.first}–${r.last}`)).join(', ');
 }
@@ -183,9 +183,9 @@ export function runsLabel(kind: PluginKind): string {
     case 'builtin':
       return t('Built in');
     case 'uploaded':
-      return 'Uploaded';
+      return t('Uploaded');
     default:
-      return 'External';
+      return t('External');
   }
 }
 
@@ -240,31 +240,37 @@ export function insideState(p: AdminPlugin, now: number = Date.now()): PluginSta
 /** status is what the list says of a plugin's connection, or of a plugin inside DMRHub. */
 export function status(p: AdminPlugin, now: number = Date.now(), timeZone?: string): string {
   if (!p.enabled) {
-    return 'Off';
+    return t('Off');
   }
   if (isInside(p)) {
     switch (insideState(p, now)) {
       case 'off':
-        return 'Off';
+        return t('Off');
       case 'running':
         return t('Running in DMRHub');
       case 'waiting':
-        return `Waiting for its IDs, ${p.waiting_id} is used by ${p.waiting_for}`;
+        return t('Waiting for its IDs, {id} is used by {other}', { id: p.waiting_id, other: p.waiting_for });
       case 'stopped':
-        return `Stopped at ${shortTime(new Date(p.stopped_at ?? ''), timeZone)}, starts again in ${secondsUntil(p.restart_at, now)} s`;
+        return t('Stopped at {time}, starts again in {seconds} s', {
+          time: shortTime(new Date(p.stopped_at ?? ''), timeZone),
+          seconds: secondsUntil(p.restart_at, now),
+        });
       default:
-        return 'Starting';
+        return t('Starting');
     }
   }
   if (p.online && p.connected_since) {
-    return `Connected for ${formatSpan(p.connected_since, now)}, from ${p.address.replace(/:\d+$/, '')}`;
+    return t('Connected for {span}, from {address}', {
+      span: formatSpan(p.connected_since, now),
+      address: p.address.replace(/:\d+$/, ''),
+    });
   }
   if (p.last_seen_at) {
     const seen = new Date(p.last_seen_at);
     if (now - seen.getTime() < 24 * 60 * 60 * 1000) {
-      return `Not connected since ${shortTime(seen, timeZone)}`;
+      return t('Not connected since {time}', { time: shortTime(seen, timeZone) });
     }
-    return `Not connected since ${formatDay(p.last_seen_at, timeZone)}`;
+    return t('Not connected since {day}', { day: formatDay(p.last_seen_at, timeZone) });
   }
   return t('Not connected yet');
 }
@@ -275,10 +281,14 @@ export function stopNote(p: AdminPlugin, now: number = Date.now(), timeZone?: st
     return null;
   }
   const stops = p.stops_last_hour ?? 1;
-  const times = stops === 1 ? 'once' : `${stops} times`;
+  const times = stops === 1 ? t('once') : t('{count} times', { count: stops });
   return {
-    title: `Stopped at ${shortTime(new Date(p.stopped_at ?? ''), timeZone)}.`,
-    body: `${p.stop_reason ?? ''} DMRHub starts it again in ${secondsUntil(p.restart_at, now)} s. It has stopped ${times} in the last hour.`,
+    title: t('Stopped at {time}.', { time: shortTime(new Date(p.stopped_at ?? ''), timeZone) }),
+    body: t('{reason} DMRHub starts it again in {seconds} s. It has stopped {times} in the last hour.', {
+      reason: p.stop_reason ?? '',
+      seconds: secondsUntil(p.restart_at, now),
+      times,
+    }),
   };
 }
 

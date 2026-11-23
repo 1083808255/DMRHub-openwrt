@@ -46,7 +46,7 @@
       </CardHeader>
       <CardContent class="flex flex-col gap-4">
         <p class="max-w-[70ch] border-l-[3px] border-border py-1 pl-3.5 text-sm" data-test="sms-privacy">
-          {{ privacyText }}
+          {{ privacyText() }}
         </p>
         <div>
           <ShadButton as-child>
@@ -82,7 +82,7 @@
             :page="boxes[name].page"
             :page-size="pageSize"
             :page-count="boxPageCount(boxes[name].total, pageSize)"
-            :summary="`showing ${boxes[name].rows.length} · this box shows the ${cap} most recent messages`"
+            :summary="$t('showing {shown} · this box shows the {cap} most recent messages', { shown: boxes[name].rows.length, cap })"
             @update:page="(page: number) => loadBox(name, page)"
           />
         </TabsContent>
@@ -168,16 +168,15 @@ import ws from '@/services/ws';
 
 useHead({ title: t('Messages') });
 
-const privacyText =
-  'When SMS Storage is on, the text messages sent to and from the radio IDs that you own appear on your ' +
-  'Messages page, up to the 250 newest in each box.';
+const privacyText = () =>
+  t('When SMS Storage is on, the text messages sent to and from the radio IDs that you own appear on your Messages page, up to the 250 newest in each box.');
 
 const cap = MESSAGE_BOX_CAP;
 const pageSize = 25;
 const boxNames: MessageBox[] = ['inbox', 'outbox'];
 const boxDescriptions: Record<MessageBox, string> = {
-  inbox: 'Private messages sent to your radio IDs. Group messages to talkgroups are not shown here.',
-  outbox: 'Messages sent from your radio IDs, including group messages to talkgroups.',
+  inbox: t('Private messages sent to your radio IDs. Group messages to talkgroups are not shown here.'),
+  outbox: t('Messages sent from your radio IDs, including group messages to talkgroups.'),
 };
 
 type BoxState = {
@@ -207,10 +206,10 @@ const radioIDList = computed(() => radioIDs.value.join(', '));
 const statTiles = computed(() => {
   const s = stats.value;
   return [
-    { key: 'inbox', label: 'Inbox', value: Math.min(s?.inbox ?? 0, cap) },
-    { key: 'outbox', label: 'Outbox', value: Math.min(s?.outbox ?? 0, cap) },
-    { key: 'ack', label: 'Delivered (ACK)', value: s?.ack ?? 0 },
-    { key: 'nack', label: 'Rejected (NACK)', value: s?.nack ?? 0 },
+    { key: 'inbox', label: t('Inbox'), value: Math.min(s?.inbox ?? 0, cap) },
+    { key: 'outbox', label: t('Outbox'), value: Math.min(s?.outbox ?? 0, cap) },
+    { key: 'ack', label: t('Delivered (ACK)'), value: s?.ack ?? 0 },
+    { key: 'nack', label: t('Rejected (NACK)'), value: s?.nack ?? 0 },
   ];
 });
 
@@ -220,7 +219,7 @@ const formatRows = computed(() => {
     label: formatLabel(f),
     count: byFormat[f] ?? 0,
   }));
-  return rows.length > 0 ? rows : [{ label: 'None', count: 0 }];
+  return rows.length > 0 ? rows : [{ label: t('None'), count: 0 }];
 });
 
 const dayLabel = (day: string) => {

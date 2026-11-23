@@ -277,15 +277,15 @@ export default {
       const min = parseID(this.draft.min);
       const max = this.draft.max.trim() === '' ? min : parseID(this.draft.max);
       if (min === null || max === null) {
-        this.err = 'Enter whole numbers.';
+        this.err = t('Enter whole numbers.');
         return;
       }
       if (min > max) {
-        this.err = 'The last ID must not be lower than the first ID.';
+        this.err = t('The last ID must not be lower than the first ID.');
         return;
       }
       if (max === 0) {
-        this.err = 'The last ID must be above 0.';
+        this.err = t('The last ID must be above 0.');
         return;
       }
       if (max > MAX_DMR_ID) {
@@ -303,7 +303,7 @@ export default {
           this.rules.push(res.data.rule);
           this.adding = '';
           this.err = '';
-          toast.success('Rule added', { description: `Peer ${this.peerId}` });
+          toast.success(t('Rule added'), { description: `Peer ${this.peerId}` });
         })
         .catch((err) => {
           console.error(err);
@@ -318,7 +318,7 @@ export default {
         .then(() => {
           this.rules = this.rules.filter((x) => x.id !== r.id);
           this.confirm = null;
-          toast.success('Rule deleted', { description: `Peer ${this.peerId}` });
+          toast.success(t('Rule deleted'), { description: `Peer ${this.peerId}` });
         })
         .catch((err) => {
           console.error(err);

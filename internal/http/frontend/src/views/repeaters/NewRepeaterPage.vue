@@ -47,7 +47,7 @@
           />
           <span v-if="v$.radioID.$error && submitted">
             <span v-for="(error, index) of v$.radioID.$errors" :key="index">
-              <small class="p-error">{{ error.$message.replace("Value", "Radio ID") }}</small>
+              <small class="p-error">{{ error.$message.replace('Value', $t('Radio ID')) }}</small>
             </span>
             <br />
           </span>
@@ -59,7 +59,7 @@
               "
               class="p-error"
               >{{
-                v$.radioID.required.$message.replace("Value", "Radio ID")
+                v$.radioID.required.$message.replace('Value', $t('Radio ID'))
               }}</small
             >
           </span>
@@ -133,7 +133,7 @@ export default {
     UserPicker,
   },
   head: {
-    title: 'New Repeater',
+    title: t('New Repeater'),
   },
   setup: () => ({ v$: useVuelidate() }),
   created() {
@@ -192,7 +192,7 @@ export default {
         { label: 'MMDVM', value: 'mmdvm' },
       ];
       if (settingsStore.ipscEnabled) {
-        types.push({ label: 'Motorola IPSC', value: 'ipsc' });
+        types.push({ label: t('Motorola IPSC'), value: 'ipsc' });
       }
       return types;
     },
@@ -230,7 +230,7 @@ export default {
             this.$toast.add({
               summary: t('Error'),
               severity: 'error',
-              detail: `Error registering repeater`,
+              detail: t('Error registering repeater'),
               life: 3000,
             });
           } else {

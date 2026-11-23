@@ -33,7 +33,7 @@
     <template v-else-if="loaded">
       <Card data-test="group-card">
         <CardHeader>
-          <CardTitle>{{ isNew ? 'New local group' : group?.name }}</CardTitle>
+          <CardTitle>{{ isNew ? $t('New local group') : group?.name }}</CardTitle>
           <CardDescription>
             {{ $t("A call to TG") }} {{ talkgroup || '…' }} {{ $t("on one of these repeaters goes to all of them, and nowhere else.") }}
           </CardDescription>
@@ -62,7 +62,7 @@
           </div>
           <div v-if="canManage" class="flex flex-wrap items-center gap-3">
             <ShadButton type="button" :disabled="busy" data-test="group-save" @click="save">
-              {{ isNew ? 'Make group' : 'Save' }}
+              {{ isNew ? $t('Make group') : $t('Save') }}
             </ShadButton>
             <span v-if="message" class="text-sm" :class="failed ? 'text-destructive' : 'text-muted-foreground'" data-test="group-message">{{ message }}</span>
           </div>
@@ -91,14 +91,14 @@
                 </TableRow>
                 <TableRow v-for="r in group.repeaters" :key="r.id" :data-test="`member-${r.id}`">
                   <TableCell>{{ r.callsign ? `${r.callsign} — ${r.id}` : r.id }}</TableCell>
-                  <TableCell>{{ r.mine ? 'You' : r.owner.callsign }}</TableCell>
+                  <TableCell>{{ r.mine ? $t('You') : r.owner.callsign }}</TableCell>
                   <TableCell>
                     <ShadSelect
                       :model-value="String(r.slot)"
                       :disabled="!canManage && !r.mine"
                       @update:model-value="(v) => setSlot(r.id, Number(v) as 1 | 2)"
                     >
-                      <SelectTrigger class="h-8 w-20" :aria-label="`Slot of ${r.id}`" :data-test="`slot-${r.id}`">
+                      <SelectTrigger class="h-8 w-20" :aria-label="$t('Slot of {id}', { id: r.id })" :data-test="`slot-${r.id}`">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -218,7 +218,7 @@ export default {
     TableRow,
   },
   head: {
-    title: 'Local group',
+    title: t('Local group'),
   },
   data: function() {
     return {
@@ -303,24 +303,24 @@ export default {
           return;
         }
         this.show(await saveLocalGroup(this.group!.id, this.name, this.talkgroup));
-        this.message = 'Saved';
-      }, 'Could not save the group');
+        this.message = t('Saved');
+      }, t('Could not save the group'));
     },
     add() {
       const id = Number(this.addID.trim());
       if (!/^\d{6,9}$/.test(this.addID.trim())) {
-        this.addError = 'Type the 6 to 9 digit ID of a repeater or hotspot';
+        this.addError = t('Type the 6 to 9 digit ID of a repeater or hotspot');
         return;
       }
       return this.run(async () => {
         this.show(await addLocalGroupRepeater(this.group!.id, id, 2));
         this.addID = '';
-      }, 'Could not add the repeater', 'addError');
+      }, t('Could not add the repeater'), 'addError');
     },
     setSlot(repeater: number, slot: 1 | 2) {
       return this.run(async () => {
         this.show(await setLocalGroupSlot(this.group!.id, repeater, slot));
-      }, 'Could not change the slot');
+      }, t('Could not change the slot'));
     },
     remove(repeater: number) {
       return this.run(async () => {
@@ -330,13 +330,13 @@ export default {
           return;
         }
         this.show(await getLocalGroup(this.group!.id));
-      }, 'Could not remove the repeater');
+      }, t('Could not remove the repeater'));
     },
     destroy() {
       return this.run(async () => {
         await deleteLocalGroup(this.group!.id);
         this.$router.push('/repeaters?view=local');
-      }, 'Could not delete the group');
+      }, t('Could not delete the group'));
     },
   },
 };

@@ -142,7 +142,7 @@
             <p v-if="activeNet.description" class="text-sm text-muted-foreground">{{ activeNet.description }}</p>
             <div class="flex items-center gap-4 text-sm">
               <span>{{ $t("Started by") }} {{ activeNet.started_by_user.callsign }}</span>
-              <span>{{ activeNet.check_in_count + recentCheckIns.length }} check-ins</span>
+              <span>{{ $t('{n} check-in | {n} check-ins', { n: activeNet.check_in_count + recentCheckIns.length }) }}</span>
             </div>
 
             <!-- Recent check-ins panel -->
@@ -159,7 +159,7 @@
                 </span>
               </div>
               <div v-if="recentCheckIns.length > 5" class="text-xs text-muted-foreground pt-1">
-                and {{ recentCheckIns.length - 5 }} more...
+                {{ $t('and {n} more...', { n: recentCheckIns.length - 5 }) }}
               </div>
             </div>
 
@@ -176,7 +176,7 @@
             <p class="text-sm text-muted-foreground">{{ $t("No active net on this talkgroup.") }}</p>
             <div v-if="canRunNets" class="flex gap-2">
               <ShadButton variant="outline" size="sm" @click="showStartNet = !showStartNet">
-                {{ showStartNet ? 'Cancel' : 'Start Net' }}
+                {{ showStartNet ? $t('Cancel') : $t('Start Net') }}
               </ShadButton>
             </div>
             <!-- Inline start form -->
@@ -206,7 +206,7 @@
                   <strong>{{ sn.name }}</strong> —
                   {{ netSchedule(sn.day_of_week, sn.time_of_day, sn.timezone) }}
                   <span v-if="sn.duration_minutes">({{ sn.duration_minutes }}m)</span>
-                  <span v-if="!sn.enabled" class="text-muted-foreground"> (disabled)</span>
+                  <span v-if="!sn.enabled" class="text-muted-foreground"> {{ $t('(disabled)') }}</span>
                 </span>
                 <span v-if="canRunNets">
                   <RouterLink :to="`/nets/scheduled/${sn.id}/edit`">
@@ -232,8 +232,8 @@
             :columns="columns"
             :data="lastheard"
             :loading="lastheardLoading"
-            :loading-text="'Loading...'"
-            :empty-text="'No transmissions match these types'"
+            :loading-text="$t('Loading...')"
+            :empty-text="$t('No transmissions match these types')"
             :manual-pagination="true"
             :page-index="page - 1"
             :page-size="rows"
@@ -248,6 +248,8 @@
 </template>
 
 <script lang="ts">
+import { t } from '@/i18n';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -318,7 +320,7 @@ export default {
     User,
   },
   head: {
-    title: 'Talkgroup Details',
+    title: t('Talkgroup Details'),
   },
   created() {},
   mounted() {
@@ -422,7 +424,7 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          this.error = 'Failed to load talkgroup details.';
+          this.error = t('Failed to load talkgroup details.');
           this.loading = false;
         });
     },
@@ -583,7 +585,7 @@ export default {
         .catch((err) => console.error(err));
     },
     handleDeleteScheduledNet(sn: ScheduledNet) {
-      if (!window.confirm(`Delete scheduled net "${sn.name}"?`)) return;
+      if (!window.confirm(t('Delete scheduled net "{name}"?', { name: sn.name }))) return;
       deleteScheduledNet(sn.id)
         .then(() => {
           this.scheduledNets = this.scheduledNets.filter((s) => s.id !== sn.id);

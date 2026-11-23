@@ -160,8 +160,8 @@ export default {
     ShadInput,
   },
   head: {
-    title: 'New Talkgroup',
-    titleTemplate: 'Admin | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
+    title: t('New Talkgroup'),
+    titleTemplate: t('Admin') + ' | %s | ' + (localStorage.getItem('title') || 'DMRHub'),
   },
   setup: () => ({ v$: useVuelidate() }),
   created() {},
@@ -249,7 +249,7 @@ export default {
                   this.$toast.add({
                     summary: 'Success',
                     severity: 'success',
-                    detail: `Talkgroup created, redirecting...`,
+                    detail: t('Talkgroup created, redirecting...'),
                     life: 3000,
                   });
                   setTimeout(() => {
@@ -273,7 +273,7 @@ export default {
                     this.$toast.add({
                       summary: t('Error'),
                       severity: 'error',
-                      detail: `Error creating talkgroup`,
+                      detail: t('Error creating talkgroup'),
                       life: 3000,
                     });
                   }
@@ -296,7 +296,7 @@ export default {
                 this.$toast.add({
                   summary: t('Error'),
                   severity: 'error',
-                  detail: `Error creating talkgroup`,
+                  detail: t('Error creating talkgroup'),
                   life: 3000,
                 });
               }
@@ -315,7 +315,7 @@ export default {
             this.$toast.add({
               summary: t('Error'),
               severity: 'error',
-              detail: `Error creating talkgroup`,
+              detail: t('Error creating talkgroup'),
               life: 3000,
             });
           }

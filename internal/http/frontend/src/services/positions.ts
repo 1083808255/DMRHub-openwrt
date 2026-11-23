@@ -90,24 +90,24 @@ export const WINDOWS = [
 ] as const;
 
 export const SYMBOLS = [
-  { name: 'house', label: 'House' },
-  { name: 'train', label: 'Train' },
-  { name: 'tractor', label: 'Tractor' },
-  { name: 'pickup', label: 'Pickup' },
-  { name: 'van', label: 'Van' },
-  { name: 'phone', label: 'Phone' },
-  { name: 'camp', label: 'Camp' },
-  { name: 'person', label: 'Person' },
-  { name: 'bike', label: 'Bike' },
-  { name: 'car', label: 'Car' },
+  { name: 'house', get label() { return t('House'); } },
+  { name: 'train', get label() { return t('Train'); } },
+  { name: 'tractor', get label() { return t('Tractor'); } },
+  { name: 'pickup', get label() { return t('Pickup'); } },
+  { name: 'van', get label() { return t('Van'); } },
+  { name: 'phone', get label() { return t('Phone'); } },
+  { name: 'camp', get label() { return t('Camp'); } },
+  { name: 'person', get label() { return t('Person'); } },
+  { name: 'bike', get label() { return t('Bike'); } },
+  { name: 'car', get label() { return t('Car'); } },
 ] as const;
 
 export const SSIDS = [
-  { value: '7', label: '-7 handheld' },
-  { value: '9', label: '-9 mobile' },
-  { value: '5', label: '-5 other network' },
-  { value: '10', label: '-10 internet' },
-  { value: '', label: 'none' },
+  { value: '7', get label() { return t('-7 handheld'); } },
+  { value: '9', get label() { return t('-9 mobile'); } },
+  { value: '5', get label() { return t('-5 other network'); } },
+  { value: '10', get label() { return t('-10 internet'); } },
+  { value: '', get label() { return t('none'); } },
 ] as const;
 
 const FIRST_SERVICE = 5050;
