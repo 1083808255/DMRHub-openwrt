@@ -2,12 +2,17 @@
  * DMRHub OTA helpers for the LuCI "Backup / Flash Firmware" page.
  *
  * This code is appended to a copy of luci-mod-system's system/flash view at
- * build time. It adds a DMRHub section that talks to /usr/sbin/dmrhub-ota,
- * which reads the release manifest, installs the application package and
- * flashes the firmware.
+ * build time. It adds a DMRHub block that talks to /usr/sbin/dmrhub-ota, which
+ * reads the release manifest, installs the application package and flashes the
+ * firmware.
+ *
+ * The block is plain HTML rather than a form section: this LuCI release builds
+ * the flash view on JSONMap, and a section added to it renders its title while
+ * its options never reach the DOM. Buttons built here need nothing from the
+ * form machinery, so they behave the same across LuCI versions.
  *
  * The strings are written in Chinese because this is the zh-CN build; the
- * LuCI translation catalogue ships no entry for our own section.
+ * LuCI translation catalogue ships no entry for our own block.
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -40,7 +45,12 @@ function handleDmrhubOtaCheck(ev) {
 	return dmrhubOtaExec(ev.target, ['status']).then(function (res) {
 		var text = res.text;
 		try {
-			var info = JSON.parse(res.text);
+			/* Take the JSON object, in case the script says something first. */
+			var start = res.text.indexOf('{');
+			var end = res.text.lastIndexOf('}');
+			var info = JSON.parse(start >= 0 && end > start
+				? res.text.slice(start, end + 1)
+				: res.text);
 			if (info.state === 'current') {
 				text = 'DMRHub 已是最新版本：' + info.remote;
 			} else {
@@ -85,24 +95,28 @@ function handleDmrhubOtaFirmware(ev) {
 }
 
 /*
- * dmrhubOtaSection adds the DMRHub block to the page. The patched render()
- * of the system/flash view calls it with its JSONMap.
+ * dmrhubOtaPanel builds the block. The patched render() appends it to the
+ * nodes the page returns.
  */
-function dmrhubOtaSection(m, form) {
-	var s = m.section(form.NamedSection, 'dmrhub_ota', 'dmrhub_ota',
-		'DMRHub 固件升级',
-		'检查 DMRHub 新版本、更新应用程序，或刷写包含 DMRHub 的新固件。');
-	var o = s.option(form.Button, 'dmrhub_ota_check', '检查更新');
-	o.inputstyle = 'action';
-	o.inputtitle = '检查更新';
-	o.onclick = handleDmrhubOtaCheck;
-	o = s.option(form.Button, 'dmrhub_ota_app', '更新 DMRHub 应用程序');
-	o.inputstyle = 'action important';
-	o.inputtitle = '更新应用…';
-	o.onclick = handleDmrhubOtaApp;
-	o = s.option(form.Button, 'dmrhub_ota_firmware', '刷写新的 DMRHub 固件');
-	o.inputstyle = 'action important';
-	o.inputtitle = '刷写固件…';
-	o.onclick = handleDmrhubOtaFirmware;
-	return m;
+function dmrhubOtaPanel() {
+	function action(label, style, handler) {
+		return E('button', {
+			'class': 'cbi-button cbi-button-' + style,
+			'click': handler
+		}, [label]);
+	}
+
+	return E('div', { 'class': 'cbi-section' }, [
+		E('h3', {}, ['DMRHub 固件升级']),
+		E('div', { 'class': 'cbi-section-descr' }, [
+			'检查 DMRHub 新版本、更新应用程序，或刷写包含 DMRHub 的新固件。'
+		]),
+		E('div', { 'class': 'cbi-page-actions' }, [
+			action('检查更新', 'action', handleDmrhubOtaCheck),
+			' ',
+			action('更新应用…', 'action important', handleDmrhubOtaApp),
+			' ',
+			action('刷写固件…', 'action important', handleDmrhubOtaFirmware)
+		])
+	]);
 }

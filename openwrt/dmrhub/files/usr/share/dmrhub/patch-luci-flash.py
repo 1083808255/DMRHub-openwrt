@@ -53,9 +53,12 @@ def main() -> None:
     # 1. The helpers, before the view object is created.
     flash = flash.replace(HELPER_ANCHOR, helpers + HELPER_ANCHOR, 1)
 
-    # 2. The section itself, just before the page renders.
-    call = "m=dmrhubOtaSection(m,form);"
-    flash = flash.replace(SECTION_ANCHOR, call + SECTION_ANCHOR, 1)
+    # 2. The block, after the page has rendered. It cannot be a form section:
+    #    this LuCI release builds the view on JSONMap, where a section added
+    #    from outside renders its title but never its options.
+    call = ("return Promise.resolve(m.render()).then(function(nodes){"
+            "nodes.appendChild(dmrhubOtaPanel());return nodes;});},")
+    flash = flash.replace(SECTION_ANCHOR, call, 1)
 
     with open(out_path, "w", encoding="utf-8") as handle:
         handle.write(flash)

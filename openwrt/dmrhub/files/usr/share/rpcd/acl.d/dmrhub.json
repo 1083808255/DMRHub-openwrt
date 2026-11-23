@@ -1,0 +1,10 @@
+{
+	"dmrhub-ota": {
+		"description": "DMRHub 固件 OTA：允许 LuCI 页面调用升级脚本",
+		"write": {
+			"file": {
+				"/usr/sbin/dmrhub-ota": [ "exec" ]
+			}
+		}
+	}
+}

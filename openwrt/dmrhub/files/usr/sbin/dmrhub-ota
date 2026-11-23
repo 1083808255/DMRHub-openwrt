@@ -61,7 +61,12 @@ fi
 [ -n "$LOCAL_VERSION" ] || LOCAL_VERSION="none"
 LOCAL_LABEL="$LOCAL_VERSION"
 
-log() { echo "[dmrhub-ota] $*"; }
+# status is read by the LuCI page, which parses its stdout, so its progress
+# lines would end up in front of the JSON. QUIET keeps them off stdout.
+log() {
+	[ -n "${QUIET:-}" ] && return 0
+	echo "[dmrhub-ota] $*"
+}
 die() { echo "[dmrhub-ota] 错误：$*" >&2; exit 1; }
 
 # _fetch_once <url> <outfile> - one download with whatever the image provides.
@@ -275,6 +280,7 @@ cmd_check() {
 }
 
 cmd_status() {
+	QUIET=1
 	load_release
 	if up_to_date; then
 		_state="current"
