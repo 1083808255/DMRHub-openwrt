@@ -101,6 +101,19 @@ fetch() {
 	if _fetch_once "$_url" "$_out"; then
 		return 0
 	fi
+	# The Gitee copy of a large asset is best effort: the build uploads it only
+	# while it fits in the runner's budget. Every release has a GitHub copy, so
+	# that one is tried next, directly and then through a proxy.
+	case "$_url" in
+	https://gitee.com/"$GITEE_REPO"/releases/download/*)
+		_alt="https://github.com/$REPO/${_url#https://gitee.com/$GITEE_REPO/}"
+		log "Gitee 下载失败，改用 GitHub：$_alt"
+		if _fetch_once "$_alt" "$_out"; then
+			return 0
+		fi
+		_url="$_alt"
+		;;
+	esac
 	case "$_url" in
 	https://github.com/*) ;;
 	*) return 1 ;;
@@ -150,19 +163,21 @@ resolve_url() {
 	_file="$(json "@.$_file_field")"
 	_tag="$(json '@.release_tag')"
 	[ -n "$_tag" ] || _tag="$(json '@.build_tag')"
-	# The assets live next to the manifest, so a Gitee manifest means Gitee
-	# assets even when the file carries GitHub URLs written by CI.
-	if [ "$MANIFEST_HOST" = "gitee" ]; then
-		[ -n "$_file" ] && [ -n "$_tag" ] || return 1
-		echo "https://gitee.com/$GITEE_REPO/releases/download/$_tag/$_file"
-		return 0
-	fi
+	# CI decides per asset whether the Gitee copy exists, because a large
+	# upload from its runner does not always finish, and it writes the choice
+	# into the manifest. Without a URL, assume the asset sits with the
+	# manifest.
 	_url="$(json "@.$_url_field")"
 	if [ -n "$_url" ]; then
 		echo "$_url"
 		return 0
 	fi
 	[ -n "$_file" ] || return 1
+	[ -n "$_tag" ] || return 1
+	if [ "$MANIFEST_HOST" = "gitee" ]; then
+		echo "https://gitee.com/$GITEE_REPO/releases/download/$_tag/$_file"
+		return 0
+	fi
 	_release="$(json '@.release_url')"
 	case "$_release" in
 	*/releases/tag/*)
