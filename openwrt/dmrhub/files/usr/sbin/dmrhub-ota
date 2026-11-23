@@ -96,7 +96,9 @@ resolve_url() {
 	_release="$(json '@.release_url')"
 	case "$_release" in
 	*/releases/tag/*)
-		echo "${_release%/*}/$_file"
+		# The release URL ends in the tag, but the assets live under
+		# /download/, so swap that segment instead of trimming it.
+		echo "${_release%%/tag/*}/download/$_file"
 		return 0
 		;;
 	esac
