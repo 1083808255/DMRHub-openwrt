@@ -283,7 +283,9 @@ jobs:
           cd artifacts
           APP_SHA=$(sha256sum "${IPK_NAME}" | awk '{print $1}')
           FW_SHA=$(sha256sum "${FW_NAME}" | awk '{print $1}')
-          TAG="${{ steps.ver.outputs.build_tag }}"
+          # The release tag carries the run number, so the URLs in the
+          # manifest point at the same release the assets are published to.
+          TAG="fw-${{ steps.ver.outputs.build_tag }}-${{ github.run_number }}"
           cat > version.json <<EOF
           {
             "version": "1.3.31-zh1-${{ steps.ver.outputs.short_sha }}",

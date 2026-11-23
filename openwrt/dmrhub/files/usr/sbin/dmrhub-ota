@@ -16,9 +16,10 @@ set -eu
 REPO="${DMRHUB_OTA_REPO:-1083808255/DMRHub-openwrt}"
 # The manifest lives next to the release assets; "latest" always points at the
 # newest release, so the script needs no configuration after an install.
-MANIFEST_URL="https://github.com/$REPO/releases/latest/download/version.json"
-# A mirror of the same manifest, used when GitHub cannot be reached.
-MIRROR_URL="https://gitee.com/1083808255/DMRHub-ota/raw/main/version.json"
+MANIFEST_URL="${DMRHUB_OTA_MANIFEST:-https://github.com/$REPO/releases/latest/download/version.json}"
+# Extra sources to try when the first one cannot be reached. Empty by default:
+# the Gitee mirror this script used to fall back on no longer exists.
+MIRROR_URL="${DMRHUB_OTA_MIRROR:-}"
 
 VERSION_DIR="/opt/dmrhub"
 VERSION_FILE="$VERSION_DIR/version"
@@ -33,8 +34,10 @@ LOCAL_LABEL="none"
 # "build_tag" and the binary reports it as its version, so the two can be
 # compared without a separate file to keep in sync.
 if [ -x /usr/bin/dmrhub ]; then
+	# The binary prints "DMRHub version <build tag> - <commit>". Pick the
+	# token that ends in the commit hash, which is the build tag.
 	LOCAL_VERSION=$(/usr/bin/dmrhub --version 2>/dev/null |
-		sed -n 's/^DMRHub - \([^ ]*\).*/\1/p')
+		awk '{ for (i = 1; i <= NF; i++) if ($i ~ /-[0-9a-f]+$/ && length($i) > 8) { print $i; exit } }')
 fi
 if [ -z "$LOCAL_VERSION" ] && [ -f "$VERSION_FILE" ]; then
 	LOCAL_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo none)
@@ -67,6 +70,7 @@ json() {
 load_manifest() {
 	_ok=0
 	for _base in "$MANIFEST_URL" "$MIRROR_URL"; do
+		[ -n "$_base" ] || continue
 		log "fetching manifest from $_base"
 		if fetch "$_base" "$MANIFEST" && [ -s "$MANIFEST" ]; then
 			_ok=1
@@ -89,6 +93,13 @@ resolve_url() {
 	fi
 	_file="$(json "@.$_file_field")"
 	[ -n "$_file" ] || return 1
+	_release="$(json '@.release_url')"
+	case "$_release" in
+	*/releases/tag/*)
+		echo "${_release%/*}/$_file"
+		return 0
+		;;
+	esac
 	echo "https://github.com/$REPO/releases/download/$(json '@.build_tag')/$_file"
 }
 
