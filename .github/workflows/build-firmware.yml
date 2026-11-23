@@ -356,4 +356,7 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           RELEASE_TAG: fw-${{ steps.ver.outputs.build_tag }}-${{ github.run_number }}
+          # A runner reaches Gitee over a slow link; five minutes per large
+          # asset is the budget before the manifest keeps the GitHub URL.
+          GITEE_BIG_TIMEOUT: 300
         run: python3 .github/scripts/publish-gitee.py
