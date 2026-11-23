@@ -370,6 +370,15 @@ cmd_job_start() {
 		[ "$_has_yes" -eq 1 ] || set -- "$@" --yes
 	fi
 	mkdir -p "$JOB_DIR" 2>/dev/null || die "无法创建任务目录"
+	# Refuse a second job while one is still running: two concurrent updates
+	# would race over the same /tmp download files and the same state/log files,
+	# corrupting both. Done/failed states are stale and safe to overwrite.
+	if [ -f "$JOB_STATE" ]; then
+		_cur=$(cat "$JOB_STATE" 2>/dev/null || echo "")
+		case "$_cur" in
+		running|queued) die "已有更新任务在运行（$_cur），请等待完成；若已卡住请删除 $JOB_DIR 后重试" ;;
+		esac
+	fi
 	# A tiny runner records state around a direct call back into this script.
 	# Args are fixed (--force / --yes), so no shell-quoting of user data.
 	_runner="$JOB_DIR/runner.sh"
