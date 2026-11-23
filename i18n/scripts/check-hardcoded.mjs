@@ -118,7 +118,7 @@ for (const file of tsFiles) {
   // Lookup tables hold the English key and translate it where they are used,
   // e.g. `const SMS_FORMATS = { ip: 'ETSI IP' }` followed by `t(SMS_FORMATS[k])`.
   // Their values are keys, not untranslated text.
-  const TABLE_KEYS = /\b(SMS_FORMATS|DATA_SUBS|CSBK_NAMES|UNKNOWN_NAMES|UNDELIVERABLE_WORDS|UNDELIVERABLE_TARGETS|FORMAT_LABEL_KEYS|SAP_NAME_KEYS)\b/;
+  const TABLE_KEYS = /\b(SMS_FORMATS|DATA_SUBS|CSBK_NAMES|UNKNOWN_NAMES|UNDELIVERABLE_WORDS|UNDELIVERABLE_TARGETS|FORMAT_LABEL_KEYS|SAP_NAME_KEYS|SAP_NAMES)\b/;
   // Mark the body of those tables so their entries are skipped.
   const tableBody = new Set();
   const tableRe = new RegExp(
