@@ -100,7 +100,9 @@ resolve_url() {
 		return 0
 		;;
 	esac
-	echo "https://github.com/$REPO/releases/download/$(json '@.build_tag')/$_file"
+	_tag="$(json '@.release_tag')"
+	[ -n "$_tag" ] || _tag="$(json '@.build_tag')"
+	echo "https://github.com/$REPO/releases/download/$_tag/$_file"
 }
 
 REMOTE_VERSION=""
@@ -122,7 +124,13 @@ load_release() {
 
 # up_to_date - true when the running build is the one the manifest names.
 up_to_date() {
-	[ -n "$REMOTE_TAG" ] && [ "$LOCAL_VERSION" = "$REMOTE_TAG" ]
+	[ -n "$REMOTE_TAG" ] || return 1
+	[ "$LOCAL_VERSION" = "$REMOTE_TAG" ] && return 0
+	# Fall back to the commit hash, which both the build tag and the version
+	# end in, so a change in the tag format does not report a false update.
+	_local_commit="${LOCAL_VERSION##*-}"
+	_remote_commit="${REMOTE_TAG##*-}"
+	[ -n "$_local_commit" ] && [ "$_local_commit" = "$_remote_commit" ]
 }
 
 save_version() {
