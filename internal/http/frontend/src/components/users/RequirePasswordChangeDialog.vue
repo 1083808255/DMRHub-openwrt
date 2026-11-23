@@ -68,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n';
 import { ref, watch } from 'vue';
 import { Button as ShadButton } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -129,7 +130,7 @@ const confirm = async () => {
       close(false);
     }
   } catch (err) {
-    toast.error('Error', { description: errorText(err, `Error requiring a new password from ${props.callsign}`) });
+    toast.error(t('Error'), { description: errorText(err, t('Error requiring a new password from {callsign}', { callsign: props.callsign })) });
   } finally {
     saving.value = false;
   }

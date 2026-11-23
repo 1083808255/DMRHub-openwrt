@@ -35,7 +35,7 @@ const props = withDefaults(defineProps<{ text: string | number; label?: string }
 const copy = async () => {
   try {
     await navigator.clipboard.writeText(String(props.text));
-    toast.success('Copied');
+    toast.success(t('Copied'));
   } catch {
     toast.error(t('Could not copy. Select the text and copy it.'));
   }

@@ -248,7 +248,7 @@ export default {
       })
       .catch((err) => {
         console.error(err);
-        toast.error('Error', { description: errorText(err, t('Could not load the rules.')) });
+        toast.error(t('Error'), { description: errorText(err, t('Could not load the rules.')) });
       });
   },
   methods: {
@@ -322,7 +322,7 @@ export default {
         })
         .catch((err) => {
           console.error(err);
-          toast.error('Error', { description: errorText(err, t('Could not delete the rule.')) });
+          toast.error(t('Error'), { description: errorText(err, t('Could not delete the rule.')) });
         });
     },
     setPrivate(g: Group, on: boolean) {
@@ -337,7 +337,7 @@ export default {
         .catch((err) => {
           console.error(err);
           this.priv[g.key] = before;
-          toast.error('Error', { description: errorText(err, t('Could not save the private call setting.')) });
+          toast.error(t('Error'), { description: errorText(err, t('Could not save the private call setting.')) });
         })
         .finally(() => {
           this.savingPriv = false;

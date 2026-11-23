@@ -579,6 +579,7 @@
   "Error logging in": "Error logging in",
   "Error registering peer": "Error registering peer",
   "Error registering repeater": "Error registering repeater",
+  "Error requiring a new password from {callsign}": "Error requiring a new password from {callsign}",
   "Error saving peer {id}": "Error saving peer {id}",
   "Error unlinking talkgroup for repeater {id}": "Error unlinking talkgroup for repeater {id}",
   "Error updating repeater {id}": "Error updating repeater {id}",

@@ -70,7 +70,7 @@ const submit = async () => {
     await forgotPassword(name);
     sent.value = true;
   } catch (err) {
-    toast.error('Error', { description: errorText(err, t('Could not ask for a link.')) });
+    toast.error(t('Error'), { description: errorText(err, t('Could not ask for a link.')) });
   } finally {
     sending.value = false;
   }
