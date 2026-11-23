@@ -11,6 +11,12 @@
  * its options never reach the DOM. Buttons built here need nothing from the
  * form machinery, so they behave the same across LuCI versions.
  *
+ * Updates run as a detached background job (dmrhub-ota job start/job status).
+ * Every synchronous layer between the browser and the script (LuCI RPC, cgi-io
+ * ubus) caps a call at ~20-30s, but a proxy download of the image takes a
+ * minute or more. Starting a job returns instantly and a short status call is
+ * polled for progress, so the page never hits those caps.
+ *
  * The strings are written in Chinese because this is the zh-CN build; the
  * LuCI translation catalogue ships no entry for our own block.
  *
@@ -23,10 +29,8 @@ function dmrhubOtaNotify(text, kind) {
 	ui.addNotification(null, E('p', { 'class': kind === 'error' ? 'alert-message danger' : '' }, text));
 }
 
-function dmrhubOtaExec(button, args) {
-	button.disabled = true;
-	var label = button.textContent;
-	button.textContent = '处理中…';
+/* dmrhubOtaCall - short synchronous call (status check / job control). */
+function dmrhubOtaCall(args) {
 	return fs.exec(DMRHUB_OTA_SCRIPT, args).then(function (res) {
 		var out = [];
 		if (res.stdout) out.push(res.stdout);
@@ -34,18 +38,79 @@ function dmrhubOtaExec(button, args) {
 		return { ok: res.code === 0, text: out.join('\n').trim(), code: res.code };
 	}).catch(function (e) {
 		return { ok: false, text: String(e.message || e), code: -1 };
-	}).finally(function () {
-		button.disabled = false;
-		button.textContent = label;
 	});
+}
+
+/* dmrhubOtaPoll - follow a background job until it finishes, updating a
+ * notification with the last log line. Firmware flashes reboot the box, so a
+ * lost connection during polling is treated as success. */
+function dmrhubOtaPoll(kind) {
+	var notice = ui.addNotification(null, E('p', {}, '正在启动更新…'));
+	var ticks = 0;
+
+	function step() {
+		return dmrhubOtaCall(['job', 'status']).then(function (res) {
+			var info = {};
+			try {
+				var start = res.text.indexOf('{');
+				var end = res.text.lastIndexOf('}');
+				info = JSON.parse(start >= 0 && end > start
+					? res.text.slice(start, end + 1)
+					: res.text);
+			} catch (e) {
+				info = { state: 'unknown', log: res.text };
+			}
+
+			var state = info.state || 'unknown';
+			var lines = (info.log || '').split('\n').filter(function (l) { return l.trim(); });
+			var last = lines.length ? lines[lines.length - 1] : '';
+			var label = (kind === 'firmware' ? '固件' : '应用') + '更新：' + last;
+			if (notice.firstChild) notice.firstChild.data = label;
+
+			if (state === 'done') {
+				if (notice.firstChild) notice.firstChild.data =
+					(kind === 'firmware' ? '固件' : '应用') + '更新完成，设备即将重启或服务已重启。';
+				if (kind === 'firmware') {
+					ui.showModal('正在刷写…', [
+						E('p', { 'class': 'spinning' },
+							'系统正在重启，请勿断电！请等待几分钟后再尝试重新连接。')
+					]);
+					ui.awaitReconnect(window.location.host);
+				}
+				return;
+			}
+			if (state === 'failed') {
+				if (notice.firstChild) notice.firstChild.data = '更新失败：\n' + (info.log || '');
+				notice.className = 'alert-message danger';
+				return;
+			}
+			if (!res.ok && state === 'unknown') {
+				// Likely the box rebooted mid-flash (connection dropped).
+				if (kind === 'firmware') {
+					ui.showModal('正在刷写…', [
+						E('p', { 'class': 'spinning' },
+							'系统正在重启，请勿断电！请等待几分钟后再尝试重新连接。')
+					]);
+					ui.awaitReconnect(window.location.host);
+					return;
+				}
+			}
+			ticks++;
+			if (ticks > 180) { // ~6 minutes at 2s, give up polling
+				if (notice.firstChild) notice.firstChild.data = '更新仍在进行中，请稍后手动刷新页面查看结果。';
+				return;
+			}
+			return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(step);
+		});
+	}
+	return step();
 }
 
 /* handleDmrhubOtaCheck reads the release manifest and reports what it found. */
 function handleDmrhubOtaCheck(ev) {
-	return dmrhubOtaExec(ev.target, ['status']).then(function (res) {
+	return dmrhubOtaCall(['status']).then(function (res) {
 		var text = res.text;
 		try {
-			/* Take the JSON object, in case the script says something first. */
 			var start = res.text.indexOf('{');
 			var end = res.text.lastIndexOf('}');
 			var info = JSON.parse(start >= 0 && end > start
@@ -63,34 +128,30 @@ function handleDmrhubOtaCheck(ev) {
 	});
 }
 
-/* handleDmrhubOtaApp installs the application package only. */
+/* handleDmrhubOtaApp starts the application update in the background. */
 function handleDmrhubOtaApp(ev) {
-	return dmrhubOtaExec(ev.target, ['app']).then(function (res) {
-		dmrhubOtaNotify(res.ok
-			? 'DMRHub 已更新，服务已重启。'
-			: '应用更新失败。\n' + res.text, res.ok ? 'info' : 'error');
+	return dmrhubOtaCall(['job', 'start', 'app']).then(function (res) {
+		if (!res.ok) {
+			dmrhubOtaNotify('无法启动应用更新：\n' + res.text, 'error');
+			return;
+		}
+		dmrhubOtaNotify('应用更新已在后台启动。', 'info');
+		return dmrhubOtaPoll('app');
 	});
 }
 
-/* handleDmrhubOtaFirmware flashes the whole firmware image. */
+/* handleDmrhubOtaFirmware flashes the whole firmware image in the background. */
 function handleDmrhubOtaFirmware(ev) {
 	if (!confirm('刷写固件会重启设备，是否继续？')) {
 		return Promise.resolve();
 	}
-	var button = ev.target;
-	button.disabled = true;
-	button.textContent = '下载中…';
-	dmrhubOtaNotify('正在下载固件镜像，可能需要几分钟。', 'info');
-	fs.exec(DMRHUB_OTA_SCRIPT, ['firmware', '--yes']).then(function () {
-		ui.showModal('正在刷写…', [
-			E('p', { 'class': 'spinning' },
-				'系统正在刷写固件，请勿断电！请等待几分钟后再尝试重新连接。')
-		]);
-		ui.awaitReconnect(window.location.host);
-	}).catch(function (e) {
-		button.disabled = false;
-		button.textContent = '刷写固件…';
-		dmrhubOtaNotify('固件更新失败。\n' + String(e.message || e), 'error');
+	return dmrhubOtaCall(['job', 'start', 'firmware']).then(function (res) {
+		if (!res.ok) {
+			dmrhubOtaNotify('无法启动固件更新：\n' + res.text, 'error');
+			return;
+		}
+		dmrhubOtaNotify('固件下载与刷写已在后台启动。', 'info');
+		return dmrhubOtaPoll('firmware');
 	});
 }
 

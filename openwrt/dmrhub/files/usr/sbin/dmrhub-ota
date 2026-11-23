@@ -11,6 +11,14 @@
 #   dmrhub-ota status             # same, as JSON for the LuCI page
 #   dmrhub-ota app [--force]      # install the application package (ipk)
 #   dmrhub-ota firmware [--yes]   # flash the firmware image (reboots)
+#   dmrhub-ota job start app|firmware [args...]
+#                                 # run an update in the background, return now
+#   dmrhub-ota job status         # JSON progress of the background job
+#
+# The LuCI page calls job start/job status: every layer between the browser
+# and this script (LuCI RPC, cgi-io ubus) caps a synchronous call at ~20-30s,
+# while a proxy download of the image takes a minute or more. A background job
+# sidesteps all of those caps.
 set -eu
 
 REPO="${DMRHUB_OTA_REPO:-1083808255/DMRHub-openwrt}"
@@ -42,6 +50,12 @@ VERSION_FILE="$VERSION_DIR/version"
 MANIFEST="/tmp/dmrhub-version.json"
 APP_FILE="/tmp/dmrhub-app.ipk"
 FW_FILE="/tmp/dmrhub-fw.img.gz"
+
+# Background job state, polled by the LuCI page while an update runs.
+JOB_DIR="/tmp/dmrhub-ota-job"
+JOB_STATE="$JOB_DIR/state"
+JOB_LOG="$JOB_DIR/log"
+JOB_KIND="$JOB_DIR/kind"
 
 LOCAL_VERSION="none"
 LOCAL_LABEL="none"
@@ -331,7 +345,88 @@ cmd_firmware() {
 	sysupgrade -k -u "$FW_FILE"
 }
 
+# json_escape - make a string safe to embed in a JSON double-quoted value.
+json_escape() {
+	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' |
+		awk 'BEGIN{ORS=""} {if(NR>1) printf "\\n"; printf "%s",$0}'
+}
+
+# cmd_job_start <app|firmware> [extra args] - spawn the real update detached
+# from the HTTP request and return immediately. setsid keeps the child alive
+# after fs.exec's stdin/stdout close; all output goes to the job log.
+cmd_job_start() {
+	_kind="${1:-}"
+	case "$_kind" in
+	app|firmware) ;;
+	*) die "后台任务只支持 app 或 firmware" ;;
+	esac
+	shift
+	mkdir -p "$JOB_DIR" 2>/dev/null || die "无法创建任务目录"
+	# A tiny runner records state around a direct call back into this script.
+	# Args are fixed (--force / --yes), so no shell-quoting of user data.
+	_runner="$JOB_DIR/runner.sh"
+	_args=""
+	for _a in "$@"; do _args="$_args $_a"; done
+	cat > "$_runner" <<EOF
+#!/bin/sh
+echo running > "$JOB_STATE"
+echo "$_kind" > "$JOB_KIND"
+"$0" __background $_kind$_args >> "$JOB_LOG" 2>&1
+if [ \$? -eq 0 ]; then echo done > "$JOB_STATE"; else echo failed > "$JOB_STATE"; fi
+EOF
+	chmod 755 "$_runner"
+	: > "$JOB_LOG"
+	echo queued > "$JOB_STATE"
+	if command -v setsid >/dev/null 2>&1; then
+		setsid "$_runner" </dev/null >/dev/null 2>&1 &
+	else
+		"$_runner" </dev/null >/dev/null 2>&1 &
+	fi
+	log "已在后台启动 $_kind 更新；用 job status 查看进度"
+}
+
+# __background <app|firmware> [args...] - internal entry for the detached runner.
+cmd_background() {
+	_kind="${1:-}"
+	shift
+	case "$_kind" in
+	app) cmd_app "$@" ;;
+	firmware) cmd_firmware "$@" ;;
+	*) die "未知后台任务 $_kind" ;;
+	esac
+}
+
+# cmd_job_status - JSON progress for the LuCI poller.
+cmd_job_status() {
+	_state="idle"
+	_kind=""
+	_log=""
+	[ -f "$JOB_STATE" ] && _state=$(cat "$JOB_STATE" 2>/dev/null || echo idle)
+	[ -f "$JOB_KIND" ] && _kind=$(cat "$JOB_KIND" 2>/dev/null || echo "")
+	[ -f "$JOB_LOG" ] && _log=$(tail -c 4096 "$JOB_LOG" 2>/dev/null || echo "")
+	printf '{"state":"%s","kind":"%s","log":"%s"}\n' \
+		"$(json_escape "$_state")" "$(json_escape "$_kind")" "$(json_escape "$_log")"
+}
+
 case "${1:-check}" in
+__background)
+	cmd_background "${2:-}" "${3:-}" "${4:-}"
+	;;
+job)
+	case "${2:-status}" in
+	start)
+		cmd_job_start "${3:-}" "${4:-}" "${5:-}" "${6:-}"
+		;;
+	status)
+		QUIET=1
+		cmd_job_status
+		;;
+	*)
+		echo "用法：$0 job {start app|firmware [args...]|status}"
+		exit 1
+		;;
+	esac
+	;;
 check)
 	cmd_check
 	;;
