@@ -21,6 +21,14 @@ MANIFEST_URL="${DMRHUB_OTA_MANIFEST:-https://github.com/$REPO/releases/latest/do
 # the Gitee mirror this script used to fall back on no longer exists.
 MIRROR_URL="${DMRHUB_OTA_MIRROR:-}"
 
+# github.com is not reachable from every network: DNS answers and ICMP get
+# through, but the TLS handshake is reset, so every download fails with
+# "Operation not permitted" or a timeout. These proxies take a full GitHub URL
+# after the prefix and are tried only after the direct download fails. Set
+# "option ota_mirror" in /etc/config/dmrhub, or DMRHUB_OTA_MIRROR for one run;
+# either accepts a space separated list, and "none" disables them.
+DEFAULT_MIRROR="https://gh-proxy.com"
+
 VERSION_DIR="/opt/dmrhub"
 VERSION_FILE="$VERSION_DIR/version"
 MANIFEST="/tmp/dmrhub-version.json"
@@ -48,16 +56,56 @@ LOCAL_LABEL="$LOCAL_VERSION"
 log() { echo "[dmrhub-ota] $*"; }
 die() { echo "[dmrhub-ota] 错误：$*" >&2; exit 1; }
 
-# fetch <url> <outfile> - download with whatever the image provides.
+# _fetch_once <url> <outfile> - one download with whatever the image provides.
+_fetch_once() {
+	if command -v uclient-fetch >/dev/null 2>&1; then
+		uclient-fetch -q --timeout=30 -O "$2" "$1" && return 0
+	fi
+	if command -v wget >/dev/null 2>&1; then
+		wget -q -T 30 -O "$2" "$1" && return 0
+	fi
+	return 1
+}
+
+# mirrors - the proxy list, from the environment, uci, or the built-in default.
+mirrors() {
+	if [ -n "${DMRHUB_OTA_MIRROR:-}" ]; then
+		_list="$DMRHUB_OTA_MIRROR"
+	else
+		_list="$(uci -q get dmrhub.main.ota_mirror 2>/dev/null || true)"
+		[ -n "$_list" ] || _list="$DEFAULT_MIRROR"
+	fi
+	[ "$_list" = "none" ] && _list=""
+	echo "$_list"
+}
+
+# The mirror that worked for this run, so the asset downloads do not each pay
+# for another direct attempt that is known to fail.
+PREFERRED_MIRROR=""
+
+# fetch <url> <outfile> - download, falling back to a proxy for github.com.
 fetch() {
 	_url="$1"
 	_out="$2"
-	if command -v uclient-fetch >/dev/null 2>&1; then
-		uclient-fetch -q --timeout=30 -O "$_out" "$_url" && return 0
+	if [ -n "$PREFERRED_MIRROR" ] && _fetch_once "$PREFERRED_MIRROR/$_url" "$_out"; then
+		return 0
 	fi
-	if command -v wget >/dev/null 2>&1; then
-		wget -q -T 30 -O "$_out" "$_url" && return 0
+	if _fetch_once "$_url" "$_out"; then
+		return 0
 	fi
+	case "$_url" in
+	https://github.com/*) ;;
+	*) return 1 ;;
+	esac
+	for _m in $(mirrors); do
+		[ -n "$_m" ] || continue
+		[ "$_m" = "$PREFERRED_MIRROR" ] && continue
+		log "直连 GitHub 失败，改用镜像：$_m"
+		if _fetch_once "$_m/$_url" "$_out"; then
+			PREFERRED_MIRROR="$_m"
+			return 0
+		fi
+	done
 	return 1
 }
 

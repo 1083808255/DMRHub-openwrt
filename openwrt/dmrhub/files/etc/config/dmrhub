@@ -2,3 +2,7 @@ config dmrhub 'main'
 	option enabled '1'
 	option config '/opt/dmrhub/config.yaml'
 	option data_dir '/opt/dmrhub'
+
+	# github.com is reset on some networks. This proxy is tried only when the
+	# direct download fails. Space separate several, or use 'none' to disable.
+	option ota_mirror 'https://gh-proxy.com'
