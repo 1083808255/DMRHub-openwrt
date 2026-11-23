@@ -346,3 +346,14 @@ jobs:
             artifacts/version.json
             artifacts/checksums.sha256
           generate_release_notes: false
+
+      - name: Publish to Gitee
+        # The OTA script reads version.json from Gitee, because github.com is
+        # unreachable from the networks these devices run on. A Gitee outage
+        # must not lose a release GitHub already has, so the step reports its
+        # failure without failing the build.
+        continue-on-error: true
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          RELEASE_TAG: fw-${{ steps.ver.outputs.build_tag }}-${{ github.run_number }}
+        run: python3 .github/scripts/publish-gitee.py
