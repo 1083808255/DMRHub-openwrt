@@ -273,7 +273,8 @@ jobs:
           rm -f /tmp/dmrhub-ota.sec
           echo "=== Packages ==="; cat Packages
           echo "=== Packages.sig ==="; cat Packages.sig
-          /usr/local/bin/usign -V -m Packages -p openwrt/dmrhub/files/etc/opkg/keys/21874afde7248b53
+          # The step runs inside artifacts, so verify against the absolute path.
+          /usr/local/bin/usign -V -m Packages -p "$GITHUB_WORKSPACE/openwrt/dmrhub/files/etc/opkg/keys/21874afde7248b53"
           echo "signature verified"
 
       - name: Generate version.json for OTA
