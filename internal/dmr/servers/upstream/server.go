@@ -113,11 +113,11 @@ type LinkStatus struct {
 	Name string `json:"name"`
 	// Up is whether the link has logged in to the master.
 	Up bool `json:"up"`
-	// Since is when it came up, in seconds since the gateway started.
-	Since float64 `json:"since,omitempty"`
-	// LastHeard is when the last burst crossed the link, in seconds since
-	// the gateway started.
-	LastHeard float64 `json:"lastHeard,omitempty"`
+	// Since is when it came up, as a time the page shows as it is.
+	Since *time.Time `json:"since,omitempty"`
+	// LastHeard is when the last burst crossed the link, as a time the
+	// page shows as it is.
+	LastHeard *time.Time `json:"lastHeard,omitempty"`
 	// Reason is why the link last went down.
 	Reason     string     `json:"reason,omitempty"`
 	RxBursts   uint64     `json:"rxBursts"`
@@ -675,7 +675,6 @@ func (s *Server) Status() Status {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	now := s.clock.Now()
 	for _, name := range names {
 		u := s.uplinks[name]
 		u.stats.mu.Lock()
@@ -685,10 +684,12 @@ func (s *Server) Status() Status {
 			RxBursts: u.stats.rxBursts, TxBursts: u.stats.txBursts,
 		}
 		if !u.stats.since.IsZero() {
-			link.Since = now.Sub(u.stats.since).Seconds()
+			at := u.stats.since
+			link.Since = &at
 		}
 		if !u.stats.lastHeard.IsZero() {
-			link.LastHeard = now.Sub(u.stats.lastHeard).Seconds()
+			at := u.stats.lastHeard
+			link.LastHeard = &at
 		}
 		tgs := make(map[uint]struct{}, len(u.stats.rxTG)+len(u.stats.txTG))
 		for tg := range u.stats.rxTG {

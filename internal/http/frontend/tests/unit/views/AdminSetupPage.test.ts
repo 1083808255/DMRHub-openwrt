@@ -282,6 +282,18 @@ describe('Admin Setup page dirty tracking', () => {
     wrapper.unmount();
   });
 
+  it('shows the inputs of a network that Add a network adds', async () => {
+    getConfig(() => response(config(), { 'dmr.upstreams': { ...plain, default: { enabled: false, networks: [], rewrites: [] } } }));
+    const { wrapper } = await mountAt('/admin/setup#upstreams');
+    await wrapper.find('[data-test="upstream-network-add"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-test="upstream-network-0"]').exists()).toBe(true);
+    for (const field of ['name', 'dialect', 'id', 'address', 'port', 'password', 'callsign', 'color', 'slots', 'rx', 'tx', 'options']) {
+      expect(wrapper.find(`[data-test="upstream-network-${field}-0"]`).exists()).toBe(true);
+    }
+    wrapper.unmount();
+  });
+
   it('shows a validation failure instead of an older saved message', async () => {
     mockAPI.post.mockResolvedValue({ data: { valid: false, errors: { dmr: { 'public-address': 'enter a host name' } } } });
     const { wrapper } = await mountAt('/admin/setup#dmr');

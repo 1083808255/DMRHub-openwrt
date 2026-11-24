@@ -2223,5 +2223,8 @@
   "From upstream": "上游发来",
   "To upstream": "发往上游",
   "Disabled": "已禁用",
-  "This network is off. Nothing is sent to it or received from it until this is on.": "此网络已关闭。在开启之前，不会向它发送任何内容，也不会从它接收任何内容。"
+  "This network is off. Nothing is sent to it or received from it until this is on.": "此网络已关闭。在开启之前，不会向它发送任何内容，也不会从它接收任何内容。",
+  "Link state": "链路状态",
+  "since {time}": "自 {time} 起",
+  "Last call at {time}": "最后通话 {time}"
 }

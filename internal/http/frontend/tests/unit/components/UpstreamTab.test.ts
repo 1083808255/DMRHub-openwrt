@@ -10,6 +10,7 @@ vi.mock('@/services/API', () => ({
 }));
 
 import API from '@/services/API';
+import { formatDateTime } from '@/lib/dateFormat';
 import UpstreamTab from '@/components/setup/menu/UpstreamTab.vue';
 
 const mockAPI = API as unknown as { get: Mock };
@@ -73,6 +74,71 @@ describe('UpstreamTab per-network switch', () => {
     const value = lastSet(wrapper);
     expect(value.enabled).toBe(false);
     expect(value.networks[0]!.enabled).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('adds a network with every input, from an empty list', async () => {
+    const wrapper = await mountTab({ enabled: true, networks: [], rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-add"]').trigger('click');
+    const value = lastSet(wrapper);
+    expect(value.networks).toHaveLength(1);
+    // The parent writes the emitted value back as the prop.
+    await wrapper.setProps({ value: { enabled: true, networks: value.networks, rewrites: [] } });
+    for (const field of ['name', 'dialect', 'id', 'address', 'port', 'password', 'callsign', 'color', 'slots', 'rx', 'tx', 'options']) {
+      expect(wrapper.find(`[data-test="upstream-network-${field}-0"]`).exists()).toBe(true);
+    }
+    expect(wrapper.find('[data-test="upstream-network-enabled-0"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('adds a second network with its own inputs', async () => {
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-add"]').trigger('click');
+    const value = lastSet(wrapper);
+    await wrapper.setProps({ value: { enabled: true, networks: value.networks, rewrites: [] } });
+    expect(value.networks).toHaveLength(3);
+    expect(wrapper.find('[data-test="upstream-network-name-2"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="upstream-network-address-2"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('shows the clock time of the last call, not how long ago it was', async () => {
+    mockAPI.get.mockResolvedValue({
+      data: {
+        enabled: true, running: true,
+        links: [{
+          name: 'BM', up: true,
+          since: '2026-11-25T00:00:00Z',
+          lastHeard: '2026-11-24T19:30:00Z',
+          rxBursts: 5, txBursts: 4, talkgroups: [],
+        }],
+      },
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await flushPromises();
+    const text = wrapper.text();
+    // The clock time of the call, formatted the way the page formats it.
+    const clock = formatDateTime(new Date('2026-11-24T19:30:00Z'), 'yyyy-MM-dd HH:mm:ss');
+    expect(text).toContain(clock);
+    expect(text).not.toMatch(/\d+\s*(hours?|hrs?|分钟|小时)\s*(ago|前)/i);
+    wrapper.unmount();
+  });
+
+  it('puts the inputs above the link state, so a new network is not pushed out of view', async () => {
+    mockAPI.get.mockResolvedValue({
+      data: {
+        enabled: true, running: true,
+        links: [{ name: 'BM', up: true, since: '2026-11-25T00:00:00Z', rxBursts: 3, txBursts: 2, talkgroups: [{ tg: 91, rx: 3, tx: 2 }] }],
+      },
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await flushPromises();
+    const html = wrapper.html();
+    const inputsAt = html.indexOf('upstream-network-name-0');
+    const stateAt = html.indexOf('data-test="upstream-links"');
+    expect(inputsAt).toBeGreaterThan(-1);
+    expect(stateAt).toBeGreaterThan(-1);
+    expect(inputsAt).toBeLessThan(stateAt);
     wrapper.unmount();
   });
 });

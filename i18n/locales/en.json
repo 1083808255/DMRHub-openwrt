@@ -2223,5 +2223,8 @@
   "From upstream": "From upstream",
   "To upstream": "To upstream",
   "Disabled": "Disabled",
-  "This network is off. Nothing is sent to it or received from it until this is on.": "This network is off. Nothing is sent to it or received from it until this is on."
+  "This network is off. Nothing is sent to it or received from it until this is on.": "This network is off. Nothing is sent to it or received from it until this is on.",
+  "Link state": "Link state",
+  "since {time}": "since {time}",
+  "Last call at {time}": "Last call at {time}"
 }
