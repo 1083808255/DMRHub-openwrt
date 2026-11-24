@@ -240,6 +240,29 @@ describe('Admin Setup page dirty tracking', () => {
     wrapper.unmount();
   });
 
+  it('shows the reason of a validation error in the save bar', async () => {
+    mockAPI.post.mockResolvedValue({ data: { valid: false, errors: { dmr: { 'public-address': 'enter a host name' } } } });
+    const { wrapper } = await mountAt('/admin/setup#dmr');
+    await wrapper.find('#setup-dmr-public-address').setValue('https://dmr.example.org');
+    await wrapper.find('[data-test="save"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-test="savebar-message"]').text()).toContain('enter a host name');
+    wrapper.unmount();
+  });
+
+  it('shows a validation failure instead of an older saved message', async () => {
+    mockAPI.post.mockResolvedValue({ data: { valid: false, errors: { dmr: { 'public-address': 'enter a host name' } } } });
+    const { wrapper } = await mountAt('/admin/setup#dmr');
+    await wrapper.find('#setup-dmr-public-address').setValue('https://dmr.example.org');
+    (wrapper.vm as unknown as { savedMsg: Record<string, string> }).savedMsg.dmr = 'Saved at 12:00.';
+    await wrapper.find('[data-test="save"]').trigger('click');
+    await flushPromises();
+    const text = wrapper.find('[data-test="savebar-message"]').text();
+    expect(text).toContain('enter a host name');
+    expect(text).not.toContain('Saved at');
+    wrapper.unmount();
+  });
+
   it('puts the default back with Use the default', async () => {
     const { wrapper } = await mountAt('/admin/setup#general');
     const field = wrapper.find('[data-test="field-network-name"]');

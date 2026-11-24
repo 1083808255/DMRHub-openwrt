@@ -88,12 +88,20 @@ export const emptyUpstreamRewrite = (): UpstreamRewriteRow => ({
  *
  * It accepts two shapes because the editor commits its rows back to the same
  * config path: the API shape (kebab-case keys, no password) when first loaded,
- * and the editor's own row shape (camelCase keys plus a typed password) on
- * every following recompute. Reading only the API shape would silently drop a
- * password the user just typed, and reset the frequency/color-code/TG fields
- * to their defaults. The hub never sends a password, so accepting `password`
- * here only ever picks up a value typed in this browser.
+ * and the editor's own row shape (camelCase keys plus a password key) on every
+ * following recompute.
+ *
+ * The distinction matters: defaults must be applied only once, when reading
+ * the API value. The editor shape always carries a `password` key (even when
+ * the user typed nothing), so its values are kept verbatim. Otherwise a user
+ * clearing the callsign or a numeric field would have the default silently
+ * put straight back, making the field impossible to clear and hiding the real
+ * validation error. The hub never sends a password, so the key can only come
+ * from this browser.
  */
+const rowValue = (v: unknown): number | string =>
+  typeof v === 'number' || typeof v === 'string' ? v : '';
+
 export const upstreamOf = (v: unknown): UpstreamValue => {
   const src = typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
   const networks = Array.isArray(src.networks) ? src.networks : [];
@@ -102,28 +110,30 @@ export const upstreamOf = (v: unknown): UpstreamValue => {
     enabled: src.enabled === true,
     networks: networks.map((raw) => {
       const n = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
+      const edited = 'password' in n;
       return {
         name: text(n.name),
         enabled: n.enabled !== false,
         dialect: n.dialect === 'hbrp' ? 'hbrp' : 'mmdvm',
         address: text(n.address),
-        port: num(n.port, 62031),
-        id: num(n.id, ''),
+        port: edited ? rowValue(n.port) : num(n.port, 62031),
+        id: edited ? rowValue(n.id) : num(n.id, ''),
         password: text(n.password),
-        callsign: text(n.callsign) || 'DMRHUB',
-        rxFrequency: num(n['rx-frequency'] ?? n.rxFrequency, 438800000),
-        txFrequency: num(n['tx-frequency'] ?? n.txFrequency, 438800000),
-        colorCode: num(n['color-code'] ?? n.colorCode, 1),
-        slots: num(n.slots, 3),
+        callsign: text(n.callsign),
+        rxFrequency: edited ? rowValue(n.rxFrequency) : num(n['rx-frequency'], 438800000),
+        txFrequency: edited ? rowValue(n.txFrequency) : num(n['tx-frequency'], 438800000),
+        colorCode: edited ? rowValue(n.colorCode) : num(n['color-code'], 1),
+        slots: edited ? rowValue(n.slots) : num(n.slots, 3),
         options: text(n.options),
       };
     }),
     rewrites: rewrites.map((raw) => {
       const r = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
+      const edited = 'localTg' in r;
       return {
         network: text(r.network),
-        localTg: num(r['local-tg'] ?? r.localTg, ''),
-        upstreamTg: num(r['upstream-tg'] ?? r.upstreamTg, ''),
+        localTg: edited ? rowValue(r.localTg) : num(r['local-tg'], ''),
+        upstreamTg: edited ? rowValue(r.upstreamTg) : num(r['upstream-tg'], ''),
       };
     }),
   };
@@ -139,7 +149,7 @@ export const upstreamPayload = (v: UpstreamValue): Record<string, unknown> => ({
     address: n.address.trim(),
     port: Number(n.port) || 0,
     id: Number(n.id) || 0,
-    callsign: n.callsign.trim() || 'DMRHUB',
+    callsign: n.callsign.trim(),
     'rx-frequency': Number(n.rxFrequency) || 0,
     'tx-frequency': Number(n.txFrequency) || 0,
     'color-code': Number(n.colorCode) || 0,

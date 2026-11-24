@@ -21,6 +21,12 @@
 
 <template>
   <div data-test="upstreams-tab">
+    <div
+      v-if="error"
+      role="alert"
+      class="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive-foreground"
+      data-test="upstreams-error"
+    >{{ error }}</div>
     <Card class="mb-5" data-test="upstreams-general">
       <CardHeader class="flex flex-wrap items-center justify-between gap-2">
         <CardTitle>{{ $t('Upstream networks') }}</CardTitle>
@@ -168,7 +174,6 @@
           </ShadButton>
         </div>
         <SettingNote path="dmr.upstreams.rewrites" menu class="mt-2" />
-        <p v-if="error" class="mt-1 text-sm text-destructive-foreground" data-test="field-error">{{ error }}</p>
       </CardContent>
     </Card>
   </div>

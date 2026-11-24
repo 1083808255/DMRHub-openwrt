@@ -66,6 +66,48 @@ describe('upstream config', () => {
     expect(upstreamPasswordsOf(again)).toEqual(['typed']);
   });
 
+  it('lets the user clear the callsign without the default coming back', () => {
+    const rows = upstreamOf({
+      networks: [{
+        name: 'BM', address: 'master.example.org', id: 1234567,
+        port: 62031, callsign: 'DMRHUB',
+        'rx-frequency': 438800000, 'tx-frequency': 438800000,
+        'color-code': 1, slots: 3,
+      }],
+    });
+    expect(rows.networks[0]!.callsign).toBe('DMRHUB');
+
+    rows.networks[0]!.callsign = '';
+    const again = upstreamOf(rows);
+    expect(again.networks[0]!.callsign).toBe('');
+
+    const payload = upstreamPayload(again) as Record<string, unknown>;
+    const network = (payload.networks as Record<string, unknown>[])[0] as Record<string, unknown>;
+    expect(network.callsign).toBe('');
+
+    // Loading the saved value back must not reinsert the default either.
+    const reloaded = upstreamOf(payload);
+    expect(reloaded.networks[0]!.callsign).toBe('');
+  });
+
+  it('keeps cleared numeric fields empty through editor recompute', () => {
+    const rows = upstreamOf({ networks: [{ name: 'BM', address: 'a', id: 1 }] });
+    rows.networks[0]!.port = '';
+    rows.networks[0]!.rxFrequency = '';
+    rows.networks[0]!.colorCode = '';
+    rows.networks[0]!.slots = '';
+    rows.rewrites.push({ network: 'BM', localTg: 91, upstreamTg: 3100 });
+    rows.rewrites[0]!.localTg = '';
+
+    const again = upstreamOf(rows);
+    expect(again.networks[0]!.port).toBe('');
+    expect(again.networks[0]!.rxFrequency).toBe('');
+    expect(again.networks[0]!.colorCode).toBe('');
+    expect(again.networks[0]!.slots).toBe('');
+    expect(again.rewrites[0]!.localTg).toBe('');
+    expect(upstreamsError(again, [true])).toContain('port');
+  });
+
   it('validates networks and rewrites', () => {
     const rows = upstreamOf({ networks: [], rewrites: [] });
     expect(upstreamsError(rows, [])).toBeUndefined();

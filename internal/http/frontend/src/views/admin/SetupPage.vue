@@ -95,7 +95,7 @@
         >
           <span
             class="mr-auto text-sm"
-            :class="savedMsg[tab.id] ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground'"
+            :class="failMsg ? 'text-destructive' : savedMsg[tab.id] ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground'"
             data-test="savebar-message"
           >{{ saveText }}</span>
           <template v-if="!readOnly">
@@ -225,11 +225,11 @@ export default defineComponent({
       if (this.readOnly) {
         return t('Nothing on this tab can change while DMRHub runs.');
       }
-      if (this.savedMsg[this.tab.id]) {
-        return this.savedMsg[this.tab.id] as string;
-      }
       if (this.failMsg) {
         return this.failMsg;
+      }
+      if (this.savedMsg[this.tab.id]) {
+        return this.savedMsg[this.tab.id] as string;
       }
       const extra = this.tab.saveNote ?? '';
       return this.dirty[this.tab.id] ? t('You have unsaved changes on this tab. {extra}', { extra }).trim() : extra;
@@ -329,6 +329,12 @@ export default defineComponent({
         this.$toast.add({ severity: 'error', summary: t('Error'), detail: t('Failed to load the settings'), life: 3000 });
       }
     },
+    invalidMsg(reason?: string): string {
+      const detail = reason?.trim();
+      return detail
+        ? t('Some settings on this tab are not valid: {reason} Fix the marked fields and save again.', { reason: detail })
+        : t('Some settings on this tab are not valid. Fix the marked fields and save again.');
+    },
     localError(tab: TabDef): Record<string, string> {
       if (tab.custom === 'upstream') {
         const error = upstreamsError(upstreamOf(getAt(this.edited, UPSTREAMS)), this.upstreamPasswordsSet);
@@ -346,7 +352,7 @@ export default defineComponent({
       const local = this.localError(tab);
       if (Object.keys(local).length > 0) {
         this.errors = local;
-        this.failMsg = t('Some settings on this tab are not valid. Fix the marked fields and save again.');
+        this.failMsg = this.invalidMsg(Object.values(local)[0]);
         return;
       }
       const payload = tabPayload(tab, this.original, this.edited);
@@ -355,9 +361,11 @@ export default defineComponent({
         const check = await API.post('/config/validate', payload);
         if (!check.data?.valid) {
           this.errors = flatErrors(check.data?.errors);
-          const here = tabPaths(tab).some((p) => p in this.errors);
+          const paths = tabPaths(tab);
+          const here = paths.some((p) => p in this.errors);
+          const hereReason = Object.entries(this.errors).find(([p]) => paths.includes(p))?.[1];
           this.failMsg = here
-            ? t('Some settings on this tab are not valid. Fix the marked fields and save again.')
+            ? this.invalidMsg(hereReason)
             : t('Some saved settings on other tabs are not valid: {settings}.', { settings: listNames(Object.keys(this.errors).map(settingLabel)) });
           return;
         }
