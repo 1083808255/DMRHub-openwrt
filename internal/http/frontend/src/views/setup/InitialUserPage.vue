@@ -39,7 +39,7 @@
 </template>
 
 <script lang="ts">
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 
 import UserRegistrationCard from '@/components/UserRegistrationCard.vue';
 import API from '@/services/API';
@@ -71,7 +71,7 @@ export default {
             severity: 'error',
             summary: t('Error'),
             detail: typeof err.response?.data?.error === 'string'
-              ? t(err.response.data.error)
+              ? backendText(err.response.data.error)
               : t('Failed to complete setup wizard'),
             life: 3000,
           });
@@ -94,7 +94,7 @@ export default {
             severity: 'error',
             summary: t('Error'),
             detail: typeof err.response?.data?.error === 'string'
-              ? t(err.response.data.error)
+              ? backendText(err.response.data.error)
               : t('An unknown error occurred'),
             life: 3000,
           });

@@ -40,7 +40,7 @@
 </template>
 
 <script lang="ts">
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 
 import UserRegistrationCard from '@/components/UserRegistrationCard.vue';
 import API from '@/services/API';
@@ -83,7 +83,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: t(err.response.data.error),
+              detail: backendText(err.response.data.error),
               life: 3000,
             });
           } else {

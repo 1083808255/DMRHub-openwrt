@@ -100,7 +100,7 @@
 </template>
 
 <script lang="ts">
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 
 import { Button as ShadButton } from '@/components/ui/button';
 import {
@@ -244,7 +244,7 @@ export default {
             this.$toast.add({
               summary: t('Error'),
               severity: 'error',
-              detail: t(err.response.data.error),
+              detail: backendText(err.response.data.error),
               life: 3000,
             });
           } else {

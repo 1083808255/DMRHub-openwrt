@@ -44,7 +44,7 @@
 </template>
 
 <script lang="ts">
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { h } from 'vue';
@@ -628,7 +628,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: t('Failed to update repeater: {error}', { error: t(err.response.data.error) }),
+              detail: t('Failed to update repeater: {error}', { error: backendText(err.response.data.error) }),
               life: 3000,
             });
           } else {

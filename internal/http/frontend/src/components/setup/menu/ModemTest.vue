@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 import { ref } from 'vue';
 import { Button as ShadButton } from '@/components/ui/button';
 import { portReplica, testView, type ModemTest, type ResultView } from '@/lib/modem';
@@ -99,7 +99,7 @@ const run = async () => {
     } else if (res?.status === 409) {
       view.value = { tone: 'bad', title: t('Another test runs now'), rows: [], text: t('Try again in a few seconds.') };
     } else {
-      view.value = { tone: 'bad', title: t('The test did not run'), rows: [], text: typeof data?.error === 'string' ? t(data.error) : undefined };
+      view.value = { tone: 'bad', title: t('The test did not run'), rows: [], text: typeof data?.error === 'string' ? backendText(data.error) : undefined };
     }
   } finally {
     running.value = false;

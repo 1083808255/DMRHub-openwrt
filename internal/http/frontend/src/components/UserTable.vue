@@ -59,7 +59,7 @@
 </template>
 
 <script lang="ts">
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { h } from 'vue';
@@ -282,7 +282,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: t(err.response.data.error),
+              detail: backendText(err.response.data.error),
               life: 3000,
             });
           } else {
@@ -318,7 +318,7 @@ export default {
               this.$toast.add({
                 severity: 'error',
                 summary: t('Error'),
-                detail: t(err.response.data.error),
+                detail: backendText(err.response.data.error),
                 life: 3000,
               });
             } else {
@@ -394,7 +394,7 @@ export default {
             severity: 'error',
             summary: t('Error'),
             detail: typeof err.response?.data?.error === 'string'
-              ? t(err.response.data.error)
+              ? backendText(err.response.data.error)
               : t('Error updating user {id}', { id: user.id }),
             life: 3000,
           });
