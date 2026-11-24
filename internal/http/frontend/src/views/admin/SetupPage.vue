@@ -329,6 +329,13 @@ export default defineComponent({
         this.$toast.add({ severity: 'error', summary: t('Error'), detail: t('Failed to load the settings'), life: 3000 });
       }
     },
+    errorText(path: string, msg: string, withTab = false): string {
+      const label = fieldsByPath[path]?.label ?? settingLabel(path);
+      const text = msg?.trim() ? `${label}: ${msg.trim()}` : label;
+      if (!withTab) return text;
+      const tab = TABS.find((t) => tabPaths(t).includes(path));
+      return tab ? `${tab.name}: ${text}` : text;
+    },
     invalidMsg(reason?: string): string {
       const detail = reason?.trim();
       return detail
@@ -362,11 +369,16 @@ export default defineComponent({
         if (!check.data?.valid) {
           this.errors = flatErrors(check.data?.errors);
           const paths = tabPaths(tab);
-          const here = paths.some((p) => p in this.errors);
-          const hereReason = Object.entries(this.errors).find(([p]) => paths.includes(p))?.[1];
-          this.failMsg = here
-            ? this.invalidMsg(hereReason)
-            : t('Some saved settings on other tabs are not valid: {settings}.', { settings: listNames(Object.keys(this.errors).map(settingLabel)) });
+          const entries = Object.entries(this.errors);
+          const here = entries.filter(([p]) => paths.includes(p));
+          const other = entries.filter(([p]) => !paths.includes(p));
+          if (here.length > 0) {
+            const details = here.map(([p, m]) => this.errorText(p, m)).join(' ');
+            this.failMsg = this.invalidMsg(details);
+          } else {
+            const details = other.map(([p, m]) => this.errorText(p, m, true)).join(' ');
+            this.failMsg = t('Some saved settings on other tabs are not valid: {settings}.', { settings: details });
+          }
           return;
         }
         this.errors = {};

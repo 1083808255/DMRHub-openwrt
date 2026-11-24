@@ -231,6 +231,7 @@ const labels: Record<string, string> = {
   'dmr.plugins.cert-file': 'Certificate File (plugins)',
   'dmr.plugins.key-file': 'Key File (plugins)',
   'dmr.transcoding.ambe-servers': 'AMBE servers',
+  'dmr.upstreams': 'Upstream networks',
   'dmr.drain-timeout': 'Drain Timeout',
 };
 

@@ -250,6 +250,22 @@ describe('Admin Setup page dirty tracking', () => {
     wrapper.unmount();
   });
 
+  it('names the setting, its tab and its reason when another tab is invalid', async () => {
+    mockAPI.post.mockResolvedValue({
+      data: { valid: false, errors: { dmr: { routing: { 'dynamic-timeout': 'the dynamic link timeout is too short' } } } },
+    });
+    const { wrapper } = await mountAt('/admin/setup#general');
+    await wrapper.find('#setup-network-name').setValue('Other');
+    await wrapper.find('[data-test="save"]').trigger('click');
+    await flushPromises();
+    const text = wrapper.find('[data-test="savebar-message"]').text();
+    expect(text).toContain('Routing');
+    expect(text).toContain('Timeout (minutes)');
+    expect(text).toContain('the dynamic link timeout is too short');
+    expect(text).not.toContain('a setting');
+    wrapper.unmount();
+  });
+
   it('shows a validation failure instead of an older saved message', async () => {
     mockAPI.post.mockResolvedValue({ data: { valid: false, errors: { dmr: { 'public-address': 'enter a host name' } } } });
     const { wrapper } = await mountAt('/admin/setup#dmr');
