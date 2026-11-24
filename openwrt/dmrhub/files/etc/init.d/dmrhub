@@ -13,17 +13,26 @@ BIN=/usr/bin/dmrhub
 start_service() {
     refreshOpkgFeed
     installLuciFlashView
+    keepDataOverUpgrade
 
     # Ensure persistent data/config directory exists
     mkdir -p "$CONF_DIR/data"
 
-    # Seed a usable config on first run. DMRHub searches ./config.yaml from
-    # its working directory, so running from $CONF_DIR picks this up.
+    # A version of the package before the fix kept the database in the root
+    # of the filesystem, because the service did not read the config file.
+    # Move that database, and its log, to the place the config file names.
+    if [ ! -f "$CONF_DIR/data/DMRHub.db" ] && [ -f /DMRHub.db ]; then
+        mv /DMRHub.db "$CONF_DIR/data/DMRHub.db" 2>/dev/null
+        mv /DMRHub.db-wal "$CONF_DIR/data/DMRHub.db-wal" 2>/dev/null
+        rm -f /DMRHub.db-shm
+    fi
+
+    # Seed a usable config on first run. DMRHub reads the file that the
+    # --config flag names, so it finds it no matter the working directory
+    # of the process.
     if [ ! -f "$CONF_DIR/config.yaml" ]; then
         cat > "$CONF_DIR/config.yaml" <<EOF
 log-level: "info"
-secret: "change-me-dmrhub-secret-key-please"
-password-salt: "change-me-dmrhub-password-salt-please"
 database:
   driver: "sqlite"
   database: "$CONF_DIR/data/DMRHub.db"
@@ -34,9 +43,20 @@ http:
 EOF
     fi
 
+    # DMRHub makes the secret and the password salt itself and keeps them
+    # in the database, so the config file must not set them. A config file
+    # of an older version holds placeholders; drop them, so the values in
+    # the database stay in use and the passwords of the accounts keep
+    # working.
+    sed -i -e '/^secret:.*change-me/d' -e '/^password-salt:.*change-me/d' \
+        "$CONF_DIR/config.yaml"
+
+    # procd of OpenWrt 24.10 has no parameter for the working directory, so
+    # the service changes it itself. DMRHub looks for ./config.yaml in its
+    # working directory, and the flag names the same file, so it finds the
+    # config no matter how the process was started.
     procd_open_instance dmrhub
-    procd_set_param command "$BIN"
-    procd_set_param workingdir "$CONF_DIR"
+    procd_set_param command /bin/sh -c "cd $CONF_DIR && exec $BIN --config $CONF_DIR/config.yaml"
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
@@ -63,6 +83,18 @@ installLuciFlashView() {
     if ! cmp -s "$src" "$dst" 2>/dev/null; then
         cp "$src" "$dst" 2>/dev/null && echo "dmrhub: installed the LuCI OTA section"
     fi
+}
+
+# keepDataOverUpgrade names the data of DMRHub, so that a flash of the
+# firmware keeps it. sysupgrade reads the files of /lib/upgrade/keep.d and
+# backs up the paths that they name, apart from the files of the packages
+# and the changed files of /etc/config. Without the rule, the flash wipes
+# the database and the setup of the hub.
+keepDataOverUpgrade() {
+    local dir="/lib/upgrade/keep.d"
+    [ -d "$dir" ] || return 0
+    grep -qx "$CONF_DIR/" "$dir/dmrhub" 2>/dev/null && return 0
+    echo "$CONF_DIR/" > "$dir/dmrhub" 2>/dev/null || true
 }
 
 status() {

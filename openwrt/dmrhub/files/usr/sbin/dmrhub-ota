@@ -340,8 +340,14 @@ cmd_firmware() {
 		echo "$REMOTE_FW_SHA  $FW_FILE" | sha256sum -c - >/dev/null || die "SHA256 校验不通过，文件可能已损坏"
 	fi
 	log "正在刷写固件，设备即将重启"
-	# -k keeps the current configuration, -u skips backup files that already
-	# match what is in /rom.
+	# Stop the service before the backup. The database runs in WAL mode, and
+	# stopping it lets SQLite fold the log into the database file, so that
+	# the archive holds a consistent copy.
+	/etc/init.d/dmrhub stop 2>/dev/null || true
+	# -k writes the list of the installed packages into the backup, -u skips
+	# the files that are the same as in /rom. Neither of them keeps the
+	# configuration of DMRHub: the data is kept because /opt/dmrhub is
+	# named in /lib/upgrade/keep.d/dmrhub.
 	sysupgrade -k -u "$FW_FILE"
 }
 
