@@ -83,7 +83,17 @@ export const emptyUpstreamRewrite = (): UpstreamRewriteRow => ({
   upstreamTg: '',
 });
 
-/** upstreamOf turns the config API value into rows the editor can show. Passwords are never sent by the hub. */
+/**
+ * upstreamOf turns a config value into rows the editor can show.
+ *
+ * It accepts two shapes because the editor commits its rows back to the same
+ * config path: the API shape (kebab-case keys, no password) when first loaded,
+ * and the editor's own row shape (camelCase keys plus a typed password) on
+ * every following recompute. Reading only the API shape would silently drop a
+ * password the user just typed, and reset the frequency/color-code/TG fields
+ * to their defaults. The hub never sends a password, so accepting `password`
+ * here only ever picks up a value typed in this browser.
+ */
 export const upstreamOf = (v: unknown): UpstreamValue => {
   const src = typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
   const networks = Array.isArray(src.networks) ? src.networks : [];
@@ -99,11 +109,11 @@ export const upstreamOf = (v: unknown): UpstreamValue => {
         address: text(n.address),
         port: num(n.port, 62031),
         id: num(n.id, ''),
-        password: '',
+        password: text(n.password),
         callsign: text(n.callsign) || 'DMRHUB',
-        rxFrequency: num(n['rx-frequency'], 438800000),
-        txFrequency: num(n['tx-frequency'], 438800000),
-        colorCode: num(n['color-code'], 1),
+        rxFrequency: num(n['rx-frequency'] ?? n.rxFrequency, 438800000),
+        txFrequency: num(n['tx-frequency'] ?? n.txFrequency, 438800000),
+        colorCode: num(n['color-code'] ?? n.colorCode, 1),
         slots: num(n.slots, 3),
         options: text(n.options),
       };
@@ -112,8 +122,8 @@ export const upstreamOf = (v: unknown): UpstreamValue => {
       const r = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
       return {
         network: text(r.network),
-        localTg: num(r['local-tg'], ''),
-        upstreamTg: num(r['upstream-tg'], ''),
+        localTg: num(r['local-tg'] ?? r.localTg, ''),
+        upstreamTg: num(r['upstream-tg'] ?? r.upstreamTg, ''),
       };
     }),
   };

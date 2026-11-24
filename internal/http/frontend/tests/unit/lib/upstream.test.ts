@@ -42,6 +42,30 @@ describe('upstream config', () => {
     expect(upstreamPasswordsOf(rows)).toEqual(['typed']);
   });
 
+  it('keeps typed values when the editor re-derives rows from the committed value', () => {
+    const rows = upstreamOf({
+      enabled: true,
+      networks: [{
+        name: 'BM', enabled: true, dialect: 'mmdvm', address: 'master.example.org',
+        port: 62031, id: 1234567, callsign: 'DMRHUB',
+        'rx-frequency': 439000000, 'tx-frequency': 439000000,
+        'color-code': 2, slots: 2, options: 'TS2=91',
+      }],
+      rewrites: [{ network: 'BM', 'local-tg': 91, 'upstream-tg': 3100 }],
+    });
+    rows.networks[0]!.password = 'typed';
+
+    // UpstreamTab commits its rows to the config path, then recomputes rows
+    // with upstreamOf on every keystroke. Nothing the user typed may be lost.
+    const again = upstreamOf(rows);
+    expect(again.networks[0]!.password).toBe('typed');
+    expect(again.networks[0]!.rxFrequency).toBe(439000000);
+    expect(again.networks[0]!.colorCode).toBe(2);
+    expect(again.rewrites[0]!.localTg).toBe(91);
+    expect(upstreamsError(again, [false])).toBeUndefined();
+    expect(upstreamPasswordsOf(again)).toEqual(['typed']);
+  });
+
   it('validates networks and rewrites', () => {
     const rows = upstreamOf({ networks: [], rewrites: [] });
     expect(upstreamsError(rows, [])).toBeUndefined();
