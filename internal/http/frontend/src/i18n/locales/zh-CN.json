@@ -2221,5 +2221,7 @@
   "From upstream: {n} bursts. To upstream: {m} bursts.": "上游发来 {n} 个突发，发往上游 {m} 个突发。",
   "Last call {time} ago": "最后一次通话在 {time} 前",
   "From upstream": "上游发来",
-  "To upstream": "发往上游"
+  "To upstream": "发往上游",
+  "Disabled": "已禁用",
+  "This network is off. Nothing is sent to it or received from it until this is on.": "此网络已关闭。在开启之前，不会向它发送任何内容，也不会从它接收任何内容。"
 }

@@ -2221,5 +2221,7 @@
   "From upstream: {n} bursts. To upstream: {m} bursts.": "From upstream: {n} bursts. To upstream: {m} bursts.",
   "Last call {time} ago": "Last call {time} ago",
   "From upstream": "From upstream",
-  "To upstream": "To upstream"
+  "To upstream": "To upstream",
+  "Disabled": "Disabled",
+  "This network is off. Nothing is sent to it or received from it until this is on.": "This network is off. Nothing is sent to it or received from it until this is on."
 }

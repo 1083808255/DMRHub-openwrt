@@ -105,13 +105,32 @@
           class="mb-4 rounded-[10px] border p-3.5"
           :data-test="`upstream-network-${i}`"
         >
-          <div class="mb-3 flex flex-wrap items-center gap-2">
-            <Switch :model-value="n.enabled" :disabled="locked" :aria-label="$t('Enable network {n}', { n: i + 1 })" :data-test="`upstream-network-enabled-${i}`" @update:model-value="(v: boolean) => setNetwork(i, 'enabled', v)" />
+          <div class="mb-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+            <Switch
+              :id="`upstream-enabled-${i}`"
+              :model-value="n.enabled"
+              :disabled="locked"
+              :aria-label="$t('Enable network {n}', { n: i + 1 })"
+              :data-test="`upstream-network-enabled-${i}`"
+              @update:model-value="(v: boolean) => setNetwork(i, 'enabled', v)"
+            />
+            <label
+              :for="`upstream-enabled-${i}`"
+              class="text-sm font-semibold"
+              :class="locked ? 'cursor-not-allowed' : 'cursor-pointer'"
+            >{{ n.enabled ? $t('On') : $t('Off') }}</label>
             <b class="text-sm">{{ n.name || $t('Unnamed network') }}</b>
+            <span
+              class="rounded-full border px-2 text-xs leading-5"
+              :class="n.enabled ? 'border-green-600/50 text-green-700 dark:text-green-400' : 'text-muted-foreground'"
+            >{{ n.enabled ? $t('Enabled') : $t('Disabled') }}</span>
             <ShadButton type="button" variant="outline" size="sm" class="ml-auto" :disabled="locked" :data-test="`upstream-network-remove-${i}`" @click="removeNetwork(i)">
               {{ $t('Remove') }}
             </ShadButton>
           </div>
+          <p v-if="!n.enabled" class="mb-3 text-sm text-muted-foreground">
+            {{ $t('This network is off. Nothing is sent to it or received from it until this is on.') }}
+          </p>
           <div class="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Name') }}</span>
