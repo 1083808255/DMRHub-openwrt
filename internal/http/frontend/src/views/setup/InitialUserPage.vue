@@ -70,7 +70,9 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: err.response?.data?.error ?? t('Failed to complete setup wizard'),
+            detail: typeof err.response?.data?.error === 'string'
+              ? t(err.response.data.error)
+              : t('Failed to complete setup wizard'),
             life: 3000,
           });
         });
@@ -80,8 +82,8 @@ export default {
         .then((res) => {
           this.$toast.add({
             severity: 'success',
-            summary: 'Success',
-            detail: res.data.message,
+            summary: t('Success'),
+            detail: t(res.data.message),
             life: 3000,
           });
           this.complete();
@@ -91,7 +93,9 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: err.response?.data?.error ?? t('An unknown error occurred'),
+            detail: typeof err.response?.data?.error === 'string'
+              ? t(err.response.data.error)
+              : t('An unknown error occurred'),
             life: 3000,
           });
           if (err.response?.status === 409) {

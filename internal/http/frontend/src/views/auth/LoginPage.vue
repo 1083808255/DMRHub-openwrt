@@ -82,6 +82,7 @@
 import { computed } from 'vue';
 import { useHead } from '@unhead/vue';
 import { useI18n } from 'vue-i18n';
+import { t } from '@/i18n';
 import API from '@/services/API';
 import { safeNext } from '@/lib/next';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -168,10 +169,11 @@ export default {
         .catch((err) => {
           console.error(err);
           const serverError = err.response && err.response.data && err.response.data.error;
+          // The backend sends its errors in English. They are keys in the
+          // locale files, so translate them. A key that is missing falls back
+          // to the original text.
           const detail = serverError
-            ? this.$te(serverError)
-              ? this.$t(serverError)
-              : serverError
+            ? t(serverError)
             : this.$t('Error logging in');
           this.$toast.add({
             summary: this.$t('Error'),

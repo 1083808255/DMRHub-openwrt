@@ -296,7 +296,7 @@ export default {
                       severity: 'error',
                       summary: t('Error'),
                       detail:
-                        t('Failed to update talkgroup admins: {error}', { error: err.response.data.error }),
+                        t('Failed to update talkgroup admins: {error}', { error: t(err.response.data.error) }),
                       life: 3000,
                     });
                     return;
@@ -321,7 +321,7 @@ export default {
                   severity: 'error',
                   summary: t('Error'),
                   detail:
-                    t('Failed to update talkgroup admins: {error}', { error: err.response.data.error }),
+                    t('Failed to update talkgroup admins: {error}', { error: t(err.response.data.error) }),
                   life: 3000,
                 });
                 return;

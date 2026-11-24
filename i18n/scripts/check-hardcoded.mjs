@@ -20,15 +20,20 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // This script lives in two places: i18n/scripts/ (canonical source, repo root
 // is two levels up) and frontend/scripts/ (working copy, root is one level up).
 // Pick whichever resolves to a directory that actually has src/.
+let rootWithDeps = null;
 function resolveRoot() {
   const candidates = [
     path.resolve(here, '../../internal/http/frontend'),
     path.resolve(here, '..'),
   ];
   for (const c of candidates) {
-    if (existsSafe(path.join(c, 'src'))) return c;
+    if (!existsSafe(path.join(c, 'src'))) continue;
+    // The compiler lives in node_modules. Prefer the copy that has it, so
+    // the script runs from either location.
+    if (existsSafe(path.join(c, 'node_modules', '@vue', 'compiler-sfc'))) return c;
+    if (!rootWithDeps) rootWithDeps = c;
   }
-  return candidates[0];
+  return rootWithDeps || candidates[0];
 }
 const root = resolveRoot();
 // Resolve @vue/compiler-sfc from the frontend's node_modules (this script now
@@ -48,6 +53,22 @@ const UI_WORD = /^(yes|no|ok|save|cancel|delete|edit|add|remove|search|back|next
 // Lookup tables hold the English key and translate it where they are used,
 // e.g. `const SMS_FORMATS = { ip: 'ETSI IP' }` followed by `t(SMS_FORMATS[k])`.
 const TABLE_KEYS = /\b(SMS_FORMATS|DATA_SUBS|CSBK_NAMES|UNKNOWN_NAMES|UNDELIVERABLE_WORDS|UNDELIVERABLE_TARGETS|FORMAT_LABEL_KEYS|SAP_NAME_KEYS|SAP_NAMES)\b/;
+
+// Every key of the locale files. A string that is one of them is a
+// translation key, whatever it looks like. The lookup tables of the setup
+// page hold the key and translate it where they are shown, so their entries
+// are not untranslated text.
+const LOCALE_KEYS = new Set();
+for (const file of ['en.json', 'zh-CN.json']) {
+  const p = path.join(root, 'src/i18n/locales', file);
+  if (!existsSafe(p)) continue;
+  try {
+    const data = JSON.parse(readFileSync(p, 'utf8'));
+    for (const key of Object.keys(data)) LOCALE_KEYS.add(key);
+  } catch {
+    // A broken locale file is reported by check-i18n.mjs.
+  }
+}
 
 // Strings that look like code, not prose.
 const TS_ALLOW = [
@@ -164,6 +185,10 @@ function scanScript(code, rel, lineOffset, found, opts = {}) {
     const trimmed = v.trim();
     if (!trimmed) continue;
     if (TS_ALLOW.some((rx) => rx.test(trimmed))) continue;
+    // A string that is a key of the locale files is a translation key, not
+    // untranslated text. Lookup tables such as the labels of the setup page
+    // hold the key and translate it where they are shown.
+    if (LOCALE_KEYS.has(trimmed)) continue;
     // Ignore matches inside console logging.
     const lineStart = scanned.lastIndexOf('\n', m.index) + 1;
     const lineText = scanned.slice(lineStart, m.index);

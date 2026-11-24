@@ -8,7 +8,24 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '../../internal/http/frontend');
+// This script lives in two places: i18n/scripts/ (canonical source, repo root
+// is two levels up) and frontend/scripts/ (working copy, root is one level up).
+function resolveRoot() {
+  const candidates = [
+    path.resolve(here, '../../internal/http/frontend'),
+    path.resolve(here, '..'),
+  ];
+  for (const c of candidates) {
+    try {
+      statSync(path.join(c, 'src'));
+      return c;
+    } catch {
+      // try the next one
+    }
+  }
+  return candidates[0];
+}
+const root = resolveRoot();
 const locales = path.join(root, 'src/i18n/locales');
 
 const files = [];
@@ -40,6 +57,43 @@ for (const file of files) {
     const line = src.slice(0, m.index).split('\n').length;
     if (!used.has(key)) used.set(key, []);
     used.get(key).push(`${rel}:${line}`);
+  }
+}
+
+// Lookup tables hold the key and translate it where the value is shown, for
+// example `const labels = { 'log-level': 'Log Level' }` and `t(labels[path])`.
+// The keys of those tables are used too, so they are counted here.
+const TABLE = /\b(?:labels|sources|deployments|servers|SMS_FORMATS|DATA_SUBS|CSBK_NAMES|UNKNOWN_NAMES|UNDELIVERABLE_WORDS|UNDELIVERABLE_TARGETS|FORMAT_LABEL_KEYS|SAP_NAME_KEYS|SAP_NAMES)\b/;
+const TABLE_ENTRY = /^\s*(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))\s*:\s*'((?:[^'\\]|\\.)*)'/gm;
+for (const file of files) {
+  const src = readFileSync(file, 'utf8');
+  if (!TABLE.test(src)) continue;
+  const rel = path.relative(root, file);
+  // Only the body of a table declaration counts.
+  const decl = /\b(?:labels|sources|deployments|servers|SMS_FORMATS|DATA_SUBS|CSBK_NAMES|UNKNOWN_NAMES|UNDELIVERABLE_WORDS|UNDELIVERABLE_TARGETS|FORMAT_LABEL_KEYS|SAP_NAME_KEYS|SAP_NAMES)\s*(?::[^=]+)?=\s*\{/g;
+  let d;
+  while ((d = decl.exec(src)) !== null) {
+    let depth = 0;
+    for (let j = d.index + d[0].length - 1; j < src.length; j += 1) {
+      if (src[j] === '{') depth += 1;
+      else if (src[j] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const body = src.slice(d.index + d[0].length, j);
+          let e;
+          TABLE_ENTRY.lastIndex = 0;
+          while ((e = TABLE_ENTRY.exec(body)) !== null) {
+            const key = e[1] !== undefined ? e[1] : e[2];
+            const value = e[3];
+            if (!key || !value) continue;
+            const line = src.slice(0, d.index + d[0].length + e.index).split('\n').length;
+            if (!used.has(value)) used.set(value, []);
+            used.get(value).push(`${rel}:${line}`);
+          }
+          break;
+        }
+      }
+    }
   }
 }
 

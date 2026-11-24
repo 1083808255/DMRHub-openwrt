@@ -213,14 +213,14 @@ const showApplyError = (e: ApplyError, self: boolean): ShownApplyError => {
       summary: $t('Replica {replica} cannot run with the saved {setting}. It keeps its previous settings.', {
         replica, setting: settingLabel(e.field),
       }),
-      detail: e.error,
+      detail: $t(e.error),
     };
   }
   const state = e.running ? $t('It keeps running with its previous settings.') : $t('It is not running.');
   const target = self || !replica
     ? $t('The {server} server', { server: serverName(e.server) })
     : $t('The {server} server of replica {replica}', { server: serverName(e.server), replica });
-  return { summary: $t('{target} could not start with the new settings. {state}', { target, state }), detail: e.error };
+  return { summary: $t('{target} could not start with the new settings. {state}', { target, state }), detail: $t(e.error) };
 };
 
 const fieldsByPath: Record<string, FieldDef> = Object.fromEntries(TABS.flatMap(tabFields).map((f) => [f.path, f]));

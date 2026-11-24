@@ -69,8 +69,8 @@ export default {
         .then((res) => {
           this.$toast.add({
             severity: 'success',
-            summary: 'Success',
-            detail: res.data.message,
+            summary: t('Success'),
+            detail: t(res.data.message),
             life: 3000,
           });
           setTimeout(() => {
@@ -83,7 +83,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: err.response.data.error,
+              detail: t(err.response.data.error),
               life: 3000,
             });
           } else {

@@ -234,28 +234,28 @@ export const TABS: TabDef[] = [
     id: 'general',
     group: 'Server',
     get name() { return t('General'); },
-    intro: [t('The name of the network, the log, new users and the secrets.')],
+    get intro() { return [t('The name of the network, the log, new users and the secrets.')]; },
     cards: [
       {
         get title() { return t('General'); },
         rows: [
-          { path: 'network-name', get label() { return t('Network name'); }, kind: 'text', help: t('The name of the network, shown at the top of every page.') },
+          { path: 'network-name', get label() { return t('Network name'); }, kind: 'text', get help() { return t('The name of the network, shown at the top of every page.'); } },
           {
-            path: 'log-level', get label() { return t('Log level'); }, kind: 'select', help: t('How much DMRHub writes to its log.'),
+            path: 'log-level', get label() { return t('Log level'); }, kind: 'select', get help() { return t('How much DMRHub writes to its log.'); },
             options: ['debug', 'info', 'warn', 'error'].map((v) => ({ value: v, label: v })),
           },
           {
             path: 'auto-approve-users', get label() { return t('Approve new users at once'); }, kind: 'bool',
-            help: t('New users can log in as soon as they register, with no wait for an admin.'),
+            get help() { return t('New users can log in as soon as they register, with no wait for an admin.'); },
           },
         ],
       },
       {
         get title() { return t('Secrets'); },
         rows: [
-          { path: 'secret', get label() { return t('Secret'); }, kind: 'secret', help: t('At least 15 random characters.') },
-          { path: 'password-salt', get label() { return t('Password salt'); }, kind: 'secret', help: t('Salt for the password hashes of the users. Different from the secret.') },
-          { path: 'hibp-api-key', get label() { return t('Have I Been Pwned API key'); }, kind: 'secret', help: t('Checks new passwords against known leaks. Empty turns the check off.') },
+          { path: 'secret', get label() { return t('Secret'); }, kind: 'secret', get help() { return t('At least 15 random characters.'); } },
+          { path: 'password-salt', get label() { return t('Password salt'); }, kind: 'secret', get help() { return t('Salt for the password hashes of the users. Different from the secret.'); } },
+          { path: 'hibp-api-key', get label() { return t('Have I Been Pwned API key'); }, kind: 'secret', get help() { return t('Checks new passwords against known leaks. Empty turns the check off.'); } },
         ],
       },
     ],
@@ -302,14 +302,14 @@ export const TABS: TabDef[] = [
           {
             path: 'listen.listeners', get label() { return t('Listeners at once'); }, kind: 'number',
             toggle: { get label() { return t('Let visitors listen in DMRHub Radio'); }, value: 200 },
-            help: t('Visitors with no account hear one talkgroup at a time and cannot talk. The limit is for each server.'),
+            get help() { return t('Visitors with no account hear one talkgroup at a time and cannot talk. The limit is for each server.'); },
             warn: (read) => (read('visibility') === 'login' && Number(read('listen.listeners')) > 0
               ? t('Visitors see nothing, so nobody can listen.')
               : undefined),
           },
           {
             path: 'listen.per-address', get label() { return t('Listeners from one address'); }, kind: 'number', show: (read) => Number(read('listen.listeners')) > 0,
-            help: t('For each server. 0 is no limit.'),
+            get help() { return t('For each server. 0 is no limit.'); },
           },
         ],
       },
@@ -319,14 +319,14 @@ export const TABS: TabDef[] = [
     id: 'http',
     group: 'Server',
     get name() { return t('HTTP'); },
-    intro: [t('The URL of the site, robots.txt and the web server.')],
+    get intro() { return [t('The URL of the site, robots.txt and the web server.')]; },
     cards: [
       {
         get title() { return t('Site'); },
         rows: [
           {
             path: 'http.canonical-host', get label() { return t('Site URL'); }, kind: 'text', placeholder: 'https://dmrhub.example.org',
-            help: t('The URL that people use to reach this site.'),
+            get help() { return t('The URL that people use to reach this site.'); },
             check: (v) => (String(v ?? '').trim() === '' ? t('Required.') : undefined),
           },
           {
@@ -343,13 +343,13 @@ export const TABS: TabDef[] = [
       {
         get title() { return t('Web server'); },
         rows: [
-          { path: 'http.bind', get label() { return t('Bind address'); }, kind: 'text', help: t('The address that the web server listens on.') },
-          { path: 'http.port', get label() { return t('Port'); }, kind: 'number', help: t('The TCP port of the web server.') },
-          { path: 'http.trusted-proxies', get label() { return t('Trusted proxies'); }, kind: 'list', help: t('Addresses of the reverse proxies in front of DMRHub, one for each line.') },
+          { path: 'http.bind', get label() { return t('Bind address'); }, kind: 'text', get help() { return t('The address that the web server listens on.'); } },
+          { path: 'http.port', get label() { return t('Port'); }, kind: 'number', get help() { return t('The TCP port of the web server.'); } },
+          { path: 'http.trusted-proxies', get label() { return t('Trusted proxies'); }, kind: 'list', get help() { return t('Addresses of the reverse proxies in front of DMRHub, one for each line.'); } },
           { path: 'http.cors.enabled', get label() { return t('Allow other sites to call the API (CORS)'); }, kind: 'bool' },
           {
             path: 'http.cors.extra-hosts', get label() { return t('Other allowed origins'); }, kind: 'list',
-            help: t('One for each line, such as https://radio.example.org.'), show: on('http.cors.enabled'),
+            get help() { return t('One for each line, such as https://radio.example.org.'); }, show: on('http.cors.enabled'),
           },
         ],
       },
@@ -359,21 +359,21 @@ export const TABS: TabDef[] = [
     id: 'database',
     group: 'Server',
     get name() { return t('Database'); },
-    intro: [t('Where DMRHub keeps its data, the Setup settings among them.')],
+    get intro() { return [t('Where DMRHub keeps its data, the Setup settings among them.')]; },
     cards: [
       {
         get title() { return t('Database'); },
         rows: [
           {
             path: 'database.driver', get label() { return t('Driver'); }, kind: 'select',
-            help: t('SQLite for small networks and tests. PostgreSQL or MySQL for more than one replica.'),
+            get help() { return t('SQLite for small networks and tests. PostgreSQL or MySQL for more than one replica.'); },
             options: [
               { value: 'sqlite', get label() { return t('SQLite'); } },
               { value: 'postgres', get label() { return t('PostgreSQL'); } },
               { value: 'mysql', get label() { return t('MySQL or MariaDB'); } },
             ],
           },
-          { path: 'database.database', get label() { return t('Database'); }, kind: 'text', help: t('The name of the database, or the path of the SQLite file.') },
+          { path: 'database.database', get label() { return t('Database'); }, kind: 'text', get help() { return t('The name of the database, or the path of the SQLite file.'); } },
           {
             grid: [
               { path: 'database.host', get label() { return t('Host'); }, kind: 'text', show: serverDatabase },
@@ -382,7 +382,7 @@ export const TABS: TabDef[] = [
               { path: 'database.password', get label() { return t('Password'); }, kind: 'secret', show: serverDatabase },
             ],
           },
-          { path: 'database.extra-parameters', get label() { return t('Extra parameters'); }, kind: 'list', help: t('Added to the connection, one for each line.') },
+          { path: 'database.extra-parameters', get label() { return t('Extra parameters'); }, kind: 'list', get help() { return t('Added to the connection, one for each line.'); } },
         ],
       },
     ],
@@ -391,12 +391,12 @@ export const TABS: TabDef[] = [
     id: 'redis',
     group: 'Server',
     get name() { return t('Redis'); },
-    intro: [t('Redis shares calls and state between replicas.')],
+    get intro() { return [t('Redis shares calls and state between replicas.')]; },
     cards: [
       {
         get title() { return t('Redis'); },
         rows: [
-          { path: 'redis.enabled', get label() { return t('Use Redis'); }, kind: 'bool', help: t('Redis is needed for more than one replica.') },
+          { path: 'redis.enabled', get label() { return t('Use Redis'); }, kind: 'bool', get help() { return t('Redis is needed for more than one replica.'); } },
           { path: 'redis.host', get label() { return t('Host'); }, kind: 'text' },
           { path: 'redis.port', get label() { return t('Port'); }, kind: 'number' },
           { path: 'redis.password', get label() { return t('Password'); }, kind: 'secret' },
@@ -408,12 +408,12 @@ export const TABS: TabDef[] = [
     id: 'smtp',
     group: 'Server',
     get name() { return t('SMTP'); },
-    intro: [t('The mail server that DMRHub sends email through.')],
+    get intro() { return [t('The mail server that DMRHub sends email through.')]; },
     cards: [
       {
         get title() { return t('Email'); },
         rows: [
-          { path: 'smtp.enabled', get label() { return t('Send email'); }, kind: 'bool', help: t('For password resets and notices to users.') },
+          { path: 'smtp.enabled', get label() { return t('Send email'); }, kind: 'bool', get help() { return t('For password resets and notices to users.'); } },
           { path: 'smtp.host', get label() { return t('SMTP host'); }, kind: 'text' },
           { path: 'smtp.port', get label() { return t('SMTP port'); }, kind: 'number' },
           {
@@ -443,22 +443,22 @@ export const TABS: TabDef[] = [
     id: 'metrics',
     group: 'Server',
     get name() { return t('Metrics and PProf'); },
-    intro: [t('Monitoring and debugging listeners.')],
+    get intro() { return [t('Monitoring and debugging listeners.')]; },
     cards: [
       {
         get title() { return t('Metrics'); },
         rows: [
-          { path: 'metrics.enabled', get label() { return t('Serve metrics'); }, kind: 'bool', help: t('Prometheus metrics on their own port.') },
+          { path: 'metrics.enabled', get label() { return t('Serve metrics'); }, kind: 'bool', get help() { return t('Prometheus metrics on their own port.'); } },
           { path: 'metrics.bind', get label() { return t('Bind address'); }, kind: 'text' },
           { path: 'metrics.port', get label() { return t('Port'); }, kind: 'number' },
           { path: 'metrics.trusted-proxies', get label() { return t('Trusted proxies'); }, kind: 'list' },
-          { path: 'metrics.otlp-endpoint', get label() { return t('OTLP endpoint'); }, kind: 'text', help: t('Where DMRHub sends its traces. Empty sends none.') },
+          { path: 'metrics.otlp-endpoint', get label() { return t('OTLP endpoint'); }, kind: 'text', get help() { return t('Where DMRHub sends its traces. Empty sends none.'); } },
         ],
       },
       {
         get title() { return t('PProf'); },
         rows: [
-          { path: 'pprof.enabled', get label() { return t('Serve PProf'); }, kind: 'bool', help: t('Profiles for debugging. Leave off unless a DMRHub developer asks for them.') },
+          { path: 'pprof.enabled', get label() { return t('Serve PProf'); }, kind: 'bool', get help() { return t('Profiles for debugging. Leave off unless a DMRHub developer asks for them.'); } },
           { path: 'pprof.bind', get label() { return t('Bind address'); }, kind: 'text', show: on('pprof.enabled') },
           { path: 'pprof.port', get label() { return t('Port'); }, kind: 'number', show: on('pprof.enabled') },
           { path: 'pprof.trusted-proxies', get label() { return t('Trusted proxies'); }, kind: 'list', show: on('pprof.enabled') },
@@ -470,31 +470,31 @@ export const TABS: TabDef[] = [
     id: 'dmr',
     group: 'DMR',
     get name() { return t('DMR and MMDVM'); },
-    intro: [t('Hotspots, MMDVMHost, DMRGateway, DroidStar and HBlink connect to the MMDVM server.')],
+    get intro() { return [t('Hotspots, MMDVMHost, DMRGateway, DroidStar and HBlink connect to the MMDVM server.')]; },
     cards: [
       {
         get title() { return t('MMDVM server'); },
         rows: [
-          { path: 'dmr.mmdvm.bind', get label() { return t('Bind address'); }, kind: 'text', help: t('The address that the MMDVM server listens on.') },
-          { path: 'dmr.mmdvm.port', get label() { return t('Port'); }, kind: 'number', help: t('The UDP port that hotspots connect to.') },
+          { path: 'dmr.mmdvm.bind', get label() { return t('Bind address'); }, kind: 'text', get help() { return t('The address that the MMDVM server listens on.'); } },
+          { path: 'dmr.mmdvm.port', get label() { return t('Port'); }, kind: 'number', get help() { return t('The UDP port that hotspots connect to.'); } },
           {
             path: 'dmr.public-address', get label() { return t('Public server address'); }, kind: 'text', placeholder: 'dmr.example.org',
-            help: t('The host name or IP address that hotspots and repeaters connect to. Empty uses the host name of the site URL.'),
+            get help() { return t('The host name or IP address that hotspots and repeaters connect to. Empty uses the host name of the site URL.'); },
           },
         ],
       },
       {
         get title() { return t('Radio IDs'); },
         rows: [
-          { path: 'dmr.radio-id-url', get label() { return t('Radio ID list'); }, kind: 'text', help: t('In the format of RadioID.net.') },
-          { path: 'dmr.repeater-id-url', get label() { return t('Repeater ID list'); }, kind: 'text', help: t('In the format of RadioID.net.') },
+          { path: 'dmr.radio-id-url', get label() { return t('Radio ID list'); }, kind: 'text', get help() { return t('In the format of RadioID.net.'); } },
+          { path: 'dmr.repeater-id-url', get label() { return t('Repeater ID list'); }, kind: 'text', get help() { return t('In the format of RadioID.net.'); } },
         ],
       },
       {
         get title() { return t('Records'); },
         rows: [
-          { path: 'dmr.retention.transmissions', get label() { return t('Keep last heard (days)'); }, kind: 'number', help: t('0 keeps them forever.') },
-          { path: 'dmr.retention.bursts', get label() { return t('Keep raw bursts (days)'); }, kind: 'number', help: t('0 keeps them forever.') },
+          { path: 'dmr.retention.transmissions', get label() { return t('Keep last heard (days)'); }, kind: 'number', get help() { return t('0 keeps them forever.'); } },
+          { path: 'dmr.retention.bursts', get label() { return t('Keep raw bursts (days)'); }, kind: 'number', get help() { return t('0 keeps them forever.'); } },
         ],
       },
       {
@@ -502,7 +502,7 @@ export const TABS: TabDef[] = [
         rows: [
           {
             path: 'dmr.drain-timeout', get label() { return t('Hand-over time (seconds)'); }, kind: 'number',
-            help: t('How long a replica that stops keeps serving while other replicas take over. Shorter than the stop time of the orchestrator. 0 stops at once.'),
+            get help() { return t('How long a replica that stops keeps serving while other replicas take over. Shorter than the stop time of the orchestrator. 0 stops at once.'); },
           },
         ],
       },
@@ -512,17 +512,17 @@ export const TABS: TabDef[] = [
     id: 'ipsc',
     group: 'DMR',
     get name() { return t('IPSC'); },
-    intro: [t('Motorola repeaters, such as the XPR 8400 and SLR 5500, connect over IPSC. Users enroll them as Motorola IPSC.')],
+    get intro() { return [t('Motorola repeaters, such as the XPR 8400 and SLR 5500, connect over IPSC. Users enroll them as Motorola IPSC.')]; },
     cards: [
       {
         get title() { return t('IPSC server'); },
         rows: [
           { path: 'dmr.ipsc.enabled', get label() { return t('Accept Motorola repeaters (IPSC)'); }, kind: 'bool' },
           { path: 'dmr.ipsc.bind', get label() { return t('Bind address'); }, kind: 'text', show: on('dmr.ipsc.enabled') },
-          { path: 'dmr.ipsc.port', get label() { return t('Port'); }, kind: 'number', help: t('The UDP port that Motorola repeaters connect to.'), show: on('dmr.ipsc.enabled') },
+          { path: 'dmr.ipsc.port', get label() { return t('Port'); }, kind: 'number', get help() { return t('The UDP port that Motorola repeaters connect to.'); }, show: on('dmr.ipsc.enabled') },
           {
             path: 'dmr.ipsc.network-id', get label() { return t('Network ID'); }, kind: 'number', required: true,
-            help: t('The DMR ID that this server uses toward IPSC repeaters. Required.'), show: on('dmr.ipsc.enabled'),
+            get help() { return t('The DMR ID that this server uses toward IPSC repeaters. Required.'); }, show: on('dmr.ipsc.enabled'),
           },
           { path: 'dmr.ipsc.call-hang-hold', get label() { return t('Hang time after voice (seconds)'); }, kind: 'seconds', step: '0.1', help: hangHelp('voice'), show: on('dmr.ipsc.enabled') },
           { path: 'dmr.ipsc.data-hang-hold', get label() { return t('Hang time after data (seconds)'); }, kind: 'seconds', step: '0.1', help: hangHelp('data'), show: on('dmr.ipsc.enabled') },
@@ -545,10 +545,10 @@ export const TABS: TabDef[] = [
         rows: [
           { path: 'dmr.openbridge.enabled', get label() { return t('Accept OpenBridge peers'); }, kind: 'bool' },
           { path: 'dmr.openbridge.bind', get label() { return t('Bind address'); }, kind: 'text', show: on('dmr.openbridge.enabled') },
-          { path: 'dmr.openbridge.port', get label() { return t('Port'); }, kind: 'number', help: t('The UDP port of OpenBridge links.'), show: on('dmr.openbridge.enabled') },
+          { path: 'dmr.openbridge.port', get label() { return t('Port'); }, kind: 'number', get help() { return t('The UDP port of OpenBridge links.'); }, show: on('dmr.openbridge.enabled') },
           {
             path: 'dmr.openbridge.server-id', get label() { return t('Server ID'); }, kind: 'number', show: on('dmr.openbridge.enabled'),
-            help: t('The server ID of 4 to 7 digits that DMRHub sends to FreeDMR peers. 0 sends the network ID of each peer.'),
+            get help() { return t('The server ID of 4 to 7 digits that DMRHub sends to FreeDMR peers. 0 sends the network ID of each peer.'); },
           },
         ],
       },
@@ -558,32 +558,32 @@ export const TABS: TabDef[] = [
     id: 'webtransport',
     group: 'DMR',
     get name() { return t('WebTransport'); },
-    intro: [t('Hotspots and radios that run in a web browser connect over WebTransport. It uses the bind address of the MMDVM server.')],
+    get intro() { return [t('Hotspots and radios that run in a web browser connect over WebTransport. It uses the bind address of the MMDVM server.')]; },
     cards: [
       {
         get title() { return t('Browser radios'); },
         rows: [
           {
             path: 'dmr.mmdvm.webtransport.enabled', get label() { return t('Accept browser hotspots and radios'); }, kind: 'bool',
-            help: t('Such as DMRHub Radio. They log in with a hotspot ID and password, like any other hotspot.'),
+            get help() { return t('Such as DMRHub Radio. They log in with a hotspot ID and password, like any other hotspot.'); },
             links: [{ text: t('Open DMRHub Radio.'), href: 'https://radio.dmrhub.net' }],
           },
           {
             path: 'dmr.mmdvm.webtransport.port', get label() { return t('Port'); }, kind: 'number', show: on('dmr.mmdvm.webtransport.enabled'),
-            help: t('The UDP port that browsers connect to. It must differ from the MMDVM port.'),
+            get help() { return t('The UDP port that browsers connect to. It must differ from the MMDVM port.'); },
           },
           {
             path: 'dmr.mmdvm.webtransport.cert-file', get label() { return t('Certificate file'); }, kind: 'text', placeholder: '/tls/tls.crt',
             show: on('dmr.mmdvm.webtransport.enabled'),
-            help: t('Empty makes DMRHub use short-lived certificates of its own, which browsers accept with no setup.'),
+            get help() { return t('Empty makes DMRHub use short-lived certificates of its own, which browsers accept with no setup.'); },
           },
           {
             path: 'dmr.mmdvm.webtransport.key-file', get label() { return t('Key file'); }, kind: 'text', placeholder: '/tls/tls.key',
-            show: on('dmr.mmdvm.webtransport.enabled'), help: t('The key of the certificate file.'),
+            show: on('dmr.mmdvm.webtransport.enabled'), get help() { return t('The key of the certificate file.'); },
           },
           {
             path: 'dmr.mmdvm.webtransport.allowed-origins', get label() { return t('Allowed web pages'); }, kind: 'list', show: on('dmr.mmdvm.webtransport.enabled'),
-            help: t('Origins of the pages that may connect, one for each line, such as https://radio.example.org. Empty allows every page.'),
+            get help() { return t('Origins of the pages that may connect, one for each line, such as https://radio.example.org. Empty allows every page.'); },
           },
         ],
       },
@@ -602,7 +602,7 @@ export const TABS: TabDef[] = [
         get title() { return t('Modem'); },
         pill: 'modem',
         rows: [
-          { path: 'dmr.modem.enabled', get label() { return t('Enabled'); }, kind: 'bool', help: t('Turn this on in one server only, the one that the board is plugged into.') },
+          { path: 'dmr.modem.enabled', get label() { return t('Enabled'); }, kind: 'bool', get help() { return t('Turn this on in one server only, the one that the board is plugged into.'); } },
         ],
         showCards: on('dmr.modem.enabled'),
         cards: [
@@ -613,14 +613,14 @@ export const TABS: TabDef[] = [
                 grid: [
                   { path: 'dmr.modem.port', get label() { return t('Serial port'); }, kind: 'port', placeholder: '/dev/ttyAMA0' },
                   {
-                    path: 'dmr.modem.baud', get label() { return t('Port speed'); }, kind: 'select', help: t('115200 for almost every board.'),
+                    path: 'dmr.modem.baud', get label() { return t('Port speed'); }, kind: 'select', get help() { return t('115200 for almost every board.'); },
                     options: [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600].map((b) => ({ value: b, label: String(b) })),
                   },
                 ],
               },
               {
                 path: 'dmr.modem.repeater-id', get label() { return t('Repeater ID'); }, kind: 'number', required: true,
-                help: t('The ID of this hotspot or repeater on the network. If no repeater has this ID, DMRHub makes one, and an admin assigns its owner.'),
+                get help() { return t('The ID of this hotspot or repeater on the network. If no repeater has this ID, DMRHub makes one, and an admin assigns its owner.'); },
               },
               {
                 path: 'dmr.modem.duplex', get label() { return t('Mode'); }, kind: 'mode',
@@ -646,16 +646,16 @@ export const TABS: TabDef[] = [
               {
                 grid: [
                   {
-                    path: 'dmr.modem.color-code', get label() { return t('Color code'); }, kind: 'select', help: t('Radios must use the same color code.'),
+                    path: 'dmr.modem.color-code', get label() { return t('Color code'); }, kind: 'select', get help() { return t('Radios must use the same color code.'); },
                     options: Array.from({ length: 16 }, (_, i) => ({ value: i, label: String(i) })),
                   },
-                  { path: 'dmr.modem.rf-level', get label() { return t('Transmit power (%)'); }, kind: 'number', step: 'any', help: t('On boards that set their power, such as MMDVM_HS hats.') },
+                  { path: 'dmr.modem.rf-level', get label() { return t('Transmit power (%)'); }, kind: 'number', step: 'any', get help() { return t('On boards that set their power, such as MMDVM_HS hats.'); } },
                 ],
               },
               {
                 grid: [
-                  { path: 'dmr.modem.rx-offset', get label() { return t('Receive offset (Hz)'); }, kind: 'number', help: t('Correction for the frequency error of the board.') },
-                  { path: 'dmr.modem.tx-offset', get label() { return t('Transmit offset (Hz)'); }, kind: 'number', help: t('Correction for the frequency error of the board.') },
+                  { path: 'dmr.modem.rx-offset', get label() { return t('Receive offset (Hz)'); }, kind: 'number', get help() { return t('Correction for the frequency error of the board.'); } },
+                  { path: 'dmr.modem.tx-offset', get label() { return t('Transmit offset (Hz)'); }, kind: 'number', get help() { return t('Correction for the frequency error of the board.'); } },
                 ],
               },
               {
@@ -676,7 +676,7 @@ export const TABS: TabDef[] = [
                   { path: 'dmr.modem.ptt-invert', get label() { return t('Invert the PTT output'); }, kind: 'bool' },
                   {
                     path: 'dmr.modem.rssi-mapping-file', get label() { return t('RSSI mapping file'); }, kind: 'text', placeholder: '/etc/dmrhub/RSSI.dat',
-                    help: t('An RSSI.dat file in the MMDVMHost format, which turns the signal reading of the board into dBm. Without it the signal strength of calls is not shown.'),
+                    get help() { return t('An RSSI.dat file in the MMDVMHost format, which turns the signal reading of the board into dBm. Without it the signal strength of calls is not shown.'); },
                     links: [
                       { text: t('Get the RSSI.dat of MMDVMHost.'), href: 'https://github.com/g4klx/MMDVM-Host/blob/master/RSSI.dat' },
                       { text: t('How to fill it in.'), href: 'https://github.com/USA-RedDragon/DMRHub/blob/main/doc/admin/modem.md#signal-strength-rssi' },
@@ -692,15 +692,15 @@ export const TABS: TabDef[] = [
             rows: [
               {
                 path: 'dmr.modem.cw-id.enabled', get label() { return t('Send a morse station ID'); }, kind: 'bool',
-                help: t('The ID goes out only while the channel is idle. The first goes out a quarter of the time after the board connects or a call ends.'),
+                get help() { return t('The ID goes out only while the channel is idle. The first goes out a quarter of the time after the board connects or a call ends.'); },
               },
               {
                 grid: [
                   {
                     path: 'dmr.modem.cw-id.callsign', get label() { return t('Callsign'); }, kind: 'text', uppercase: true, required: true,
-                    help: t('Letters, digits, spaces and / ? , - = .'), show: on('dmr.modem.cw-id.enabled'),
+                    get help() { return t('Letters, digits, spaces and / ? , - = .'); }, show: on('dmr.modem.cw-id.enabled'),
                   },
-                  { path: 'dmr.modem.cw-id.time', get label() { return t('Minutes between IDs'); }, kind: 'number', help: t('1 to 1440.'), show: on('dmr.modem.cw-id.enabled') },
+                  { path: 'dmr.modem.cw-id.time', get label() { return t('Minutes between IDs'); }, kind: 'number', get help() { return t('1 to 1440.'); }, show: on('dmr.modem.cw-id.enabled') },
                 ],
               },
             ],
@@ -738,7 +738,7 @@ export const TABS: TabDef[] = [
     id: 'transcoding',
     group: 'DMR',
     get name() { return t('Transcoding'); },
-    intro: [t('AMBE servers convert calls between Codec2 and AMBE. With no server, calls pass through in their own codec.')],
+    get intro() { return [t('AMBE servers convert calls between Codec2 and AMBE. With no server, calls pass through in their own codec.')]; },
     custom: 'transcoding',
     cards: [],
   },
@@ -765,7 +765,7 @@ export const TABS: TabDef[] = [
         rows: [
           { path: 'dmr.routing.disable-dynamic-links', get label() { return t('Dynamic links'); }, kind: 'bool', invert: true },
           {
-            path: 'dmr.routing.dynamic-timeout', get label() { return t('Timeout (minutes)'); }, kind: 'minutes', help: t('0 never.'),
+            path: 'dmr.routing.dynamic-timeout', get label() { return t('Timeout (minutes)'); }, kind: 'minutes', get help() { return t('0 never.'); },
             show: (read) => read('dmr.routing.disable-dynamic-links') !== true,
           },
         ],
@@ -781,7 +781,7 @@ export const TABS: TabDef[] = [
           { path: 'dmr.routing.contention', get label() { return t('Two talkers at once'); }, kind: 'segment', options: contention },
           {
             path: 'dmr.routing.on-air-unlock', get label() { return t('On-air unlock (hours)'); }, kind: 'hours', step: 'any',
-            help: t('How long a right code unlocks a radio ID on its timeslot.'),
+            get help() { return t('How long a right code unlocks a radio ID on its timeslot.'); },
           },
         ],
       },
@@ -792,11 +792,11 @@ export const TABS: TabDef[] = [
           { path: 'dmr.routing.spoken-refusals', get label() { return t('Tell the radio why its call was refused'); }, kind: 'bool' },
           {
             path: 'dmr.routing.prompt-voice', get label() { return t('Voice'); }, kind: 'select', options: PROMPT_VOICES,
-            help: t('Users can pick their own voice in Settings.'), show: on('dmr.routing.spoken-refusals'),
+            get help() { return t('Users can pick their own voice in Settings.'); }, show: on('dmr.routing.spoken-refusals'),
           },
           {
             path: 'dmr.routing.prompt-service-id', get label() { return t('Service ID'); }, kind: 'number',
-            help: t('The ID that the prompts come from, as a private call.'), show: on('dmr.routing.spoken-refusals'),
+            get help() { return t('The ID that the prompts come from, as a private call.'); }, show: on('dmr.routing.spoken-refusals'),
           },
         ],
       },
@@ -812,14 +812,14 @@ export const TABS: TabDef[] = [
           {
             path: 'dmr.routing.local-talkgroups', get label() { return t('Local talkgroups'); }, kind: 'list', numbers: true, rows: 3, count: true,
             placeholder: '9',
-            help: t('One for each line. A call to one of them stays in the local group of its repeater.'),
+            get help() { return t('One for each line. A call to one of them stays in the local group of its repeater.'); },
             check: localTalkgroupsError,
           },
         ],
       },
       {
         get title() { return t('Repeaters'); },
-        rows: [{ path: 'dmr.repeater-quota', get label() { return t('Repeaters for each user'); }, kind: 'number', help: t('0 no limit.') }],
+        rows: [{ path: 'dmr.repeater-quota', get label() { return t('Repeaters for each user'); }, kind: 'number', get help() { return t('0 no limit.'); } }],
       },
     ],
   },
@@ -827,19 +827,19 @@ export const TABS: TabDef[] = [
     id: 'positions',
     group: 'Features',
     get name() { return t('Positions and APRS'); },
-    intro: [t('Owners turn on position tracking for each radio. These are the limits, and the APRS-IS login that sends the positions on.')],
+    get intro() { return [t('Owners turn on position tracking for each radio. These are the limits, and the APRS-IS login that sends the positions on.')]; },
     cards: [
       {
         get title() { return t('Limits for owners'); },
         rows: [
           {
             path: 'dmr.positions.min-interval', get label() { return t('Shortest report interval'); }, kind: 'select',
-            help: t('The shortest interval that an owner can pick for a radio.'),
+            get help() { return t('The shortest interval that an owner can pick for a radio.'); },
             options: [5, 10, 15, 30, 60].map((m) => ({ value: m, label: `${m} minutes` })),
           },
           {
             path: 'dmr.positions.max-retention', get label() { return t('Longest retention (days)'); }, kind: 'number',
-            help: t('The longest time that an owner can keep the positions of a radio, 1 to 365.'),
+            get help() { return t('The longest time that an owner can keep the positions of a radio, 1 to 365.'); },
           },
         ],
       },
@@ -848,9 +848,9 @@ export const TABS: TabDef[] = [
         rows: [
           {
             path: 'dmr.positions.aprs-is.callsign', get label() { return t('APRS-IS callsign'); }, kind: 'text',
-            help: t('The callsign with SSID that the hub logs in to APRS-IS as. Empty sends nothing to APRS-IS.'),
+            get help() { return t('The callsign with SSID that the hub logs in to APRS-IS as. Empty sends nothing to APRS-IS.'); },
           },
-          { path: 'dmr.positions.aprs-is.server', get label() { return t('APRS-IS server'); }, kind: 'text', help: t('As host:port.') },
+          { path: 'dmr.positions.aprs-is.server', get label() { return t('APRS-IS server'); }, kind: 'text', get help() { return t('As host:port.'); } },
         ],
       },
     ],
@@ -859,14 +859,14 @@ export const TABS: TabDef[] = [
     id: 'messages',
     group: 'Features',
     get name() { return t('Messages'); },
-    intro: [t('Text and data messages between radios.')],
+    get intro() { return [t('Text and data messages between radios.')]; },
     cards: [
       {
         get title() { return t('Messages'); },
         rows: [
           {
             path: 'dmr.retention.messages', get label() { return t('Keep messages (days)'); }, kind: 'number',
-            help: t('Text and data messages, with their raw bytes. 0 keeps them forever.'),
+            get help() { return t('Text and data messages, with their raw bytes. 0 keeps them forever.'); },
           },
         ],
       },
@@ -875,11 +875,11 @@ export const TABS: TabDef[] = [
         rows: [
           {
             path: 'dmr.messages.hold-days', get label() { return t('Hold messages for (days)'); }, kind: 'number',
-            help: t('How long DMRHub keeps a text for a radio that is off the air, 1 to 365.'),
+            get help() { return t('How long DMRHub keeps a text for a radio that is off the air, 1 to 365.'); },
           },
           {
             path: 'dmr.messages.hold-max', get label() { return t('Most messages held for one user'); }, kind: 'number',
-            help: t('DMRHub holds no more texts for a user who has this many waiting, 1 to 1000.'),
+            get help() { return t('DMRHub holds no more texts for a user who has this many waiting, 1 to 1000.'); },
           },
         ],
       },
@@ -900,7 +900,7 @@ export const TABS: TabDef[] = [
         rows: [
           {
             path: 'dmr.plugins.in-process', get label() { return t('Run plugins inside DMRHub'); }, kind: 'bool',
-            help: t('The parrot, the location server and the uploaded plugins. Turn it off only when every plugin runs as its own program.'),
+            get help() { return t('The parrot, the location server and the uploaded plugins. Turn it off only when every plugin runs as its own program.'); },
           },
         ],
       },
@@ -909,10 +909,10 @@ export const TABS: TabDef[] = [
         rows: [
           { path: 'dmr.plugins.enabled', get label() { return t('Accept plugins that run as their own programs'); }, kind: 'bool' },
           { path: 'dmr.plugins.bind', get label() { return t('Bind address'); }, kind: 'text' },
-          { path: 'dmr.plugins.port', get label() { return t('Port'); }, kind: 'number', help: t('The TCP port that plugins connect to.') },
+          { path: 'dmr.plugins.port', get label() { return t('Port'); }, kind: 'number', get help() { return t('The TCP port that plugins connect to.'); } },
           {
             path: 'dmr.plugins.cert-file', get label() { return t('Certificate file'); }, kind: 'text',
-            help: t('Empty uses a certificate that DMRHub makes; plugins check it by its fingerprint.'),
+            get help() { return t('Empty uses a certificate that DMRHub makes; plugins check it by its fingerprint.'); },
           },
           { path: 'dmr.plugins.key-file', get label() { return t('Key file'); }, kind: 'text' },
         ],
@@ -924,7 +924,7 @@ export const TABS: TabDef[] = [
     group: 'Features',
     get name() { return t('Private call routing'); },
     optional: true,
-    intro: [t('Where DMRHub sends a call or message to one radio. It goes to the repeater or hotspot where DMRHub last heard that radio.')],
+    get intro() { return [t('Where DMRHub sends a call or message to one radio. It goes to the repeater or hotspot where DMRHub last heard that radio.')]; },
     cards: [
       {
         get title() { return t('Voice calls'); },
@@ -933,7 +933,7 @@ export const TABS: TabDef[] = [
           { path: 'dmr.private-calls.voice.unknown', get label() { return t('When DMRHub does not know where the radio is'); }, kind: 'choice', options: unknown },
           {
             path: 'dmr.private-calls.voice.max-age', get label() { return t('Last heard age limit (minutes)'); }, kind: 'minutes',
-            help: t('Calls go to where DMRHub last heard the radio. With a limit, a radio not heard for longer counts as unknown. 0 is no limit.'),
+            get help() { return t('Calls go to where DMRHub last heard the radio. With a limit, a radio not heard for longer counts as unknown. 0 is no limit.'); },
           },
         ],
       },
@@ -944,7 +944,7 @@ export const TABS: TabDef[] = [
           { path: 'dmr.private-calls.data.unknown', get label() { return t('When DMRHub does not know where the radio is'); }, kind: 'choice', options: [sameAsVoice, ...unknown] },
           {
             path: 'dmr.private-calls.data.max-age', get label() { return t('Last heard age limit (minutes)'); }, kind: 'minutes',
-            help: t('0 uses the limit of voice calls. A negative number is no limit.'),
+            get help() { return t('0 uses the limit of voice calls. A negative number is no limit.'); },
           },
         ],
       },
