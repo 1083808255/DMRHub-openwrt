@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import API from '@/services/API';
+import { t } from '@/i18n';
 
 export type Me = {
   id: number;
@@ -65,10 +66,12 @@ export async function requirePasswordChange(id: number, generate: boolean): Prom
 
 export async function setEmail(email: string): Promise<string> {
   const res = await API.put('/users/me/email', { email });
-  return res.data.message;
+  // The backend sends its message in English. It is a key of the locale
+  // files, so translate it. A key that is missing falls back to the original.
+  return t(res.data.message);
 }
 
 export async function verifyEmail(token: string): Promise<string> {
   const res = await API.post('/auth/verify-email', { token });
-  return res.data.message;
+  return t(res.data.message);
 }

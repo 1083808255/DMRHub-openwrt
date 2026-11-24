@@ -1954,5 +1954,9 @@
   "Internal server error": "服务器内部错误",
   "DMRHub cannot reach its database, and a database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub.": "DMRHub 无法连接数据库，且此前已保存过数据库设置，因此安装向导无法修改它。管理员需在配置文件、环境变量或启动参数中修正数据库配置，然后重启 DMRHub。",
   "Parrot": "鹦鹉",
-  "Location server": "位置服务"
+  "Location server": "位置服务",
+  "App removed": "应用已移除",
+  "Scheduled net deleted": "定时通联已删除",
+  "The on-air code is off": "开机码已关闭",
+  "Token deleted": "令牌已删除"
 }
