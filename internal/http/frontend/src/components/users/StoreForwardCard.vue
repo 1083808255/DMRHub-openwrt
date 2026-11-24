@@ -32,7 +32,7 @@
         <div class="flex flex-col gap-1">
           <span id="store-forward-label" class="font-medium">{{ $t("Store and forward") }}</span>
           <p class="text-sm" :class="on ? '' : 'text-muted-foreground'" data-test="store-forward-status">
-            {{ on ? 'On.' : 'Off.' }}
+            {{ on ? $t('On.') : $t('Off.') }}
           </p>
         </div>
         <Switch

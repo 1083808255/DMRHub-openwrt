@@ -26,16 +26,16 @@
     :data-test="`plugin-switch-${sw.plugin_id}-${sw.key}`"
   >
     <CardHeader>
-      <CardTitle>{{ sw.title }}</CardTitle>
+      <CardTitle>{{ pluginName(sw.plugin) }}</CardTitle>
       <CardDescription v-if="sw.description">{{ sw.description }}</CardDescription>
-      <p class="text-xs text-muted-foreground" data-test="plugin-switch-plugin">{{ $t("From the plugin") }} {{ sw.plugin }}.</p>
+      <p class="text-xs text-muted-foreground" data-test="plugin-switch-plugin">{{ $t("From the plugin") }} {{ pluginName(sw.plugin) }}.</p>
     </CardHeader>
     <CardContent class="flex flex-col gap-4">
       <div class="flex items-start justify-between gap-4">
         <div class="flex flex-col gap-1">
           <span :id="labelID(sw)" class="font-medium">{{ sw.title }}</span>
           <p class="text-sm" :class="sw.on ? '' : 'text-muted-foreground'" data-test="plugin-switch-status">
-            {{ sw.on ? 'On.' : 'Off.' }}
+            {{ sw.on ? $t('On.') : $t('Off.') }}
           </p>
         </div>
         <Switch
@@ -103,6 +103,11 @@ const errors = ref<Record<string, string>>({});
 
 const keyOf = (sw: PluginSwitch) => `${sw.plugin_id}-${sw.key}`;
 const labelID = (sw: PluginSwitch) => `plugin-switch-${keyOf(sw)}`;
+
+// The builtin plugins have a name of their own. The plugins that people
+// upload keep the name they were given.
+const BUILTIN_PLUGINS = ['Parrot', 'Location server', 'Status'];
+const pluginName = (name: string) => (BUILTIN_PLUGINS.includes(name) ? t(name) : name);
 
 const save = async (sw: PluginSwitch, on: boolean, choice: string) => {
   const key = keyOf(sw);

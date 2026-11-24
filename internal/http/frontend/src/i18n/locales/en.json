@@ -1952,5 +1952,7 @@
   "This invite does not work. Ask an admin for a new one.": "This invite does not work. Ask an admin for a new one.",
   "The setup wizard takes requests from its own pages only": "The setup wizard takes requests from its own pages only",
   "Internal server error": "Internal server error",
-  "DMRHub cannot reach its database, and a database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub.": "DMRHub cannot reach its database, and a database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub."
+  "DMRHub cannot reach its database, and a database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub.": "DMRHub cannot reach its database, and a database setting was saved before, so the setup wizard cannot change it. An admin must fix the database in the config file, the environment or the flags, then restart DMRHub.",
+  "Parrot": "Parrot",
+  "Location server": "Location server"
 }
