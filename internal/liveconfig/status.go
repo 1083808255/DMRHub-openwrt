@@ -111,7 +111,7 @@ func (l *Live) Status(ctx context.Context) (Status, error) {
 		lock, locked := l.opts.Locks[k.Path]
 		s := Setting{Editable: l.Editable(k), Locked: locked, StartOnly: !k.Setup, Source: l.source(k), Origin: lock.Name}
 		if raw, ok := saved.Values[k.Path]; ok && k.Setup {
-			s.Saved = raw
+			s.Saved = redactedValue(k.Path, raw)
 		}
 		s.Default = defaultOf(k, def)
 		s.NotInEffect = !k.Equal(running, wanted)

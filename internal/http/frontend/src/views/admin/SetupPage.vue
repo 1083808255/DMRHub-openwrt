@@ -177,6 +177,15 @@ const showApplyError = (e: ApplyError, self: boolean): ShownApplyError => {
 
 const fieldsByPath: Record<string, FieldDef> = Object.fromEntries(TABS.flatMap(tabFields).map((f) => [f.path, f]));
 
+/**
+ * pathInTab reports whether path belongs to the tab of the paths. A list
+ * setting such as dmr.upstreams.networks is a single path in the tab, and
+ * the errors of the backend name it as it is, so a path under a setting of
+ * the tab belongs to the tab too.
+ */
+const pathInTab = (path: string, paths: string[]): boolean =>
+  paths.some((p) => path === p || path.startsWith(`${p}.`) || path.startsWith(`${p}[`));
+
 const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
 
 export default defineComponent({
@@ -333,7 +342,7 @@ export default defineComponent({
       const label = fieldsByPath[path]?.label ?? settingLabel(path);
       const text = msg?.trim() ? `${label}: ${msg.trim()}` : label;
       if (!withTab) return text;
-      const tab = TABS.find((t) => tabPaths(t).includes(path));
+      const tab = TABS.find((t) => pathInTab(path, tabPaths(t)));
       return tab ? `${tab.name}: ${text}` : text;
     },
     invalidMsg(reason?: string): string {
@@ -370,8 +379,8 @@ export default defineComponent({
           this.errors = flatErrors(check.data?.errors);
           const paths = tabPaths(tab);
           const entries = Object.entries(this.errors);
-          const here = entries.filter(([p]) => paths.includes(p));
-          const other = entries.filter(([p]) => !paths.includes(p));
+          const here = entries.filter(([p]) => pathInTab(p, paths));
+          const other = entries.filter(([p]) => !pathInTab(p, paths));
           if (here.length > 0) {
             const details = here.map(([p, m]) => this.errorText(p, m)).join(' ');
             this.failMsg = this.invalidMsg(details);

@@ -2205,5 +2205,7 @@
   "Rewrite {n}: {field} must be a talkgroup number from 1 to 16777215.": "Rewrite {n}: {field} must be a talkgroup number from 1 to 16777215.",
   "the local talkgroup": "the local talkgroup",
   "the upstream talkgroup": "the upstream talkgroup",
-  "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.": "Some settings on this tab are not valid: {reason} Fix the marked fields and save again."
+  "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.": "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.",
+  "this setting takes effect at the start of DMRHub only; set it in the config file or the environment of the deployment": "this setting takes effect at the start of DMRHub only; set it in the config file or the environment of the deployment",
+  "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it": "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it"
 }

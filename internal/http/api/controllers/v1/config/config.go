@@ -131,8 +131,18 @@ func GETConfig(c *gin.Context) {
 	for i, n := range running.DMR.Upstreams.Networks {
 		upstreamPasswords[i] = n.Password != ""
 	}
+	// The passwords of the upstream networks stay on the replica. The
+	// secrets say which ones are set, and an empty input keeps a password.
+	safe := *running
+	if len(running.DMR.Upstreams.Networks) > 0 {
+		safe.DMR.Upstreams.Networks = make([]config.UpstreamNetwork, len(running.DMR.Upstreams.Networks))
+		copy(safe.DMR.Upstreams.Networks, running.DMR.Upstreams.Networks)
+		for i := range safe.DMR.Upstreams.Networks {
+			safe.DMR.Upstreams.Networks[i].Password = ""
+		}
+	}
 	response := apimodels.ConfigResponse{
-		Config: *running,
+		Config: safe,
 		Secrets: apimodels.SecretStatus{
 			SecretSet:            running.Secret != "",
 			PasswordSaltSet:      running.PasswordSalt != "",

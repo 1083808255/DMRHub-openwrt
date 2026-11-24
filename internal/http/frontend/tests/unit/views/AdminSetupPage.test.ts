@@ -266,6 +266,22 @@ describe('Admin Setup page dirty tracking', () => {
     wrapper.unmount();
   });
 
+  it('treats an error under dmr.upstreams.networks as one of this tab', async () => {
+    mockAPI.post.mockResolvedValue({
+      data: { valid: false, errors: { dmr: { upstreams: { networks: 'this setting takes effect at the start of DMRHub only' } } } },
+    });
+    const { wrapper } = await mountAt('/admin/setup#upstreams');
+    const vm = wrapper.vm as unknown as { set: (p: string, v: unknown) => void; save: () => Promise<void> };
+    vm.set('dmr.upstreams', { enabled: true, networks: [], rewrites: [] });
+    await vm.save();
+    await flushPromises();
+    const text = wrapper.find('[data-test="savebar-message"]').text();
+    expect(text).toContain('not valid');
+    expect(text).toContain('this setting takes effect at the start of DMRHub only');
+    expect(text).not.toContain('other tabs');
+    wrapper.unmount();
+  });
+
   it('shows a validation failure instead of an older saved message', async () => {
     mockAPI.post.mockResolvedValue({ data: { valid: false, errors: { dmr: { 'public-address': 'enter a host name' } } } });
     const { wrapper } = await mountAt('/admin/setup#dmr');

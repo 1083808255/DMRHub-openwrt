@@ -166,7 +166,7 @@ type UpstreamNetwork struct {
 	Address     string `json:"address" yaml:"address" name:"address" description:"Host name or IP address of the upstream master, such as master.brandmeister.network"`
 	Port        int    `json:"port" yaml:"port" name:"port" description:"UDP port of the upstream master" default:"62031"`
 	ID          uint32 `json:"id" yaml:"id" name:"id" description:"Repeater (hotspot) ID that DMRHub logs into the upstream master with. Must be registered there"`
-	Password    string `json:"-" yaml:"password" name:"password" description:"Password of the repeater ID on the upstream master"`
+	Password    string `json:"password,omitempty" yaml:"password" name:"password" description:"Password of the repeater ID on the upstream master"`
 	Callsign    string `json:"callsign" yaml:"callsign" name:"callsign" description:"Callsign sent to the upstream master in the login configuration" default:"DMRHUB"`
 	RXFrequency uint32 `json:"rx-frequency" yaml:"rx-frequency" name:"rx-frequency" description:"Receive frequency in Hz sent to the upstream master" default:"438800000"`
 	TXFrequency uint32 `json:"tx-frequency" yaml:"tx-frequency" name:"tx-frequency" description:"Transmit frequency in Hz sent to the upstream master" default:"438800000"`

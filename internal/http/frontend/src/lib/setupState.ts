@@ -232,6 +232,9 @@ const labels: Record<string, string> = {
   'dmr.plugins.key-file': 'Key File (plugins)',
   'dmr.transcoding.ambe-servers': 'AMBE servers',
   'dmr.upstreams': 'Upstream networks',
+  'dmr.upstreams.enabled': 'Link to upstream networks',
+  'dmr.upstreams.networks': 'Upstream networks',
+  'dmr.upstreams.rewrites': 'Talkgroup rewrites',
   'dmr.drain-timeout': 'Drain Timeout',
 };
 

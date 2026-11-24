@@ -247,6 +247,44 @@ func TestPublicAddressIsASetupSetting(t *testing.T) {
 	assert.Equal(t, "localhost", l.Current().Get().ServerAddress())
 }
 
+// TestUpstreamsAreASetupSetting saves the upstream networks in Setup while
+// DMRHub runs, and checks that their passwords stay on the replica: the
+// status shows the saved list without them, and a restart runs with them.
+func TestUpstreamsAreASetupSetting(t *testing.T) {
+	t.Parallel()
+	database := newDB(t, testutils.SQLiteMemoryBackend())
+	l := boot(t, database, deployment{file: validDeployment})
+	save(t, l, func(c *config.Config) {
+		c.DMR.Upstreams.Enabled = true
+		c.DMR.Upstreams.Networks = []config.UpstreamNetwork{{
+			Name: "BM", Enabled: true, Dialect: "mmdvm", Address: "master.example.org",
+			Port: 62031, ID: 1234567, Password: "hunter2", Callsign: "DMRHUB",
+			RXFrequency: 438800000, TXFrequency: 438800000, ColorCode: 1, Slots: 3,
+		}}
+		c.DMR.Upstreams.Rewrites = []config.UpstreamRewrite{{Network: "BM", LocalTG: 91, UpstreamTG: 3100}}
+	})
+
+	running := l.Current().Get()
+	assert.True(t, running.DMR.Upstreams.Enabled)
+	require.Len(t, running.DMR.Upstreams.Networks, 1)
+	assert.Equal(t, "hunter2", running.DMR.Upstreams.Networks[0].Password, "the replica runs with the password")
+
+	st, err := l.Status(context.Background())
+	require.NoError(t, err)
+	s := st.Settings["dmr.upstreams.networks"]
+	assert.True(t, s.Editable)
+	assert.False(t, s.StartOnly)
+	assert.Equal(t, liveconfig.SourceSetup, s.Source)
+	assert.Contains(t, string(s.Saved), `"BM"`)
+	assert.NotContains(t, string(s.Saved), "hunter2", "the status never shows the password")
+
+	// A restart reads the saved list back from the database, passwords too.
+	again := boot(t, database, deployment{file: validDeployment})
+	restarted := again.Current().Get()
+	require.Len(t, restarted.DMR.Upstreams.Networks, 1)
+	assert.Equal(t, "hunter2", restarted.DMR.Upstreams.Networks[0].Password)
+}
+
 // TestALockedListIsLockedWhole sets one AMBE server in the config file.
 // The list is locked as a whole, and the saved list does not mix in.
 func TestALockedListIsLockedWhole(t *testing.T) {

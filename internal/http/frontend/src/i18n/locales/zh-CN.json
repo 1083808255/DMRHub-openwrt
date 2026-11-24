@@ -2205,5 +2205,7 @@
   "Rewrite {n}: {field} must be a talkgroup number from 1 to 16777215.": "规则 {n}：{field} 必须是 1 到 16777215 之间的通话组号码。",
   "the local talkgroup": "本地通话组",
   "the upstream talkgroup": "上游通话组",
-  "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.": "此标签页上的部分设置无效：{reason}请修正标记的字段后重新保存。"
+  "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.": "此标签页上的部分设置无效：{reason}请修正标记的字段后重新保存。",
+  "this setting takes effect at the start of DMRHub only; set it in the config file or the environment of the deployment": "此设置只在 DMRHub 启动时生效，请在配置文件或部署环境中设置。",
+  "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it": "此设置由部署（配置文件、环境变量或命令行参数）设置，Setup 无法修改。"
 }

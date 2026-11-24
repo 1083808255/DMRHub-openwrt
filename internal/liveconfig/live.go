@@ -334,11 +334,33 @@ func (l *Live) newReport(rev uint64, applyErrs []ApplyError, invalid []config.Va
 			continue
 		}
 		if v, err := k.Value(running); err == nil {
-			r.Values[k.Path] = v
+			r.Values[k.Path] = redactedValue(k.Path, v)
 		}
 		r.Sources[k.Path] = l.source(k)
 	}
 	return r
+}
+
+// redactedValue returns the value of a setting without the passwords that
+// it keeps for itself. The passwords of the upstream networks are part of
+// their list, and the API shows the value of every setting, so they are
+// taken out before the value leaves the replica.
+func redactedValue(path string, raw json.RawMessage) json.RawMessage {
+	if path != "dmr.upstreams.networks" || len(raw) == 0 {
+		return raw
+	}
+	var networks []config.UpstreamNetwork
+	if err := json.Unmarshal(raw, &networks); err != nil {
+		return raw
+	}
+	for i := range networks {
+		networks[i].Password = ""
+	}
+	out, err := json.Marshal(networks)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // Check returns why next cannot be saved: a change of a setting that Setup
