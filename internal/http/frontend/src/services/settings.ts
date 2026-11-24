@@ -18,7 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import API from '@/services/API';
-import { t } from '@/i18n';
+import { backendText } from '@/i18n';
 
 export type UserSettings = {
   sms_storage: boolean;
@@ -89,7 +89,7 @@ export function errorText(err: unknown, fallback: string): string {
     // The backend sends its errors in English. Those sentences are keys in the
     // locale files, so translate them. A key that is missing falls back to
     // the original text, which keeps unexpected messages readable.
-    return t(data.error);
+    return backendText(data.error);
   }
   return fallback;
 }

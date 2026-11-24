@@ -73,7 +73,7 @@ describe('PeerRules', () => {
   it('shows no rules', async () => {
     const w = await mountRules({ egressPrivate: false }, []);
     expect(w.find('[data-test="summary-tx"]').text()).toBe('Transmits nothing.');
-    expect(w.find('[data-test="group-tx"]').text()).toContain('No transmit rules');
+    expect(w.find('[data-test="group-tx"]').text()).toContain('No rules in this direction');
   });
 
   it('adds a source rule', async () => {

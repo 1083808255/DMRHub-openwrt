@@ -18,7 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 import API from '@/services/API';
 import { shortTime } from '@/lib/codec';
-import { t } from '@/i18n';
+import { backendText, t } from '@/i18n';
 
 export type PluginRange = { first: number; last: number };
 
@@ -285,7 +285,7 @@ export function stopNote(p: AdminPlugin, now: number = Date.now(), timeZone?: st
   return {
     title: t('Stopped at {time}.', { time: shortTime(new Date(p.stopped_at ?? ''), timeZone) }),
     body: t('{reason} DMRHub starts it again in {seconds} s. It has stopped {times} in the last hour.', {
-      reason: p.stop_reason ?? '',
+      reason: backendText(p.stop_reason ?? ''),
       seconds: secondsUntil(p.restart_at, now),
       times,
     }),

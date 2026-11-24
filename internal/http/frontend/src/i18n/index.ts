@@ -67,3 +67,65 @@ export function setLocale(locale: LocaleCode): void {
 export function t(key: string, named?: Record<string, unknown>): string {
   return i18n.global.t(key, named ?? {}) as string;
 }
+
+/**
+ * The messages of a locale, without the compiler of the templates. The
+ * messages of the backend are plain sentences, and a sentence may hold a
+ * character that the compiler reads as a template, for example the "@" of an
+ * email address.
+ */
+function messagesOf(locale: string): Record<string, unknown> {
+  const messages = i18n.global.messages.value as Record<string, Record<string, unknown>>;
+  return messages[locale] ?? messages.en ?? {};
+}
+
+/**
+ * The message of the locale for a key, or the message of the fallback locale
+ * when the locale has none. Undefined when no locale has the key.
+ */
+function message(key: string): string | undefined {
+  const value = messagesOf(i18n.global.locale.value)[key];
+  if (typeof value === 'string') return value;
+  const fallback = messagesOf('en')[key];
+  return typeof fallback === 'string' ? fallback : undefined;
+}
+
+/**
+ * The longest key of the locale that the text starts with, for a message of
+ * the backend that puts a value at its end, for example
+ * "Another user has the callsign BH8GLN". Empty when there is none.
+ *
+ * Only a key that ends with a space matches, so that what follows is a value
+ * and not another word of the message. A key with a placeholder in it is no
+ * use here, because the value that follows is not what it fills in.
+ */
+function prefixKey(text: string): string {
+  const messages = messagesOf(i18n.global.locale.value);
+  let best = '';
+  for (const key of Object.keys(messages)) {
+    if (!key.endsWith(' ') || key.includes('{')) continue;
+    if (key.length > best.length && text.startsWith(key)) best = key;
+  }
+  return best;
+}
+
+/**
+ * Translate a message of the backend. The backend writes its errors in
+ * English, and those sentences are keys in the locale files. A key that is
+ * missing falls back to the original text, which keeps a message that the
+ * locale does not know readable.
+ */
+export function backendText(text: string): string {
+  if (!text) return '';
+  const exact = message(text);
+  if (exact !== undefined) return exact;
+  // A message of the backend that puts a value at its end, for example
+  // "Another user has the callsign BH8GLN". Translate the part before the
+  // value and keep the value as it is.
+  const key = prefixKey(text);
+  if (key) {
+    const prefix = message(key);
+    if (prefix !== undefined) return prefix + text.slice(key.length);
+  }
+  return text;
+}
