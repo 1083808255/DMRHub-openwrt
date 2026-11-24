@@ -87,11 +87,12 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
 import { useHead } from '@unhead/vue';
-import { format } from 'date-fns';
+
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -114,7 +115,7 @@ const busy = ref(false);
 const message = ref('');
 const error = ref('');
 
-const shortDate = (value: string) => format(new Date(value), 'MMM d');
+const shortDate = (value: string) => formatDateTime(new Date(value), 'MMM d');
 
 const load = async (to = 1) => {
   try {

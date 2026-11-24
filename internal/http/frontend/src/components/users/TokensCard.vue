@@ -159,10 +159,11 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
-import { format } from 'date-fns';
+
 import CopyButton from '@/components/enroll/CopyButton.vue';
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -190,8 +191,8 @@ const access = ref<'scoped' | 'full'>('scoped');
 const picked = ref<string[]>([]);
 const days = ref(defaultDays);
 
-const day = (value: string) => format(new Date(value), 'MMM d, yyyy');
-const when = (value: string) => format(new Date(value), 'MMM d, HH:mm');
+const day = (value: string) => formatDateTime(new Date(value), 'MMM d, yyyy');
+const when = (value: string) => formatDateTime(new Date(value), 'MMM d, HH:mm');
 const expiryText = (d: number) => {
   if (d === 0) {
     return t('Never');
@@ -199,7 +200,7 @@ const expiryText = (d: number) => {
   if (d === 365) {
     return t('In 1 year');
   }
-  return `In ${d} days`;
+  return t('In {days} days', { days: d });
 };
 
 const clearNotes = () => {
@@ -265,7 +266,7 @@ const rotate = async (token: PersonalToken) => {
     tokens.value = tokens.value.map((t) => (t.id === token.id ? made.token : t));
     shown.value = { name: made.token.name, secret: made.secret, rotated: true };
   } catch (err) {
-    error.value = errorText(err, `Could not rotate ${token.name}.`);
+    error.value = errorText(err, t('Could not rotate {name}.', { name: token.name }));
   } finally {
     busy.value = false;
   }
@@ -279,7 +280,7 @@ const remove = async (token: PersonalToken) => {
     tokens.value = tokens.value.filter((t) => t.id !== token.id);
     deleted.value = token.name;
   } catch (err) {
-    error.value = errorText(err, `Could not delete ${token.name}.`);
+    error.value = errorText(err, t('Could not delete {name}.', { name: token.name }));
   } finally {
     busy.value = false;
   }

@@ -152,7 +152,7 @@ const flatErrors = (v: unknown, prefix = '', out: Record<string, string> = {}): 
   for (const [k, e] of Object.entries(r)) {
     const path = prefix ? `${prefix}.${k}` : k;
     if (typeof e === 'string') {
-      out[path] = e;
+      out[path] = t(e);
     } else {
       flatErrors(e, path, out);
     }
@@ -165,12 +165,12 @@ const showApplyError = (e: ApplyError, self: boolean): ShownApplyError => {
   if (e.field) {
     return {
       summary: t('Replica {replica} cannot run with the saved {setting}. It keeps its previous settings.', { replica, setting: settingLabel(e.field) }),
-      detail: e.error,
+      detail: t(e.error),
     };
   }
   const state = e.running ? t('It keeps running with its previous settings.') : t('It is not running.');
   const of = self || !replica ? '' : t(' of replica {replica}', { replica });
-  return { summary: t('The {server} server{of} could not start with the new settings. {state}', { server: serverName(e.server), of, state }), detail: e.error };
+  return { summary: t('The {server} server{of} could not start with the new settings. {state}', { server: serverName(e.server), of, state }), detail: t(e.error) };
 };
 
 const fieldsByPath: Record<string, FieldDef> = Object.fromEntries(TABS.flatMap(tabFields).map((f) => [f.path, f]));
@@ -387,7 +387,7 @@ export default defineComponent({
           this.errors = flatErrors(data.errors);
         }
         this.failMsg = typeof data?.error === 'string'
-          ? t('The settings were not saved: {error}.', { error: data.error })
+          ? t('The settings were not saved: {error}.', { error: t(data.error) })
           : t('The settings were not saved.');
         this.$toast.add({ severity: 'error', summary: t('Error'), detail: t('Failed to save the settings'), life: 3000 });
       } finally {

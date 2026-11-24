@@ -54,7 +54,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { Input as Input } from '@/components/ui/input';
 import { DataTable } from '@/components/ui/data-table';
 
-import { format, formatDistanceToNowStrict } from 'date-fns';
+import { formatDateTime, formatDistanceToNowStrictLocal as formatDistanceToNowStrict } from '@/lib/dateFormat';
 
 import { mapStores } from 'pinia';
 import { useSettingsStore } from '@/store';
@@ -206,7 +206,7 @@ export default {
       if (Number.isNaN(date.getTime())) {
         return '-';
       }
-      return format(date, 'yyyy-MM-dd HH:mm:ss');
+      return formatDateTime(date, 'yyyy-MM-dd HH:mm:ss');
     },
     startEdit(talkgroup: TalkgroupRow) {
       this.editableTalkgroups++;
@@ -341,7 +341,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: t('Failed to update talkgroup: {error}', { error: err.response.data.error }),
+              detail: t('Failed to update talkgroup: {error}', { error: t(err.response.data.error) }),
               life: 3000,
             });
             return;

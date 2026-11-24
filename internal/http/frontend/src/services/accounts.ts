@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import API from '@/services/API';
+import { t } from '@/i18n';
 
 export type Invite = {
   id: number;
@@ -86,7 +87,7 @@ export async function getMessageAccesses(q: MessageAccessQuery): Promise<{ total
 /** The search of an access log entry as the admin typed it, such as "from 3002068". */
 export function accessWhat(a: MessageAccess): string {
   if (a.kind === 'read') {
-    return `Message ${a.message_id ?? ''}`.trim();
+    return t('Message {id}', { id: a.message_id ?? '' }).trim();
   }
   const p = new URLSearchParams(a.filter);
   const parts: string[] = [];
@@ -94,8 +95,8 @@ export function accessWhat(a: MessageAccess): string {
   for (const [key, name] of names) {
     const v = p.get(key);
     if (v) {
-      parts.push(key === 'text' ? `${name} "${v}"` : `${name} ${v}`);
+      parts.push(key === 'text' ? `${t(name)} "${v}"` : `${t(name)} ${v}`);
     }
   }
-  return parts.length > 0 ? `Search: ${parts.join(', ')}` : 'Search';
+  return parts.length > 0 ? t('Search: {parts}', { parts: parts.join(', ') }) : t('Search');
 }

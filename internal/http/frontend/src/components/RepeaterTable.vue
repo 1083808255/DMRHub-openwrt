@@ -49,7 +49,8 @@ import { t } from '@/i18n';
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { h } from 'vue';
 import { RouterLink } from 'vue-router';
-import { format, formatDistanceToNowStrict } from 'date-fns';
+
+import { formatDateTime, formatDistanceToNowStrictLocal as formatDistanceToNowStrict } from '@/lib/dateFormat';
 import { Button as ShadButton } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
 import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
@@ -583,7 +584,7 @@ export default {
       if (Number.isNaN(date.getTime())) {
         return '-';
       }
-      return format(date, 'yyyy-MM-dd HH:mm:ss');
+      return formatDateTime(date, 'yyyy-MM-dd HH:mm:ss');
     },
     startEdit(repeater: RepeaterRow) {
       repeater.editable = true;
@@ -627,7 +628,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: t('Failed to update repeater: {error}', { error: err.response.data.error }),
+              detail: t('Failed to update repeater: {error}', { error: t(err.response.data.error) }),
               life: 3000,
             });
           } else {

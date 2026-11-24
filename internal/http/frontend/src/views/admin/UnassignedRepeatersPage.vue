@@ -90,11 +90,12 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
 import { useHead } from '@unhead/vue';
-import { format } from 'date-fns';
+
 import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
 import UserPicker from '@/components/users/UserPicker.vue';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -128,7 +129,7 @@ const busy = ref(false);
 const message = ref('');
 const error = ref('');
 
-const shortDate = (value: string) => format(new Date(value), 'MMM d, yyyy');
+const shortDate = (value: string) => formatDateTime(new Date(value), 'MMM d, yyyy');
 const seen = (value: string) => !!value && new Date(value).getUTCFullYear() > 1;
 
 const load = async (to = 1) => {

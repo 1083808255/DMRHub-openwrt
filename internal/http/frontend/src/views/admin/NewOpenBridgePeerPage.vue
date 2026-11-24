@@ -288,7 +288,7 @@ export default {
             this.$toast.add({
               summary: t('Error'),
               severity: 'error',
-              detail: err.response.data.error,
+              detail: t(err.response.data.error),
               life: 3000,
             });
           } else {

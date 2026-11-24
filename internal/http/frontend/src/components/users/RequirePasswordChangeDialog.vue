@@ -123,7 +123,7 @@ const confirm = async () => {
   try {
     const generated = await requirePasswordChange(props.userId, generate.value);
     emit('done');
-    toast.success(`${props.callsign} must choose a new password when they next log in.`);
+    toast.success(t('{callsign} must choose a new password when they next log in.', { callsign: props.callsign }));
     if (generated) {
       password.value = generated;
     } else {

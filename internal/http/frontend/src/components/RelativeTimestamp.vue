@@ -37,7 +37,8 @@
 
 <script lang="ts">
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { format, formatDistanceToNowStrict } from 'date-fns';
+
+import { formatDateTime, formatDistanceToNowStrictLocal as formatDistanceToNowStrict } from '@/lib/dateFormat';
 
 export default {
   name: 'RelativeTimestamp',
@@ -72,7 +73,7 @@ export default {
       if (Number.isNaN(date.getTime())) {
         return '-';
       }
-      return format(date, 'yyyy-MM-dd HH:mm:ss');
+      return formatDateTime(date, 'yyyy-MM-dd HH:mm:ss');
     },
   },
 };

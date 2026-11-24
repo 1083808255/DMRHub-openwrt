@@ -51,10 +51,11 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
-import { format } from 'date-fns';
+
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import API from '@/services/API';
@@ -67,7 +68,7 @@ const invites = ref<CosysopInvite[]>([]);
 const busy = ref(false);
 const message = ref('');
 
-const day = (iso: string) => format(new Date(iso), 'MMM d, yyyy');
+const day = (iso: string) => formatDateTime(new Date(iso), 'MMM d, yyyy');
 
 const load = async () => {
   try {

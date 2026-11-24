@@ -126,10 +126,11 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { computed, onMounted, ref } from 'vue';
-import { format } from 'date-fns';
+
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input as ShadInput } from '@/components/ui/input';
@@ -155,20 +156,20 @@ const busy = ref(false);
 const error = ref('');
 const note = ref('');
 
-const when = (value: string) => format(new Date(value), 'MMM d, HH:mm');
+const when = (value: string) => formatDateTime(new Date(value), 'MMM d, HH:mm');
 
 const groupedKey = computed(() => (setup.value?.key ?? '').replace(/(.{4})(?=.)/g, '$1 '));
 
 const lengthText = computed(() => {
   const s = unlockSeconds.value;
   if (s % 86400 === 0) {
-    return s === 86400 ? '24 hours' : `${s / 86400} days`;
+    return s === 86400 ? t('24 hours') : t('{days} days', { days: s / 86400 });
   }
   if (s % 3600 === 0) {
-    return s === 3600 ? '1 hour' : `${s / 3600} hours`;
+    return s === 3600 ? t('1 hour') : t('{hours} hours', { hours: s / 3600 });
   }
   const m = Math.max(1, Math.round(s / 60));
-  return m === 1 ? '1 minute' : `${m} minutes`;
+  return m === 1 ? t('1 minute') : t('{minutes} minutes', { minutes: m });
 });
 
 const show = (s: OnAirCode) => {
@@ -266,9 +267,9 @@ const lock = async (u: OnAirUnlock) => {
   busy.value = true;
   try {
     show(await lockRadio(u));
-    note.value = `Locked ${u.radio} on ${u.callsign || u.repeater}.`;
+    note.value = t('Locked {radio} on {who}.', { radio: u.radio, who: u.callsign || u.repeater });
   } catch (err) {
-    error.value = errorText(err, `Could not lock ${u.radio}.`);
+    error.value = errorText(err, t('Could not lock {radio}.', { radio: u.radio }));
   } finally {
     busy.value = false;
   }

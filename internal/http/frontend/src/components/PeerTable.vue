@@ -51,7 +51,8 @@ import { t } from '@/i18n';
 
 import type { DataTableColumn } from '@/components/ui/data-table';
 import { h } from 'vue';
-import { format, formatDistanceToNowStrict } from 'date-fns';
+
+import { formatDateTime, formatDistanceToNowStrictLocal as formatDistanceToNowStrict } from '@/lib/dateFormat';
 import { Button as ShadButton } from '@/components/ui/button';
 import { buttonVariants } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
@@ -292,7 +293,7 @@ export default {
       if (Number.isNaN(date.getTime())) {
         return '-';
       }
-      return format(date, 'yyyy-MM-dd HH:mm:ss');
+      return formatDateTime(date, 'yyyy-MM-dd HH:mm:ss');
     },
     startEdit(peer: Record<string, unknown>) {
       peer.editable = true;

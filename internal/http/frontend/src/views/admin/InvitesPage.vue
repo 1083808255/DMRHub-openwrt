@@ -87,11 +87,12 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
 import { useHead } from '@unhead/vue';
-import { format } from 'date-fns';
+
 import CopyButton from '@/components/enroll/CopyButton.vue';
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -109,7 +110,7 @@ const error = ref('');
 const busy = ref(false);
 const made = ref<NewInvite | null>(null);
 
-const when = (value: string) => format(new Date(value), 'MMM d, HH:mm');
+const when = (value: string) => formatDateTime(new Date(value), 'MMM d, HH:mm');
 const expired = (i: Invite) => new Date(i.expires_at).getTime() <= Date.now();
 
 const load = async () => {

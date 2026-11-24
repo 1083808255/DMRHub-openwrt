@@ -174,11 +174,12 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
 import { useHead } from '@unhead/vue';
-import { format } from 'date-fns';
+
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input as ShadInput } from '@/components/ui/input';
@@ -235,7 +236,7 @@ const newID = ref('');
 const idError = ref('');
 const idOK = ref('');
 
-const shortDate = (value: string) => format(new Date(value), 'MMM d, h:mm a');
+const shortDate = (value: string) => formatDateTime(new Date(value), 'MMM d, h:mm a');
 
 const load = async () => {
   try {

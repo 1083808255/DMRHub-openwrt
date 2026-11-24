@@ -19,6 +19,7 @@
 
 import type { App } from 'vue';
 import { toast } from '@/components/ui/toast';
+import { t } from '@/i18n';
 
 type ToastOptions = {
   severity?: string;
@@ -36,7 +37,7 @@ const normalizeDuration = (life?: number) => {
 };
 
 const showToast = (options: ToastOptions = {}) => {
-  const title = options.summary || 'Notification';
+  const title = options.summary || t('Notification');
   const description = options.detail;
   const duration = normalizeDuration(options.life);
 

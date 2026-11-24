@@ -17,7 +17,7 @@
 //
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/dateFormat';
 import { i18n, t } from '@/i18n';
 
 export type RepeaterEvent = {
@@ -45,7 +45,7 @@ export const PROBLEMS = new Set([
   'wrong_password', 'ip_blocked', 'bad_config', 'pushed_off', 'timeout', 'bad_options', 'unknown_talkgroup', 'options_busy',
 ]);
 
-const when = (iso: string) => format(new Date(iso), 'MMM d, HH:mm');
+const when = (iso: string) => formatDateTime(new Date(iso), 'MMM d, HH:mm');
 
 /**
  * logLine returns the plain sentence of a connection log entry and, for a
@@ -56,7 +56,7 @@ export function logLine(ev: RepeaterEvent, repeaterID: number, device: string): 
   const times = ev.count > 1
     ? i18n.global.t('{count} times since {time}', {
       count: ev.count,
-      time: format(new Date(ev.first_at), 'HH:mm'),
+      time: formatDateTime(new Date(ev.first_at), 'HH:mm'),
     })
     : '';
   const join = (...parts: string[]) => parts.filter((p) => p !== '').join(', ');

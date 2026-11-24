@@ -150,7 +150,7 @@ const stopped = computed(() => stopNote(plugin.value, now.value));
 
 const uploaded = computed(() => plugin.value.kind === 'uploaded');
 const description = computed(() => {
-  const version = plugin.value.version ? `Version ${plugin.value.version}.` : '';
+  const version = plugin.value.version ? t('Version {version}.', { version: plugin.value.version }) : '';
   return [plugin.value.description, version].filter((s) => s !== '').join(' ');
 });
 

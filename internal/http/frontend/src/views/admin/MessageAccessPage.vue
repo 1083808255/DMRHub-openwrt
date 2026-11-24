@@ -81,11 +81,12 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
 import { useHead } from '@unhead/vue';
-import { format } from 'date-fns';
+
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input as ShadInput } from '@/components/ui/input';
@@ -106,7 +107,7 @@ const loadError = ref('');
 const radioID = ref('');
 const admin = ref('');
 
-const when = (value: string) => format(new Date(value), 'MMM d, HH:mm');
+const when = (value: string) => formatDateTime(new Date(value), 'MMM d, HH:mm');
 
 const load = async (to = 1) => {
   try {

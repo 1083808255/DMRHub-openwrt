@@ -63,7 +63,8 @@
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
-import { format, formatDistanceToNow } from 'date-fns';
+
+import { formatDateTime, formatDistanceToNowLocal as formatDistanceToNow } from '@/lib/dateFormat';
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -76,7 +77,7 @@ const busy = ref(false);
 const removed = ref('');
 const error = ref('');
 
-const day = (value: string) => format(new Date(value), 'MMM d, yyyy');
+const day = (value: string) => formatDateTime(new Date(value), 'MMM d, yyyy');
 const ago = (value: string) => formatDistanceToNow(new Date(value), { addSuffix: true });
 
 const load = async () => {
@@ -98,7 +99,7 @@ const remove = async (app: App) => {
     apps.value = apps.value.filter((a) => a.id !== app.id);
     removed.value = app.origin;
   } catch (err) {
-    error.value = errorText(err, `Could not remove ${app.origin}.`);
+    error.value = errorText(err, t('Could not remove {origin}.', { origin: app.origin }));
   } finally {
     busy.value = false;
   }

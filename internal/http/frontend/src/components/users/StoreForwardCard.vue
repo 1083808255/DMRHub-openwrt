@@ -77,10 +77,11 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { onMounted, ref } from 'vue';
-import { format } from 'date-fns';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -94,7 +95,7 @@ const held = ref<HeldText[]>([]);
 const saving = ref(false);
 const error = ref('');
 
-const shortDate = (value: string) => format(new Date(value), 'MMM d, HH:mm');
+const shortDate = (value: string) => formatDateTime(new Date(value), 'MMM d, HH:mm');
 
 const loadHeld = async () => {
   try {

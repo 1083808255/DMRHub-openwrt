@@ -155,6 +155,7 @@
 </template>
 
 <script lang="ts">
+import { formatDistanceStrictLocal as formatDistanceStrict } from '@/lib/dateFormat';
 import { t as $t } from '@/i18n';
 
 import { Button as ShadButton } from '@/components/ui/button';
@@ -181,7 +182,7 @@ import API from '@/services/API';
 import { repeaterOnline } from '@/services/repeater';
 import { errorText } from '@/services/settings';
 import { useSettingsStore, useUserStore } from '@/store';
-import { formatDistanceStrict } from 'date-fns';
+
 import { RouterLink } from 'vue-router';
 
 type RepeaterData = {

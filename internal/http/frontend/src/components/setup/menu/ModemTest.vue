@@ -74,7 +74,7 @@ const errorList = (errors: unknown): string => {
   const out: string[] = [];
   const walk = (v: unknown, path: string) => {
     if (typeof v === 'string') {
-      out.push(`${labels[path] ?? path}: ${v}`);
+      out.push(`${labels[path] ?? path}: ${t(v)}`);
       return;
     }
     for (const [k, e] of Object.entries(asRecord(v) ?? {})) {
@@ -99,7 +99,7 @@ const run = async () => {
     } else if (res?.status === 409) {
       view.value = { tone: 'bad', title: t('Another test runs now'), rows: [], text: t('Try again in a few seconds.') };
     } else {
-      view.value = { tone: 'bad', title: t('The test did not run'), rows: [], text: typeof data?.error === 'string' ? data.error : undefined };
+      view.value = { tone: 'bad', title: t('The test did not run'), rows: [], text: typeof data?.error === 'string' ? t(data.error) : undefined };
     }
   } finally {
     running.value = false;

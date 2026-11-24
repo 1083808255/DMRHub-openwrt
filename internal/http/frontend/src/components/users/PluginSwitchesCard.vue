@@ -91,6 +91,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { t } from '@/i18n';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { codeParts, getPluginSwitches, setPluginSwitch, type PluginSwitch } from '@/services/pluginSwitches';
@@ -111,7 +112,10 @@ const save = async (sw: PluginSwitch, on: boolean, choice: string) => {
     const got = await setPluginSwitch(sw.plugin_id, sw.key, on, choice);
     switches.value = switches.value.map((s) => (keyOf(s) === key ? got : s));
   } catch (err) {
-    errors.value = { ...errors.value, [key]: errorText(err, `Could not turn ${on ? 'on' : 'off'} ${sw.title}.`) };
+    errors.value = {
+      ...errors.value,
+      [key]: errorText(err, on ? t('Could not turn {name} on.', { name: sw.title }) : t('Could not turn {name} off.', { name: sw.title })),
+    };
   } finally {
     busy.value = '';
   }

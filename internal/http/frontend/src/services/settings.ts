@@ -18,6 +18,7 @@
 // The source code is available at <https://github.com/USA-RedDragon/DMRHub>
 
 import API from '@/services/API';
+import { t } from '@/i18n';
 
 export type UserSettings = {
   sms_storage: boolean;
@@ -85,7 +86,10 @@ export async function removeRadioID(id: number): Promise<void> {
 export function errorText(err: unknown, fallback: string): string {
   const data = (err as { response?: { data?: { error?: unknown } } })?.response?.data;
   if (data && typeof data.error === 'string' && data.error !== '') {
-    return data.error;
+    // The backend sends its errors in English. Those sentences are keys in the
+    // locale files, so translate them. A key that is missing falls back to
+    // the original text, which keeps unexpected messages readable.
+    return t(data.error);
   }
   return fallback;
 }

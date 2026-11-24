@@ -303,7 +303,7 @@ export default {
           this.rules.push(res.data.rule);
           this.adding = '';
           this.err = '';
-          toast.success(t('Rule added'), { description: `Peer ${this.peerId}` });
+          toast.success(t('Rule added'), { description: t('Peer {id}', { id: this.peerId }) });
         })
         .catch((err) => {
           console.error(err);
@@ -318,7 +318,7 @@ export default {
         .then(() => {
           this.rules = this.rules.filter((x) => x.id !== r.id);
           this.confirm = null;
-          toast.success(t('Rule deleted'), { description: `Peer ${this.peerId}` });
+          toast.success(t('Rule deleted'), { description: t('Peer {id}', { id: this.peerId }) });
         })
         .catch((err) => {
           console.error(err);

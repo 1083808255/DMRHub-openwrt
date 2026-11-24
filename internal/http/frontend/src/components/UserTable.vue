@@ -68,7 +68,7 @@ import { Input } from '@/components/ui/input';
 import { Button as ShadButton } from '@/components/ui/button';
 import { TableCell, TableRow } from '@/components/ui/table';
 
-import { format, formatDistanceToNowStrict } from 'date-fns';
+import { formatDateTime, formatDistanceToNowStrictLocal as formatDistanceToNowStrict } from '@/lib/dateFormat';
 
 import { mapStores } from 'pinia';
 import { useUserStore, useSettingsStore } from '@/store';
@@ -259,7 +259,7 @@ export default {
       if (Number.isNaN(date.getTime())) {
         return '-';
       }
-      return format(date, 'yyyy-MM-dd HH:mm:ss');
+      return formatDateTime(date, 'yyyy-MM-dd HH:mm:ss');
     },
     handleSuspend(_event: Event, user: UserRow) {
       const action = user.suspended ? 'suspend' : 'unsuspend';
@@ -282,7 +282,7 @@ export default {
             this.$toast.add({
               severity: 'error',
               summary: t('Error'),
-              detail: err.response.data.error,
+              detail: t(err.response.data.error),
               life: 3000,
             });
           } else {
@@ -318,7 +318,7 @@ export default {
               this.$toast.add({
                 severity: 'error',
                 summary: t('Error'),
-                detail: err.response.data.error,
+                detail: t(err.response.data.error),
                 life: 3000,
               });
             } else {
@@ -393,7 +393,9 @@ export default {
           this.$toast.add({
             severity: 'error',
             summary: t('Error'),
-            detail: err.response?.data?.error ?? t('Error updating user {id}', { id: user.id }),
+            detail: typeof err.response?.data?.error === 'string'
+              ? t(err.response.data.error)
+              : t('Error updating user {id}', { id: user.id }),
             life: 3000,
           });
         });

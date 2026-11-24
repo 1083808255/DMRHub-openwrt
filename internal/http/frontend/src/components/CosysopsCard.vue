@@ -81,10 +81,11 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/dateFormat';
 import { t } from '@/i18n';
 
 import { computed, ref } from 'vue';
-import { format } from 'date-fns';
+
 import { Button as ShadButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input as ShadInput } from '@/components/ui/input';
@@ -104,7 +105,7 @@ const failed = ref(false);
 const manages = computed(() => props.data.role === 'owner' || props.data.role === 'admin');
 const hasActions = computed(() => manages.value || props.data.cosysops.some((c) => c.id === props.myId));
 
-const day = (iso: string | null) => (iso ? format(new Date(iso), 'MMM d, yyyy') : '');
+const day = (iso: string | null) => (iso ? formatDateTime(new Date(iso), 'MMM d, yyyy') : '');
 
 const removeLabel = (c: Cosysop) => {
   if (c.id === props.myId) return t('Leave');

@@ -137,10 +137,10 @@ import { DataTable } from '@/components/ui/data-table';
 import RelativeTimestamp from '@/components/RelativeTimestamp.vue';
 import { getNets, getScheduledNets, type Net, type ScheduledNet } from '@/services/net';
 import { getWebsocketURI } from '@/services/util';
-import { formatDistanceToNow, isPast } from 'date-fns';
+import { isPast } from 'date-fns';
+import { formatDistanceToNowLocal as formatDistanceToNow } from '@/lib/dateFormat';
 import ws from '@/services/ws';
 import { netSchedule } from '@/lib/timeConversion';
-
 
 export default {
   components: {
