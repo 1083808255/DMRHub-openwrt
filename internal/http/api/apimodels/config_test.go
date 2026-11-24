@@ -135,3 +135,43 @@ func TestPOSTConfigKeepsPasswords(t *testing.T) {
 	assert.Equal(t, "oldkv", cfg.Redis.Password)
 	assert.Equal(t, "oldmail", cfg.SMTP.Password)
 }
+
+func TestPOSTConfigHandlesUpstreamPasswords(t *testing.T) {
+	t.Parallel()
+	body := `{"dmr":{"upstreams":{"enabled":true,"networks":[{"name":"BM"},{"name":"DMR+"}]}},` +
+		`"upstreams":{"passwords":["typed",""]}}`
+	var req apimodels.POSTConfig
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+	current := &config.Config{}
+	current.DMR.Upstreams.Enabled = true
+	current.DMR.Upstreams.Networks = []config.UpstreamNetwork{
+		{Name: "BM", Password: "saved-bm"},
+		{Name: "DMR+", Password: "saved-dmr"},
+	}
+	var cfg config.Config
+	req.ToConfig(&cfg, current)
+
+	require.Len(t, cfg.DMR.Upstreams.Networks, 2)
+	assert.Equal(t, "typed", cfg.DMR.Upstreams.Networks[0].Password, "a typed password replaces the saved one")
+	assert.Equal(t, "saved-dmr", cfg.DMR.Upstreams.Networks[1].Password, "a blank password keeps the saved one")
+}
+
+func TestPOSTConfigKeepsUpstreamPasswordsItLacks(t *testing.T) {
+	t.Parallel()
+	body := `{"dmr":{"upstreams":{"enabled":true,"networks":[{"name":"BM"},{"name":"DMR+"}]}}}`
+	var req apimodels.POSTConfig
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+	current := &config.Config{}
+	current.DMR.Upstreams.Networks = []config.UpstreamNetwork{
+		{Name: "BM", Password: "saved-bm"},
+		{Name: "DMR+", Password: "saved-dmr"},
+	}
+	var cfg config.Config
+	req.ToConfig(&cfg, current)
+
+	require.Len(t, cfg.DMR.Upstreams.Networks, 2)
+	assert.Equal(t, "saved-bm", cfg.DMR.Upstreams.Networks[0].Password)
+	assert.Equal(t, "saved-dmr", cfg.DMR.Upstreams.Networks[1].Password)
+}

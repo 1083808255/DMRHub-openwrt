@@ -128,6 +128,7 @@ type RobotsTXT struct {
 type DMR struct {
 	MMDVM                    MMDVM         `json:"mmdvm,omitempty" name:"mmdvm" description:"MMDVM server configuration for DMR"`
 	OpenBridge               OpenBridge    `json:"openbridge,omitempty" name:"openbridge" description:"OpenBridge server configuration for DMR"`
+	Upstreams                Upstreams     `json:"upstreams,omitempty" name:"upstreams" description:"Upstream networks that DMRHub links to, as a DMRGateway does"`
 	IPSC                     IPSC          `json:"ipsc,omitempty" name:"ipsc" description:"IPSC server configuration for Motorola DMR repeaters"`
 	Modem                    Modem         `json:"modem" name:"modem" description:"MMDVM modem board on a serial port that DMRHub drives as a hotspot or repeater of its own, without MMDVMHost"`
 	DisableRadioIDValidation bool          `json:"disable-radio-id-validation,omitempty" name:"disable-radio-id-validation" description:"Turn off all the RadioID checks of radio-id-checks, whatever they are set to" default:"false"`
@@ -145,6 +146,43 @@ type DMR struct {
 	Routing                  Routing       `json:"routing" name:"routing" description:"How DMRHub links talkgroups and which transmissions it takes"`
 	RepeaterQuota            int           `json:"repeater-quota" yaml:"repeater-quota" name:"repeater-quota" description:"Most repeaters and hotspots that a user can add. Admins have no limit. 0 is no limit" default:"100"`
 	DrainTimeout             int           `json:"drain-timeout" yaml:"drain-timeout" name:"drain-timeout" description:"Longest time, in seconds, that a replica that stops keeps serving its repeaters, peers, browser radios and plugins while other replicas take them over. It must be shorter than the time the orchestrator gives the replica to stop. 0 stops at once" default:"25"`
+}
+
+// Upstreams holds the upstream networks that DMRHub links to, as DMRGateway
+// does. Each network is a client connection to a DMR master; the rewrite
+// table maps talkgroups between this hub and the upstreams.
+type Upstreams struct {
+	Enabled  bool               `json:"enabled,omitempty" name:"enabled" description:"Enable upstream network links, as DMRGateway does" default:"false"`
+	Networks []UpstreamNetwork  `json:"networks" yaml:"networks" name:"networks" description:"Upstream DMR networks that DMRHub connects to. Each one logs in as a repeater with its own ID and password"`
+	Rewrites []UpstreamRewrite  `json:"rewrites" yaml:"rewrites" name:"rewrites" description:"Talkgroup rewrite table: which local talkgroup is sent to which upstream network and talkgroup, and which upstream talkgroups are received"`
+}
+
+// UpstreamNetwork is one upstream DMR master that DMRHub logs into as a
+// repeater, using the MMDVM or HBRP network protocol.
+type UpstreamNetwork struct {
+	Name        string `json:"name" yaml:"name" name:"name" description:"Unique name of this upstream network, such as BrandMeister or DMRPlus. Rewrites refer to it by this name"`
+	Enabled     bool   `json:"enabled" yaml:"enabled" name:"enabled" description:"Enable this upstream network" default:"false"`
+	Dialect     string `json:"dialect" yaml:"dialect" name:"dialect" description:"Network protocol of the master: mmdvm or hbrp" default:"mmdvm"`
+	Address     string `json:"address" yaml:"address" name:"address" description:"Host name or IP address of the upstream master, such as master.brandmeister.network"`
+	Port        int    `json:"port" yaml:"port" name:"port" description:"UDP port of the upstream master" default:"62031"`
+	ID          uint32 `json:"id" yaml:"id" name:"id" description:"Repeater (hotspot) ID that DMRHub logs into the upstream master with. Must be registered there"`
+	Password    string `json:"-" yaml:"password" name:"password" description:"Password of the repeater ID on the upstream master"`
+	Callsign    string `json:"callsign" yaml:"callsign" name:"callsign" description:"Callsign sent to the upstream master in the login configuration" default:"DMRHUB"`
+	RXFrequency uint32 `json:"rx-frequency" yaml:"rx-frequency" name:"rx-frequency" description:"Receive frequency in Hz sent to the upstream master" default:"438800000"`
+	TXFrequency uint32 `json:"tx-frequency" yaml:"tx-frequency" name:"tx-frequency" description:"Transmit frequency in Hz sent to the upstream master" default:"438800000"`
+	ColorCode   int    `json:"color-code" yaml:"color-code" name:"color-code" description:"Color code sent to the upstream master, 0 to 15" default:"1"`
+	Slots       int    `json:"slots" yaml:"slots" name:"slots" description:"Slots sent to the upstream master: 1, 2, 3 (both, duplex) or 4 (simplex)" default:"3"`
+	Options     string `json:"options" yaml:"options" name:"options" description:"Options (RPTO) sent to the upstream master after login, such as TS2=91; for a static talkgroup"`
+}
+
+// UpstreamRewrite maps one talkgroup between this hub and an upstream
+// network, DMRGateway style. Local calls to LocalTG are sent to the named
+// network on UpstreamTG; calls from UpstreamTG on that network arrive on
+// LocalTG. An empty UpstreamName applies the rewrite to every network.
+type UpstreamRewrite struct {
+	Network    string `json:"network" yaml:"network" name:"network" description:"Name of the upstream network this rule applies to. Empty applies to every network"`
+	LocalTG    uint   `json:"local-tg" yaml:"local-tg" name:"local-tg" description:"Talkgroup number on this hub"`
+	UpstreamTG uint   `json:"upstream-tg" yaml:"upstream-tg" name:"upstream-tg" description:"Talkgroup number on the upstream network"`
 }
 
 // RadioIDChecks holds the checks of DMR IDs and callsigns against the

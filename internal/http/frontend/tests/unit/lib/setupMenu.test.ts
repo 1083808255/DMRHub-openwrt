@@ -35,7 +35,7 @@ const stateWith = (settings: Record<string, Setting>): SetupState => ({ ...empty
 describe('setup menu tabs', () => {
   it('splits General and HTTP and keeps Metrics and PProf', () => {
     expect(TABS.map((t) => t.id)).toEqual([
-      'general', 'accounts', 'http', 'database', 'redis', 'smtp', 'metrics', 'dmr', 'ipsc', 'openbridge', 'webtransport', 'modem',
+      'general', 'accounts', 'http', 'database', 'redis', 'smtp', 'metrics', 'dmr', 'ipsc', 'openbridge', 'upstreams', 'webtransport', 'modem',
       'transcoding', 'iplists', 'routing', 'positions', 'messages', 'plugins', 'pcroute',
     ]);
     expect(tabPaths(tab('general'))).toEqual(['network-name', 'log-level', 'auto-approve-users', 'secret', 'password-salt', 'hibp-api-key']);
@@ -44,6 +44,7 @@ describe('setup menu tabs', () => {
     expect(tabPaths(tab('metrics'))).toEqual(expect.arrayContaining(['metrics.enabled', 'pprof.enabled']));
     expect(tabPaths(tab('dmr'))).toContain('dmr.public-address');
     expect(tabPaths(tab('transcoding'))).toEqual(['dmr.transcoding.ambe-servers']);
+    expect(tabPaths(tab('upstreams'))).toEqual(['dmr.upstreams', 'upstreams.passwords']);
   });
 
   it('puts each setting on one tab only', () => {

@@ -21,6 +21,7 @@ import { ambeServersPayload, type AmbeServerRow } from '@/lib/codec';
 import { ipListCount, ipListError } from '@/lib/ipList';
 import { PROMPT_VOICES } from '@/lib/prompts';
 import { formatValue, type Setting, type SetupState } from '@/lib/setupState';
+import { upstreamOf, upstreamPasswordsOf, upstreamPayload } from '@/lib/upstream';
 import { i18n, t } from '@/i18n';
 
 export type Values = Record<string, unknown>;
@@ -108,7 +109,7 @@ export type TabDef = {
   name: string;
   intro: IntroPart[];
   cards: CardDef[];
-  custom?: 'transcoding';
+  custom?: 'transcoding' | 'upstream';
   saveNote?: string;
   optional?: boolean;
 };
@@ -553,6 +554,14 @@ export const TABS: TabDef[] = [
         ],
       },
     ],
+  },
+  {
+    id: 'upstreams',
+    group: 'DMR',
+    get name() { return t('Upstream networks'); },
+    get intro() { return [t('Link this hub to other DMR networks the way DMRGateway does, with a talkgroup rewrite table for each one.')]; },
+    custom: 'upstream',
+    cards: [],
   },
   {
     id: 'webtransport',
@@ -1000,10 +1009,19 @@ const cardFields = (cards: CardDef[]): FieldDef[] =>
 export const tabFields = (tab: TabDef): FieldDef[] => cardFields(tab.cards);
 
 export const AMBE_SERVERS = 'dmr.transcoding.ambe-servers';
+export const UPSTREAMS = 'dmr.upstreams';
+export const UPSTREAM_PASSWORDS = 'upstreams.passwords';
 
 /** The paths of the settings that the Save of a tab saves. */
-export const tabPaths = (tab: TabDef): string[] =>
-  tab.custom === 'transcoding' ? [AMBE_SERVERS] : tabFields(tab).map((f) => f.path);
+export const tabPaths = (tab: TabDef): string[] => {
+  if (tab.custom === 'transcoding') {
+    return [AMBE_SERVERS];
+  }
+  if (tab.custom === 'upstream') {
+    return [UPSTREAMS, UPSTREAM_PASSWORDS];
+  }
+  return tabFields(tab).map((f) => f.path);
+};
 
 /**
  * The errors of the shown settings of tab that their checks find, by
@@ -1092,6 +1110,12 @@ const fieldOf = (tab: TabDef, path: string): FieldDef | undefined => tabFields(t
 const valueFor = (tab: TabDef, path: string, values: Values): unknown => {
   if (path === AMBE_SERVERS) {
     return ambeServersOf(getAt(values, path));
+  }
+  if (path === UPSTREAMS) {
+    return upstreamPayload(upstreamOf(getAt(values, path)));
+  }
+  if (path === UPSTREAM_PASSWORDS) {
+    return upstreamPasswordsOf(upstreamOf(getAt(values, UPSTREAMS)));
   }
   const f = fieldOf(tab, path);
   return f ? normalize(f, getAt(values, path)) : getAt(values, path);

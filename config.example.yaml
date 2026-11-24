@@ -85,6 +85,31 @@ dmr:
     port: 62035
     # Server ID of 4 to 7 digits that DMRHub sends to enhanced (FreeDMR) OpenBridge peers as the source server. 0 sends the network ID of each peer
     # server-id: 0
+  # Upstream networks that DMRHub links to as a DMRGateway, each with its
+  # own login and a talkgroup rewrite table. Configurable in Setup.
+  upstreams:
+    # Enable the upstream gateway
+    enabled: false
+    # One entry per upstream master.
+    networks: []
+    # - name: BrandMeister
+    #   enabled: true
+    #   dialect: mmdvm             # mmdvm or hbrp
+    #   address: master.brandmeister.network
+    #   port: 62031
+    #   id: 1234567                # repeater ID registered on the upstream
+    #   password: your-password
+    #   callsign: DMRHUB
+    #   rx-frequency: 438800000    # Hz
+    #   tx-frequency: 438800000    # Hz
+    #   color-code: 1
+    #   slots: 3                   # 1, 2, 3 (both) or 4 (simplex)
+    #   options: ""                # RPTO sent after login, e.g. TS2=91
+    # DMRGateway style talkgroup map. Empty network applies to every network.
+    rewrites: []
+    # - network: BrandMeister
+    #   local-tg: 91
+    #   upstream-tg: 91
   # IPSC server configuration for Motorola DMR repeaters
   ipsc:
     # Enable IPSC server support

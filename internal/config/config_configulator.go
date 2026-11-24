@@ -78,6 +78,34 @@ type openBridgeShadow struct {
 	ServerID *uint32 `json:"server-id" toml:"server-id" yaml:"server-id"`
 }
 
+type upstreamNetworkShadow struct {
+	Name        *string `json:"name"         toml:"name"         yaml:"name"`
+	Enabled     *bool   `json:"enabled"      toml:"enabled"      yaml:"enabled"`
+	Dialect     *string `json:"dialect"      toml:"dialect"      yaml:"dialect"`
+	Address     *string `json:"address"      toml:"address"      yaml:"address"`
+	Port        *int    `json:"port"         toml:"port"         yaml:"port"`
+	ID          *uint32 `json:"id"           toml:"id"           yaml:"id"`
+	Password    *string `json:"password"     toml:"password"     yaml:"password"`
+	Callsign    *string `json:"callsign"     toml:"callsign"     yaml:"callsign"`
+	RXFrequency *uint32 `json:"rx-frequency" toml:"rx-frequency" yaml:"rx-frequency"`
+	TXFrequency *uint32 `json:"tx-frequency" toml:"tx-frequency" yaml:"tx-frequency"`
+	ColorCode   *int    `json:"color-code"   toml:"color-code"   yaml:"color-code"`
+	Slots       *int    `json:"slots"        toml:"slots"        yaml:"slots"`
+	Options     *string `json:"options"      toml:"options"      yaml:"options"`
+}
+
+type upstreamRewriteShadow struct {
+	Network    *string `json:"network"     toml:"network"     yaml:"network"`
+	LocalTG    *uint   `json:"local-tg"    toml:"local-tg"    yaml:"local-tg"`
+	UpstreamTG *uint   `json:"upstream-tg" toml:"upstream-tg" yaml:"upstream-tg"`
+}
+
+type upstreamsShadow struct {
+	Enabled  *bool                    `json:"enabled"  toml:"enabled"  yaml:"enabled"`
+	Networks *[]upstreamNetworkShadow `json:"networks" toml:"networks" yaml:"networks"`
+	Rewrites *[]upstreamRewriteShadow `json:"rewrites" toml:"rewrites" yaml:"rewrites"`
+}
+
 type iPSCShadow struct {
 	Enabled      *bool          `json:"enabled"        toml:"enabled"        yaml:"enabled"`
 	Bind         *string        `json:"bind"           toml:"bind"           yaml:"bind"`
@@ -223,6 +251,7 @@ type routingShadow struct {
 type dMRShadow struct {
 	MMDVM                    *mMDVMShadow         `json:"mmdvm"                       toml:"mmdvm"                       yaml:"mmdvm"`
 	OpenBridge               *openBridgeShadow    `json:"openbridge"                  toml:"openbridge"                  yaml:"openbridge"`
+	Upstreams                *upstreamsShadow     `json:"upstreams"                   toml:"upstreams"                   yaml:"upstreams"`
 	IPSC                     *iPSCShadow          `json:"ipsc"                        toml:"ipsc"                        yaml:"ipsc"`
 	Modem                    *modemShadow         `json:"modem"                       toml:"modem"                       yaml:"modem"`
 	DisableRadioIDValidation *bool                `json:"disable-radio-id-validation" toml:"disable-radio-id-validation" yaml:"disable-radio-id-validation"`
@@ -342,6 +371,8 @@ func configApplyDefaults(cfg *Config, sep string, set configulator.SetOrigin) er
 	set("dmr.openbridge.bind", configulator.LayerDefault, "default tag")
 	cfg.DMR.OpenBridge.Port = 62035
 	set("dmr.openbridge.port", configulator.LayerDefault, "default tag")
+	cfg.DMR.Upstreams.Enabled = false
+	set("dmr.upstreams.enabled", configulator.LayerDefault, "default tag")
 	cfg.DMR.IPSC.Enabled = false
 	set("dmr.ipsc.enabled", configulator.LayerDefault, "default tag")
 	cfg.DMR.IPSC.Bind = "[::]"
@@ -704,6 +735,112 @@ func (s *configShadow) applyTo(cfg *Config, _ string, set configulator.SetOrigin
 			if s.DMR.OpenBridge.ServerID != nil {
 				cfg.DMR.OpenBridge.ServerID = *s.DMR.OpenBridge.ServerID
 				set("dmr.openbridge.server-id", configulator.LayerFile, file)
+			}
+		}
+		if s.DMR.Upstreams != nil {
+			if s.DMR.Upstreams.Enabled != nil {
+				cfg.DMR.Upstreams.Enabled = *s.DMR.Upstreams.Enabled
+				set("dmr.upstreams.enabled", configulator.LayerFile, file)
+			}
+			if s.DMR.Upstreams.Networks != nil {
+				out := make([]UpstreamNetwork, len(*s.DMR.Upstreams.Networks))
+				for i, esh := range *s.DMR.Upstreams.Networks {
+					var e UpstreamNetwork
+					idx := "dmr.upstreams.networks[" + strconv.Itoa(i) + "]"
+					e.Enabled = false
+					set(idx+".enabled", configulator.LayerDefault, "element default")
+					e.Dialect = "mmdvm"
+					set(idx+".dialect", configulator.LayerDefault, "element default")
+					e.Port = 62031
+					set(idx+".port", configulator.LayerDefault, "element default")
+					e.Callsign = "DMRHUB"
+					set(idx+".callsign", configulator.LayerDefault, "element default")
+					e.RXFrequency = uint32(438800000)
+					set(idx+".rx-frequency", configulator.LayerDefault, "element default")
+					e.TXFrequency = uint32(438800000)
+					set(idx+".tx-frequency", configulator.LayerDefault, "element default")
+					e.ColorCode = 1
+					set(idx+".color-code", configulator.LayerDefault, "element default")
+					e.Slots = 3
+					set(idx+".slots", configulator.LayerDefault, "element default")
+					if esh.Name != nil {
+						e.Name = *esh.Name
+						set(idx+".name", configulator.LayerFile, file)
+					}
+					if esh.Enabled != nil {
+						e.Enabled = *esh.Enabled
+						set(idx+".enabled", configulator.LayerFile, file)
+					}
+					if esh.Dialect != nil {
+						e.Dialect = *esh.Dialect
+						set(idx+".dialect", configulator.LayerFile, file)
+					}
+					if esh.Address != nil {
+						e.Address = *esh.Address
+						set(idx+".address", configulator.LayerFile, file)
+					}
+					if esh.Port != nil {
+						e.Port = *esh.Port
+						set(idx+".port", configulator.LayerFile, file)
+					}
+					if esh.ID != nil {
+						e.ID = *esh.ID
+						set(idx+".id", configulator.LayerFile, file)
+					}
+					if esh.Password != nil {
+						e.Password = *esh.Password
+						set(idx+".password", configulator.LayerFile, file)
+					}
+					if esh.Callsign != nil {
+						e.Callsign = *esh.Callsign
+						set(idx+".callsign", configulator.LayerFile, file)
+					}
+					if esh.RXFrequency != nil {
+						e.RXFrequency = *esh.RXFrequency
+						set(idx+".rx-frequency", configulator.LayerFile, file)
+					}
+					if esh.TXFrequency != nil {
+						e.TXFrequency = *esh.TXFrequency
+						set(idx+".tx-frequency", configulator.LayerFile, file)
+					}
+					if esh.ColorCode != nil {
+						e.ColorCode = *esh.ColorCode
+						set(idx+".color-code", configulator.LayerFile, file)
+					}
+					if esh.Slots != nil {
+						e.Slots = *esh.Slots
+						set(idx+".slots", configulator.LayerFile, file)
+					}
+					if esh.Options != nil {
+						e.Options = *esh.Options
+						set(idx+".options", configulator.LayerFile, file)
+					}
+					out[i] = e
+				}
+				cfg.DMR.Upstreams.Networks = out
+				set("dmr.upstreams.networks", configulator.LayerFile, file)
+			}
+			if s.DMR.Upstreams.Rewrites != nil {
+				out := make([]UpstreamRewrite, len(*s.DMR.Upstreams.Rewrites))
+				for i, esh := range *s.DMR.Upstreams.Rewrites {
+					var e UpstreamRewrite
+					idx := "dmr.upstreams.rewrites[" + strconv.Itoa(i) + "]"
+					if esh.Network != nil {
+						e.Network = *esh.Network
+						set(idx+".network", configulator.LayerFile, file)
+					}
+					if esh.LocalTG != nil {
+						e.LocalTG = *esh.LocalTG
+						set(idx+".local-tg", configulator.LayerFile, file)
+					}
+					if esh.UpstreamTG != nil {
+						e.UpstreamTG = *esh.UpstreamTG
+						set(idx+".upstream-tg", configulator.LayerFile, file)
+					}
+					out[i] = e
+				}
+				cfg.DMR.Upstreams.Rewrites = out
+				set("dmr.upstreams.rewrites", configulator.LayerFile, file)
 			}
 		}
 		if s.DMR.IPSC != nil {
@@ -1544,6 +1681,19 @@ func configApplyEnv(cfg *Config, ec configulator.EnvContext, set configulator.Se
 		}
 		cfg.DMR.OpenBridge.ServerID = uint32(p)
 		set("dmr.openbridge.server-id", configulator.LayerEnv, n)
+	}
+	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "upstreams", "enabled"); ok {
+		p, err := strconv.ParseBool(v)
+		if err != nil {
+			return &configulator.ParseError{
+				Err:    err,
+				Path:   "dmr.upstreams.enabled",
+				Source: n,
+				Value:  v,
+			}
+		}
+		cfg.DMR.Upstreams.Enabled = p
+		set("dmr.upstreams.enabled", configulator.LayerEnv, n)
 	}
 	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "ipsc", "enabled"); ok {
 		p, err := strconv.ParseBool(v)
@@ -2702,6 +2852,7 @@ func configRegisterPFlags(fs *pflag.FlagSet, o *cpflag.Options) error {
 		"dmr" + o.Separator + "openbridge" + o.Separator + "bind",
 		"dmr" + o.Separator + "openbridge" + o.Separator + "port",
 		"dmr" + o.Separator + "openbridge" + o.Separator + "server-id",
+		"dmr" + o.Separator + "upstreams" + o.Separator + "enabled",
 		"dmr" + o.Separator + "ipsc" + o.Separator + "enabled",
 		"dmr" + o.Separator + "ipsc" + o.Separator + "bind",
 		"dmr" + o.Separator + "ipsc" + o.Separator + "port",
@@ -2868,123 +3019,124 @@ func configRegisterPFlags(fs *pflag.FlagSet, o *cpflag.Options) error {
 	fs.String(names[31], "[::]", "OpenBridge server listen address")
 	fs.Var(impl.NewInt(62035), names[32], "OpenBridge server port")
 	fs.Uint32(names[33], 0, "Server ID of 4 to 7 digits that DMRHub sends to enhanced (FreeDMR) OpenBridge peers as the source server. 0 sends the network ID of each peer")
-	fs.Bool(names[34], false, "Enable IPSC server support")
-	fs.String(names[35], "[::]", "IPSC server listen address")
-	fs.Var(impl.NewInt(50000), names[36], "IPSC server port")
-	fs.Uint32(names[37], 0, "DMR network ID that identifies this server to IPSC peers. Required when IPSC is enabled")
-	fs.Duration(names[38], time.Duration(int64(2500000000)), "Wait for data and CSBK calls to IPSC after a voice call on a slot; 0 is off")
-	fs.Duration(names[39], time.Duration(int64(1200000000)), "Wait for data and CSBK calls to IPSC after a data call on a slot; 0 is off")
-	fs.Bool(names[40], false, "Drive an MMDVM modem board (MMDVM_HS hat, MMDVM repeater board, DVMega) on a serial port as a hotspot or repeater of this server")
-	fs.String(names[41], "", "Serial device of the modem, such as /dev/ttyAMA0 or /dev/ttyACM0. Required when the modem is enabled")
-	fs.Var(impl.NewInt(115200), names[42], "Speed of the serial port in baud: 9600, 19200, 38400, 57600, 115200, 230400, 460800 or 921600")
-	fs.Var(impl.NewUint(0), names[43], "ID of the repeater that the modem is on the network. DMRHub makes it a modem repeater when the modem connects, and refuses network logins with its ID. A repeater that does not exist is made with no owner, and an admin assigns its owner. Required when the modem is enabled")
-	fs.Bool(names[44], false, "Run the modem as a duplex repeater with two timeslots. Off runs it as a simplex hotspot, whose one channel is timeslot 2")
-	fs.Var(impl.NewUint(1), names[45], "Color code of the modem, 0 to 15")
-	fs.Var(impl.NewUint(0), names[46], "Receive frequency in Hz. Required when the modem is enabled")
-	fs.Var(impl.NewUint(0), names[47], "Transmit frequency in Hz. Required when the modem is enabled")
-	fs.Var(impl.NewInt(0), names[48], "Correction in Hz added to the receive frequency, for the frequency error of the board")
-	fs.Var(impl.NewInt(0), names[49], "Correction in Hz added to the transmit frequency, for the frequency error of the board")
-	fs.Float64(names[50], 100.0, "Transmit power in percent, on boards that set it, such as MMDVM_HS hats")
-	fs.Float64(names[51], 50.0, "Receive audio level in percent")
-	fs.Float64(names[52], 50.0, "Transmit deviation level in percent")
-	fs.Var(impl.NewInt(0), names[53], "Receive DC offset, -128 to 127")
-	fs.Var(impl.NewInt(0), names[54], "Transmit DC offset, -128 to 127")
-	fs.Bool(names[55], false, "Invert the receive audio")
-	fs.Bool(names[56], true, "Invert the transmit audio, which most boards need")
-	fs.Bool(names[57], false, "Invert the PTT output")
-	fs.Var(impl.NewInt(100), names[58], "Time in milliseconds, 0 to 500, that the transmitter is on before the first burst")
-	fs.Var(impl.NewInt(0), names[59], "Delay of the duplex receiver in symbols, 0 to 255")
-	fs.Bool(names[60], false, "Ask the modem for its debug messages and log them")
-	fs.String(names[61], "", "Path to an RSSI.dat file in the MMDVMHost format, which maps the raw RSSI of the board to dBm. Without it the RSSI of modem calls is not known")
-	fs.Bool(names[62], false, "Send a morse station ID while the channel is idle")
-	fs.Var(impl.NewUint(10), names[63], "Minutes between station IDs, 1 to 1440. The first goes out a quarter of this time after the modem connects or the channel goes idle")
-	fs.String(names[64], "", "Callsign to send in morse: letters, digits, spaces and / ? , - = . Required when the station ID is on")
-	fs.Bool(names[65], false, "Key up the transmitter of a duplex modem at each interval while the channel is idle")
-	fs.Var(impl.NewUint(60), names[66], "Seconds between beacons, 1 to 86400")
-	fs.Var(impl.NewUint(3), names[67], "Seconds that each beacon keys up, at least 1 and less than the interval")
-	fs.Bool(names[68], false, "Turn off all the RadioID checks of radio-id-checks, whatever they are set to")
-	fs.Bool(names[69], true, "Refuse a registration whose DMR ID does not have 7 digits")
-	fs.Bool(names[70], true, "Refuse a registration or a callsign change whose callsign RadioID does not list under the DMR ID of the account, and list on the RadioID drift page the accounts whose callsign RadioID no longer lists")
-	fs.Bool(names[71], true, "Refuse an added radio ID that RadioID does not list under the callsign of the user, and list on the RadioID drift page the added radio IDs that RadioID no longer lists under it")
-	fs.Bool(names[72], true, "Refuse a 6-digit repeater ID that RadioID does not list under the callsign of its owner, and fill in the details of the repeater from RadioID")
-	fs.Bool(names[73], true, "Refuse a 9-digit hotspot ID that does not start with the DMR ID of its owner")
-	fs.String(names[74], "https://www.radioid.net/static/users.json", "URL to fetch radio ID information for validation and display purposes. Expected JSON format is the same as RadioID.net.")
-	fs.String(names[75], "https://www.radioid.net/static/rptrs.json", "URL to fetch repeater information for validation and display purposes. Expected JSON format is the same as RadioID.net.")
-	fs.String(names[76], "", "Host name or IP address that hotspots and repeaters connect to, as the enroll page shows it, such as dmr.example.org. Empty uses the host name of the canonical host of the HTTP server")
-	fs.Var(impl.NewInt(0), names[77], "Days to keep text and data messages, with their raw bytes. 0 keeps them forever")
-	fs.Var(impl.NewInt(0), names[78], "Days to keep the last heard entries of voice, data and control traffic. 0 keeps them forever")
-	fs.Var(impl.NewInt(0), names[79], "Days to keep the raw DMR bursts of each transmission. 0 keeps them forever")
-	fs.Var(impl.NewInt(7), names[80], "Days that store and forward keeps a text for a radio that is off the air. 0 is 7")
-	fs.Var(impl.NewInt(50), names[81], "Most texts that store and forward keeps for one user. 0 is 50")
-	fs.Var(impl.NewInt(5), names[82], "Shortest report interval, in minutes, that an owner can pick for a radio: 5, 10, 15, 30 or 60")
-	fs.Var(impl.NewInt(30), names[83], "Longest time, in days, that an owner can keep the positions of a radio, from 1 to 365")
-	fs.String(names[84], "", "Callsign with SSID that the hub logs in to APRS-IS as. Empty sends nothing to APRS-IS")
-	fs.String(names[85], "rotate.aprs2.net:14580", "APRS-IS server, as host:port")
-	fs.Bool(names[86], true, "Run the parrot, the location server and the uploaded plugins inside DMRHub. Turn it off only when every plugin runs as its own program")
-	fs.Bool(names[87], false, "Accept plugins that run as their own programs")
-	fs.String(names[88], "[::]", "Address the plugin listener binds to")
-	fs.Var(impl.NewInt(3006), names[89], "TCP port that plugins connect to")
-	fs.String(names[90], "", "TLS certificate file of the plugin listener. Empty makes DMRHub use a certificate of its own, which plugins check by its fingerprint")
-	fs.String(names[91], "", "TLS key file of the certificate file")
-	fs.String(names[92], "hybrid", "Radios that private traffic reaches. One of hybrid (any radio heard on a repeater of this network; a radio ID that a user owns counts only where that user owns the repeater or an admin trusts it), members (only the radio IDs that users own, on the repeaters of their owner or trusted ones), or anyone (any radio, wherever it was last heard)")
-	fs.String(names[93], "drop", "What happens to private traffic to a radio that the reach allows but that DMRHub has not heard, or not within the max age. One of drop (drop it and log it) or flood (send it to every repeater)")
-	fs.Duration(names[94], time.Duration(int64(0)), "Longest time since a radio was last heard on a repeater that private traffic still goes there, such as 24h. 0 is no limit")
-	fs.String(names[95], "", "Radios that private SMS and data reach, as for voice. Empty takes the voice reach")
-	fs.String(names[96], "", "What happens to private SMS and data to a radio that DMRHub has not heard, as for voice. Empty takes the voice setting")
-	fs.Duration(names[97], time.Duration(int64(0)), "Longest time since a radio was last heard that private SMS and data still go there. 0 takes the voice max age; a negative value, such as -1s, is no limit")
-	fs.String(names[98], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
-	fs.StringSlice(names[99], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
-	fs.StringSlice(names[100], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
-	fs.String(names[101], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
-	fs.StringSlice(names[102], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
-	fs.StringSlice(names[103], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
-	fs.String(names[104], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
-	fs.StringSlice(names[105], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
-	fs.StringSlice(names[106], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
-	fs.String(names[107], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
-	fs.StringSlice(names[108], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
-	fs.StringSlice(names[109], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
-	fs.Bool(names[110], false, "Do not link a talkgroup as the dynamic talkgroup of a timeslot when someone transmits on it or a hotspot dials it. Calls still reach the repeaters that carry the talkgroup")
-	fs.Duration(names[111], time.Duration(int64(900000000000)), "Time with no transmission from a repeater on its dynamic talkgroup after which DMRHub unlinks it from that timeslot, such as 15m. 0 never unlinks it")
-	fs.Bool(names[112], false, "Make a talkgroup when a repeater or hotspot of this network sends a group voice call to an ID that is not a talkgroup, rather than drop the call")
-	fs.Bool(names[113], false, "Delete a talkgroup that DMRHub made by itself when no call is made on it for the ephemeral TTL. A talkgroup that an admin edits is kept")
-	fs.Duration(names[114], time.Duration(int64(86400000000000)), "Time with no call on a talkgroup that DMRHub made by itself after which it deletes the talkgroup, when ephemeral talkgroups are on, such as 24h")
-	fs.String(names[115], "any", "Radios that may transmit through the repeaters and hotspots of this network. One of any (any radio ID), radioid (the radio IDs that the RadioID list has) or members (the DMR IDs of accounts and the radio IDs that their users added)")
-	fs.Duration(names[116], time.Duration(int64(0)), "Longest voice transmission that DMRHub routes, such as 3m. DMRHub drops the rest of a longer one. 0 is no limit")
-	fs.Duration(names[117], time.Duration(int64(86400000000000)), "How long a right on-air code unlocks a radio ID on the repeater or hotspot timeslot that it came through, such as 24h. Users who turn the on-air code on in Settings unlock their radio IDs with a private call to 9 and the 6 digits of the code")
-	fs.String(names[118], "mix", "What a repeater gets when two group calls reach the same timeslot of it at once, such as two radios on one talkgroup. One of mix (both calls, their bursts interleaved) or first (the first call holds the timeslot until it ends, and DMRHub drops the other call there)")
-	fs.UintSlice(names[119], nil, "Talkgroup numbers that users can make local groups on. A group call to one of them goes only to the other repeaters of the local group of the repeater on that number and timeslot, and never to a network talkgroup or an OpenBridge peer. On a repeater in no such group, the call goes nowhere")
-	fs.Lookup(names[119]).DefValue = "[8,9]"
-	fs.Bool(names[120], false, "Answer a voice transmission that DMRHub refuses from a repeater, hotspot or the browser radio with a short spoken prompt, such as Talkgroup not found, as a private call to the radio about 1 second after it stops transmitting")
-	fs.Var(impl.NewUint(9999), names[121], "DMR ID that the spoken prompts come from, as the source of their private calls")
-	fs.String(names[122], "kitten-mini-luna", "Voice of the spoken prompts for users who did not pick their own voice in Settings")
-	fs.Var(impl.NewInt(100), names[123], "Most repeaters and hotspots that a user can add. Admins have no limit. 0 is no limit")
-	fs.Var(impl.NewInt(25), names[124], "Longest time, in seconds, that a replica that stops keeps serving its repeaters, peers, browser radios and plugins while other replicas take them over. It must be shorter than the time the orchestrator gives the replica to stop. 0 stops at once")
-	fs.Bool(names[125], false, "Enable SMTP support for sending emails")
-	fs.String(names[126], "", "SMTP server host address")
-	fs.Var(impl.NewInt(25), names[127], "SMTP server port")
-	fs.String(names[128], "none", "SMTP TLS mode. One of none, starttls, or implicit")
-	fs.String(names[129], "", "SMTP server username")
-	fs.String(names[130], "", "SMTP server password")
-	fs.String(names[131], "", "Email address to use as the sender")
-	fs.String(names[132], "none", "SMTP authentication method. One of none, plain, or login")
-	fs.String(names[133], "DMRHub", "Name of the DMR network, shown in the web interface")
-	fs.Bool(names[134], false, "Enable metrics collection and export")
-	fs.String(names[135], "[::]", "Metrics server listen address")
-	fs.Var(impl.NewInt(9000), names[136], "Metrics server port")
-	fs.StringSlice(names[137], nil, "List of trusted proxy IPs for the metrics server")
-	fs.String(names[138], "", "OTLP endpoint for exporting OpenTelemetry tracing data")
-	fs.Bool(names[139], false, "Enable PProf profiling and debugging support")
-	fs.String(names[140], "[::]", "PProf server listen address")
-	fs.StringSlice(names[141], nil, "List of trusted proxy IPs for the PProf server")
-	fs.Var(impl.NewInt(6060), names[142], "PProf server port")
-	fs.String(names[143], "", "API key for the Have I Been Pwned service, used for checking if passwords have been compromised")
-	fs.Bool(names[144], false, "Approve new users when they register, so they can log in at once without waiting for an admin")
-	fs.String(names[145], "open", "Who can register. One of open (anyone), invite (only a person with an invite from an admin) or closed (nobody). The first admin can register in any mode")
-	fs.String(names[146], "public", "What visitors who are not logged in see. One of public (the last heard calls, talkgroups, nets and RadioID details), login (nothing until they log in) or hide-names (the same as public, without the names and positions of the radios)")
-	fs.Bool(names[147], true, "Refuse the logins of an account for up to 15 minutes after 10 failed logins of it in 15 minutes")
-	fs.Var(impl.NewInt(200), names[148], "Most listeners at once on each server. 0 turns the monitor off")
-	fs.Var(impl.NewInt(4), names[149], "Most listeners at once from one IP address on each server. 0 is no limit")
+	fs.Bool(names[34], false, "Enable upstream network links, as DMRGateway does")
+	fs.Bool(names[35], false, "Enable IPSC server support")
+	fs.String(names[36], "[::]", "IPSC server listen address")
+	fs.Var(impl.NewInt(50000), names[37], "IPSC server port")
+	fs.Uint32(names[38], 0, "DMR network ID that identifies this server to IPSC peers. Required when IPSC is enabled")
+	fs.Duration(names[39], time.Duration(int64(2500000000)), "Wait for data and CSBK calls to IPSC after a voice call on a slot; 0 is off")
+	fs.Duration(names[40], time.Duration(int64(1200000000)), "Wait for data and CSBK calls to IPSC after a data call on a slot; 0 is off")
+	fs.Bool(names[41], false, "Drive an MMDVM modem board (MMDVM_HS hat, MMDVM repeater board, DVMega) on a serial port as a hotspot or repeater of this server")
+	fs.String(names[42], "", "Serial device of the modem, such as /dev/ttyAMA0 or /dev/ttyACM0. Required when the modem is enabled")
+	fs.Var(impl.NewInt(115200), names[43], "Speed of the serial port in baud: 9600, 19200, 38400, 57600, 115200, 230400, 460800 or 921600")
+	fs.Var(impl.NewUint(0), names[44], "ID of the repeater that the modem is on the network. DMRHub makes it a modem repeater when the modem connects, and refuses network logins with its ID. A repeater that does not exist is made with no owner, and an admin assigns its owner. Required when the modem is enabled")
+	fs.Bool(names[45], false, "Run the modem as a duplex repeater with two timeslots. Off runs it as a simplex hotspot, whose one channel is timeslot 2")
+	fs.Var(impl.NewUint(1), names[46], "Color code of the modem, 0 to 15")
+	fs.Var(impl.NewUint(0), names[47], "Receive frequency in Hz. Required when the modem is enabled")
+	fs.Var(impl.NewUint(0), names[48], "Transmit frequency in Hz. Required when the modem is enabled")
+	fs.Var(impl.NewInt(0), names[49], "Correction in Hz added to the receive frequency, for the frequency error of the board")
+	fs.Var(impl.NewInt(0), names[50], "Correction in Hz added to the transmit frequency, for the frequency error of the board")
+	fs.Float64(names[51], 100.0, "Transmit power in percent, on boards that set it, such as MMDVM_HS hats")
+	fs.Float64(names[52], 50.0, "Receive audio level in percent")
+	fs.Float64(names[53], 50.0, "Transmit deviation level in percent")
+	fs.Var(impl.NewInt(0), names[54], "Receive DC offset, -128 to 127")
+	fs.Var(impl.NewInt(0), names[55], "Transmit DC offset, -128 to 127")
+	fs.Bool(names[56], false, "Invert the receive audio")
+	fs.Bool(names[57], true, "Invert the transmit audio, which most boards need")
+	fs.Bool(names[58], false, "Invert the PTT output")
+	fs.Var(impl.NewInt(100), names[59], "Time in milliseconds, 0 to 500, that the transmitter is on before the first burst")
+	fs.Var(impl.NewInt(0), names[60], "Delay of the duplex receiver in symbols, 0 to 255")
+	fs.Bool(names[61], false, "Ask the modem for its debug messages and log them")
+	fs.String(names[62], "", "Path to an RSSI.dat file in the MMDVMHost format, which maps the raw RSSI of the board to dBm. Without it the RSSI of modem calls is not known")
+	fs.Bool(names[63], false, "Send a morse station ID while the channel is idle")
+	fs.Var(impl.NewUint(10), names[64], "Minutes between station IDs, 1 to 1440. The first goes out a quarter of this time after the modem connects or the channel goes idle")
+	fs.String(names[65], "", "Callsign to send in morse: letters, digits, spaces and / ? , - = . Required when the station ID is on")
+	fs.Bool(names[66], false, "Key up the transmitter of a duplex modem at each interval while the channel is idle")
+	fs.Var(impl.NewUint(60), names[67], "Seconds between beacons, 1 to 86400")
+	fs.Var(impl.NewUint(3), names[68], "Seconds that each beacon keys up, at least 1 and less than the interval")
+	fs.Bool(names[69], false, "Turn off all the RadioID checks of radio-id-checks, whatever they are set to")
+	fs.Bool(names[70], true, "Refuse a registration whose DMR ID does not have 7 digits")
+	fs.Bool(names[71], true, "Refuse a registration or a callsign change whose callsign RadioID does not list under the DMR ID of the account, and list on the RadioID drift page the accounts whose callsign RadioID no longer lists")
+	fs.Bool(names[72], true, "Refuse an added radio ID that RadioID does not list under the callsign of the user, and list on the RadioID drift page the added radio IDs that RadioID no longer lists under it")
+	fs.Bool(names[73], true, "Refuse a 6-digit repeater ID that RadioID does not list under the callsign of its owner, and fill in the details of the repeater from RadioID")
+	fs.Bool(names[74], true, "Refuse a 9-digit hotspot ID that does not start with the DMR ID of its owner")
+	fs.String(names[75], "https://www.radioid.net/static/users.json", "URL to fetch radio ID information for validation and display purposes. Expected JSON format is the same as RadioID.net.")
+	fs.String(names[76], "https://www.radioid.net/static/rptrs.json", "URL to fetch repeater information for validation and display purposes. Expected JSON format is the same as RadioID.net.")
+	fs.String(names[77], "", "Host name or IP address that hotspots and repeaters connect to, as the enroll page shows it, such as dmr.example.org. Empty uses the host name of the canonical host of the HTTP server")
+	fs.Var(impl.NewInt(0), names[78], "Days to keep text and data messages, with their raw bytes. 0 keeps them forever")
+	fs.Var(impl.NewInt(0), names[79], "Days to keep the last heard entries of voice, data and control traffic. 0 keeps them forever")
+	fs.Var(impl.NewInt(0), names[80], "Days to keep the raw DMR bursts of each transmission. 0 keeps them forever")
+	fs.Var(impl.NewInt(7), names[81], "Days that store and forward keeps a text for a radio that is off the air. 0 is 7")
+	fs.Var(impl.NewInt(50), names[82], "Most texts that store and forward keeps for one user. 0 is 50")
+	fs.Var(impl.NewInt(5), names[83], "Shortest report interval, in minutes, that an owner can pick for a radio: 5, 10, 15, 30 or 60")
+	fs.Var(impl.NewInt(30), names[84], "Longest time, in days, that an owner can keep the positions of a radio, from 1 to 365")
+	fs.String(names[85], "", "Callsign with SSID that the hub logs in to APRS-IS as. Empty sends nothing to APRS-IS")
+	fs.String(names[86], "rotate.aprs2.net:14580", "APRS-IS server, as host:port")
+	fs.Bool(names[87], true, "Run the parrot, the location server and the uploaded plugins inside DMRHub. Turn it off only when every plugin runs as its own program")
+	fs.Bool(names[88], false, "Accept plugins that run as their own programs")
+	fs.String(names[89], "[::]", "Address the plugin listener binds to")
+	fs.Var(impl.NewInt(3006), names[90], "TCP port that plugins connect to")
+	fs.String(names[91], "", "TLS certificate file of the plugin listener. Empty makes DMRHub use a certificate of its own, which plugins check by its fingerprint")
+	fs.String(names[92], "", "TLS key file of the certificate file")
+	fs.String(names[93], "hybrid", "Radios that private traffic reaches. One of hybrid (any radio heard on a repeater of this network; a radio ID that a user owns counts only where that user owns the repeater or an admin trusts it), members (only the radio IDs that users own, on the repeaters of their owner or trusted ones), or anyone (any radio, wherever it was last heard)")
+	fs.String(names[94], "drop", "What happens to private traffic to a radio that the reach allows but that DMRHub has not heard, or not within the max age. One of drop (drop it and log it) or flood (send it to every repeater)")
+	fs.Duration(names[95], time.Duration(int64(0)), "Longest time since a radio was last heard on a repeater that private traffic still goes there, such as 24h. 0 is no limit")
+	fs.String(names[96], "", "Radios that private SMS and data reach, as for voice. Empty takes the voice reach")
+	fs.String(names[97], "", "What happens to private SMS and data to a radio that DMRHub has not heard, as for voice. Empty takes the voice setting")
+	fs.Duration(names[98], time.Duration(int64(0)), "Longest time since a radio was last heard that private SMS and data still go there. 0 takes the voice max age; a negative value, such as -1s, is no limit")
+	fs.String(names[99], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
+	fs.StringSlice(names[100], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
+	fs.StringSlice(names[101], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
+	fs.String(names[102], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
+	fs.StringSlice(names[103], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
+	fs.StringSlice(names[104], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
+	fs.String(names[105], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
+	fs.StringSlice(names[106], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
+	fs.StringSlice(names[107], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
+	fs.String(names[108], "off", "Which list applies. One of off (accept every address), block (refuse the addresses of the block list) or allow (refuse every address but those of the allow list)")
+	fs.StringSlice(names[109], nil, "Addresses and CIDR ranges, IPv4 or IPv6, such as 203.0.113.7 or 2001:db8::/32, that the block mode refuses")
+	fs.StringSlice(names[110], nil, "Addresses and CIDR ranges, IPv4 or IPv6, that the allow mode accepts")
+	fs.Bool(names[111], false, "Do not link a talkgroup as the dynamic talkgroup of a timeslot when someone transmits on it or a hotspot dials it. Calls still reach the repeaters that carry the talkgroup")
+	fs.Duration(names[112], time.Duration(int64(900000000000)), "Time with no transmission from a repeater on its dynamic talkgroup after which DMRHub unlinks it from that timeslot, such as 15m. 0 never unlinks it")
+	fs.Bool(names[113], false, "Make a talkgroup when a repeater or hotspot of this network sends a group voice call to an ID that is not a talkgroup, rather than drop the call")
+	fs.Bool(names[114], false, "Delete a talkgroup that DMRHub made by itself when no call is made on it for the ephemeral TTL. A talkgroup that an admin edits is kept")
+	fs.Duration(names[115], time.Duration(int64(86400000000000)), "Time with no call on a talkgroup that DMRHub made by itself after which it deletes the talkgroup, when ephemeral talkgroups are on, such as 24h")
+	fs.String(names[116], "any", "Radios that may transmit through the repeaters and hotspots of this network. One of any (any radio ID), radioid (the radio IDs that the RadioID list has) or members (the DMR IDs of accounts and the radio IDs that their users added)")
+	fs.Duration(names[117], time.Duration(int64(0)), "Longest voice transmission that DMRHub routes, such as 3m. DMRHub drops the rest of a longer one. 0 is no limit")
+	fs.Duration(names[118], time.Duration(int64(86400000000000)), "How long a right on-air code unlocks a radio ID on the repeater or hotspot timeslot that it came through, such as 24h. Users who turn the on-air code on in Settings unlock their radio IDs with a private call to 9 and the 6 digits of the code")
+	fs.String(names[119], "mix", "What a repeater gets when two group calls reach the same timeslot of it at once, such as two radios on one talkgroup. One of mix (both calls, their bursts interleaved) or first (the first call holds the timeslot until it ends, and DMRHub drops the other call there)")
+	fs.UintSlice(names[120], nil, "Talkgroup numbers that users can make local groups on. A group call to one of them goes only to the other repeaters of the local group of the repeater on that number and timeslot, and never to a network talkgroup or an OpenBridge peer. On a repeater in no such group, the call goes nowhere")
+	fs.Lookup(names[120]).DefValue = "[8,9]"
+	fs.Bool(names[121], false, "Answer a voice transmission that DMRHub refuses from a repeater, hotspot or the browser radio with a short spoken prompt, such as Talkgroup not found, as a private call to the radio about 1 second after it stops transmitting")
+	fs.Var(impl.NewUint(9999), names[122], "DMR ID that the spoken prompts come from, as the source of their private calls")
+	fs.String(names[123], "kitten-mini-luna", "Voice of the spoken prompts for users who did not pick their own voice in Settings")
+	fs.Var(impl.NewInt(100), names[124], "Most repeaters and hotspots that a user can add. Admins have no limit. 0 is no limit")
+	fs.Var(impl.NewInt(25), names[125], "Longest time, in seconds, that a replica that stops keeps serving its repeaters, peers, browser radios and plugins while other replicas take them over. It must be shorter than the time the orchestrator gives the replica to stop. 0 stops at once")
+	fs.Bool(names[126], false, "Enable SMTP support for sending emails")
+	fs.String(names[127], "", "SMTP server host address")
+	fs.Var(impl.NewInt(25), names[128], "SMTP server port")
+	fs.String(names[129], "none", "SMTP TLS mode. One of none, starttls, or implicit")
+	fs.String(names[130], "", "SMTP server username")
+	fs.String(names[131], "", "SMTP server password")
+	fs.String(names[132], "", "Email address to use as the sender")
+	fs.String(names[133], "none", "SMTP authentication method. One of none, plain, or login")
+	fs.String(names[134], "DMRHub", "Name of the DMR network, shown in the web interface")
+	fs.Bool(names[135], false, "Enable metrics collection and export")
+	fs.String(names[136], "[::]", "Metrics server listen address")
+	fs.Var(impl.NewInt(9000), names[137], "Metrics server port")
+	fs.StringSlice(names[138], nil, "List of trusted proxy IPs for the metrics server")
+	fs.String(names[139], "", "OTLP endpoint for exporting OpenTelemetry tracing data")
+	fs.Bool(names[140], false, "Enable PProf profiling and debugging support")
+	fs.String(names[141], "[::]", "PProf server listen address")
+	fs.StringSlice(names[142], nil, "List of trusted proxy IPs for the PProf server")
+	fs.Var(impl.NewInt(6060), names[143], "PProf server port")
+	fs.String(names[144], "", "API key for the Have I Been Pwned service, used for checking if passwords have been compromised")
+	fs.Bool(names[145], false, "Approve new users when they register, so they can log in at once without waiting for an admin")
+	fs.String(names[146], "open", "Who can register. One of open (anyone), invite (only a person with an invite from an admin) or closed (nobody). The first admin can register in any mode")
+	fs.String(names[147], "public", "What visitors who are not logged in see. One of public (the last heard calls, talkgroups, nets and RadioID details), login (nothing until they log in) or hide-names (the same as public, without the names and positions of the radios)")
+	fs.Bool(names[148], true, "Refuse the logins of an account for up to 15 minutes after 10 failed logins of it in 15 minutes")
+	fs.Var(impl.NewInt(200), names[149], "Most listeners at once on each server. 0 turns the monitor off")
+	fs.Var(impl.NewInt(4), names[150], "Most listeners at once from one IP address on each server. 0 is no limit")
 	return nil
 }
 
@@ -3396,6 +3548,18 @@ func configApplyPFlags(cfg *Config, fs *pflag.FlagSet, o *cpflag.Options, _ stri
 		}
 		cfg.DMR.OpenBridge.ServerID = v
 		set("dmr.openbridge.server-id", configulator.LayerCLI, "--"+n)
+	}
+	if n := "dmr" + o.Separator + "upstreams" + o.Separator + "enabled"; fs.Changed(n) {
+		v, err := fs.GetBool(n)
+		if err != nil {
+			return &configulator.ParseError{
+				Err:    err,
+				Path:   "dmr.upstreams.enabled",
+				Source: "--" + n,
+			}
+		}
+		cfg.DMR.Upstreams.Enabled = v
+		set("dmr.upstreams.enabled", configulator.LayerCLI, "--"+n)
 	}
 	if n := "dmr" + o.Separator + "ipsc" + o.Separator + "enabled"; fs.Changed(n) {
 		v, err := fs.GetBool(n)
@@ -5629,6 +5793,25 @@ func (s *dMRShadow) decodeJSON(dec *jsontext.Decoder, path string) error {
 				}
 				s.OpenBridge = &sub
 			}
+		case "upstreams":
+			if dec.PeekKind() == jsontext.KindNull {
+				if _, err := dec.ReadToken(); err != nil {
+					return err
+				}
+			} else {
+				open, err := dec.ReadToken()
+				if err != nil {
+					return err
+				}
+				if open.Kind() != jsontext.KindBeginObject {
+					return configJSONError(path+".upstreams", open, fmt.Errorf("expected an object, got %v", open.Kind()))
+				}
+				var sub upstreamsShadow
+				if err := sub.decodeJSON(dec, path+".upstreams"); err != nil {
+					return err
+				}
+				s.Upstreams = &sub
+			}
 		case "ipsc":
 			if dec.PeekKind() == jsontext.KindNull {
 				if _, err := dec.ReadToken(); err != nil {
@@ -6205,6 +6388,420 @@ func (s *openBridgeShadow) decodeJSON(dec *jsontext.Decoder, path string) error 
 				s.ServerID = &num
 			default:
 				return configJSONError(path+".server-id", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		default:
+			if reject, _ := json.GetOption(dec.Options(), json.RejectUnknownMembers); reject {
+				return &configulator.UnknownKeyError{Path: path + "." + configQuoteKey(key)}
+			}
+			if err := dec.SkipValue(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// decodeJSON decodes the members of an object whose opening brace has
+// been read. path is the object's dotted path.
+func (s *upstreamsShadow) decodeJSON(dec *jsontext.Decoder, path string) error {
+	for {
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return err
+		}
+		if tok.Kind() == jsontext.KindEndObject {
+			return nil
+		}
+		switch key := tok.String(); key {
+		case "enabled":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindTrue, jsontext.KindFalse:
+				b := v.Bool()
+				s.Enabled = &b
+			default:
+				return configJSONError(path+".enabled", v, fmt.Errorf("expected a bool, got %v", v.Kind()))
+			}
+		case "networks":
+			if dec.PeekKind() == jsontext.KindNull {
+				if _, err := dec.ReadToken(); err != nil {
+					return err
+				}
+			} else {
+				open, err := dec.ReadToken()
+				if err != nil {
+					return err
+				}
+				if open.Kind() != jsontext.KindBeginArray {
+					return configJSONError(path+".networks", open, fmt.Errorf("expected an array, got %v", open.Kind()))
+				}
+				out := []upstreamNetworkShadow{}
+				for dec.PeekKind() != jsontext.KindEndArray {
+					ep := path + ".networks" + "[" + strconv.Itoa(len(out)) + "]"
+					et, err := dec.ReadToken()
+					if err != nil {
+						return err
+					}
+					if et.Kind() != jsontext.KindBeginObject {
+						return configJSONError(ep, et, fmt.Errorf("expected an object, got %v", et.Kind()))
+					}
+					var el upstreamNetworkShadow
+					if err := el.decodeJSON(dec, ep); err != nil {
+						return err
+					}
+					out = append(out, el)
+				}
+				if _, err := dec.ReadToken(); err != nil {
+					return err
+				}
+				s.Networks = &out
+			}
+		case "rewrites":
+			if dec.PeekKind() == jsontext.KindNull {
+				if _, err := dec.ReadToken(); err != nil {
+					return err
+				}
+			} else {
+				open, err := dec.ReadToken()
+				if err != nil {
+					return err
+				}
+				if open.Kind() != jsontext.KindBeginArray {
+					return configJSONError(path+".rewrites", open, fmt.Errorf("expected an array, got %v", open.Kind()))
+				}
+				out := []upstreamRewriteShadow{}
+				for dec.PeekKind() != jsontext.KindEndArray {
+					ep := path + ".rewrites" + "[" + strconv.Itoa(len(out)) + "]"
+					et, err := dec.ReadToken()
+					if err != nil {
+						return err
+					}
+					if et.Kind() != jsontext.KindBeginObject {
+						return configJSONError(ep, et, fmt.Errorf("expected an object, got %v", et.Kind()))
+					}
+					var el upstreamRewriteShadow
+					if err := el.decodeJSON(dec, ep); err != nil {
+						return err
+					}
+					out = append(out, el)
+				}
+				if _, err := dec.ReadToken(); err != nil {
+					return err
+				}
+				s.Rewrites = &out
+			}
+		default:
+			if reject, _ := json.GetOption(dec.Options(), json.RejectUnknownMembers); reject {
+				return &configulator.UnknownKeyError{Path: path + "." + configQuoteKey(key)}
+			}
+			if err := dec.SkipValue(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// decodeJSON decodes the members of an object whose opening brace has
+// been read. path is the object's dotted path.
+func (s *upstreamNetworkShadow) decodeJSON(dec *jsontext.Decoder, path string) error {
+	for {
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return err
+		}
+		if tok.Kind() == jsontext.KindEndObject {
+			return nil
+		}
+		switch key := tok.String(); key {
+		case "name":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Name = &str
+			default:
+				return configJSONError(path+".name", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		case "enabled":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindTrue, jsontext.KindFalse:
+				b := v.Bool()
+				s.Enabled = &b
+			default:
+				return configJSONError(path+".enabled", v, fmt.Errorf("expected a bool, got %v", v.Kind()))
+			}
+		case "dialect":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Dialect = &str
+			default:
+				return configJSONError(path+".dialect", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		case "address":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Address = &str
+			default:
+				return configJSONError(path+".address", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		case "port":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Int()
+				if err != nil {
+					return configJSONError(path+".port", v, err)
+				}
+				if raw < math.MinInt || raw > math.MaxInt {
+					return configJSONError(path+".port", v, fmt.Errorf("%d overflows int", raw))
+				}
+				num := int(raw)
+				s.Port = &num
+			default:
+				return configJSONError(path+".port", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "id":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Uint()
+				if err != nil {
+					return configJSONError(path+".id", v, err)
+				}
+				if raw > math.MaxUint32 {
+					return configJSONError(path+".id", v, fmt.Errorf("%d overflows uint32", raw))
+				}
+				num := uint32(raw)
+				s.ID = &num
+			default:
+				return configJSONError(path+".id", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "password":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Password = &str
+			default:
+				return configJSONError(path+".password", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		case "callsign":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Callsign = &str
+			default:
+				return configJSONError(path+".callsign", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		case "rx-frequency":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Uint()
+				if err != nil {
+					return configJSONError(path+".rx-frequency", v, err)
+				}
+				if raw > math.MaxUint32 {
+					return configJSONError(path+".rx-frequency", v, fmt.Errorf("%d overflows uint32", raw))
+				}
+				num := uint32(raw)
+				s.RXFrequency = &num
+			default:
+				return configJSONError(path+".rx-frequency", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "tx-frequency":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Uint()
+				if err != nil {
+					return configJSONError(path+".tx-frequency", v, err)
+				}
+				if raw > math.MaxUint32 {
+					return configJSONError(path+".tx-frequency", v, fmt.Errorf("%d overflows uint32", raw))
+				}
+				num := uint32(raw)
+				s.TXFrequency = &num
+			default:
+				return configJSONError(path+".tx-frequency", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "color-code":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Int()
+				if err != nil {
+					return configJSONError(path+".color-code", v, err)
+				}
+				if raw < math.MinInt || raw > math.MaxInt {
+					return configJSONError(path+".color-code", v, fmt.Errorf("%d overflows int", raw))
+				}
+				num := int(raw)
+				s.ColorCode = &num
+			default:
+				return configJSONError(path+".color-code", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "slots":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Int()
+				if err != nil {
+					return configJSONError(path+".slots", v, err)
+				}
+				if raw < math.MinInt || raw > math.MaxInt {
+					return configJSONError(path+".slots", v, fmt.Errorf("%d overflows int", raw))
+				}
+				num := int(raw)
+				s.Slots = &num
+			default:
+				return configJSONError(path+".slots", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "options":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Options = &str
+			default:
+				return configJSONError(path+".options", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		default:
+			if reject, _ := json.GetOption(dec.Options(), json.RejectUnknownMembers); reject {
+				return &configulator.UnknownKeyError{Path: path + "." + configQuoteKey(key)}
+			}
+			if err := dec.SkipValue(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// decodeJSON decodes the members of an object whose opening brace has
+// been read. path is the object's dotted path.
+func (s *upstreamRewriteShadow) decodeJSON(dec *jsontext.Decoder, path string) error {
+	for {
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return err
+		}
+		if tok.Kind() == jsontext.KindEndObject {
+			return nil
+		}
+		switch key := tok.String(); key {
+		case "network":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindString:
+				str := v.String()
+				s.Network = &str
+			default:
+				return configJSONError(path+".network", v, fmt.Errorf("expected a string, got %v", v.Kind()))
+			}
+		case "local-tg":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Uint()
+				if err != nil {
+					return configJSONError(path+".local-tg", v, err)
+				}
+				if raw > math.MaxUint {
+					return configJSONError(path+".local-tg", v, fmt.Errorf("%d overflows uint", raw))
+				}
+				num := uint(raw)
+				s.LocalTG = &num
+			default:
+				return configJSONError(path+".local-tg", v, fmt.Errorf("expected a number, got %v", v.Kind()))
+			}
+		case "upstream-tg":
+			v, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			switch v.Kind() {
+			case jsontext.KindNull:
+			case jsontext.KindNumber:
+				raw, err := v.Uint()
+				if err != nil {
+					return configJSONError(path+".upstream-tg", v, err)
+				}
+				if raw > math.MaxUint {
+					return configJSONError(path+".upstream-tg", v, fmt.Errorf("%d overflows uint", raw))
+				}
+				num := uint(raw)
+				s.UpstreamTG = &num
+			default:
+				return configJSONError(path+".upstream-tg", v, fmt.Errorf("expected a number, got %v", v.Kind()))
 			}
 		default:
 			if reject, _ := json.GetOption(dec.Options(), json.RejectUnknownMembers); reject {
@@ -8579,6 +9176,9 @@ func (c Config) PrintConfig() string {
 	fmt.Fprintf(&b, "dmr.openbridge.bind = %v\n", c.DMR.OpenBridge.Bind)
 	fmt.Fprintf(&b, "dmr.openbridge.port = %v\n", c.DMR.OpenBridge.Port)
 	fmt.Fprintf(&b, "dmr.openbridge.server-id = %v\n", c.DMR.OpenBridge.ServerID)
+	fmt.Fprintf(&b, "dmr.upstreams.enabled = %v\n", c.DMR.Upstreams.Enabled)
+	fmt.Fprintf(&b, "dmr.upstreams.networks = %v\n", c.DMR.Upstreams.Networks)
+	fmt.Fprintf(&b, "dmr.upstreams.rewrites = %v\n", c.DMR.Upstreams.Rewrites)
 	fmt.Fprintf(&b, "dmr.ipsc.enabled = %v\n", c.DMR.IPSC.Enabled)
 	fmt.Fprintf(&b, "dmr.ipsc.bind = %v\n", c.DMR.IPSC.Bind)
 	fmt.Fprintf(&b, "dmr.ipsc.port = %v\n", c.DMR.IPSC.Port)

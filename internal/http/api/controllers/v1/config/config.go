@@ -127,12 +127,17 @@ func GETConfig(c *gin.Context) {
 		return
 	}
 
+	upstreamPasswords := make([]bool, len(running.DMR.Upstreams.Networks))
+	for i, n := range running.DMR.Upstreams.Networks {
+		upstreamPasswords[i] = n.Password != ""
+	}
 	response := apimodels.ConfigResponse{
 		Config: *running,
 		Secrets: apimodels.SecretStatus{
-			SecretSet:       running.Secret != "",
-			PasswordSaltSet: running.PasswordSalt != "",
-			SMTPPasswordSet: running.SMTP.Password != "",
+			SecretSet:            running.Secret != "",
+			PasswordSaltSet:      running.PasswordSalt != "",
+			SMTPPasswordSet:      running.SMTP.Password != "",
+			UpstreamPasswordsSet: upstreamPasswords,
 		},
 		Status: status,
 	}

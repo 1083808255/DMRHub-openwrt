@@ -89,6 +89,16 @@
           :wizard="wizard"
           @set="forward"
         />
+        <UpstreamTab
+          v-else-if="tab.custom === 'upstream'"
+          :value="read(UPSTREAMS)"
+          :setting="state.settings[UPSTREAMS]"
+          :error="errors[UPSTREAMS]"
+          :saves="saves"
+          :wizard="wizard"
+          :passwords-set="props.upstreamPasswordsSet"
+          @set="forward"
+        />
         <SetupCard
           v-for="c in tab.cards"
           v-else
@@ -116,8 +126,9 @@ import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import SetupCard from '@/components/setup/menu/SetupCard.vue';
 import TranscodingTab from '@/components/setup/menu/TranscodingTab.vue';
+import UpstreamTab from '@/components/setup/menu/UpstreamTab.vue';
 import {
-  AMBE_SERVERS, tabReadOnly, tabStartOnly, type Read, type TabDef, type TabGroup, type TabMark,
+  AMBE_SERVERS, UPSTREAMS, tabReadOnly, tabStartOnly, type Read, type TabDef, type TabGroup, type TabMark,
 } from '@/lib/setupMenu';
 import type { SetupState } from '@/lib/setupState';
 
@@ -128,6 +139,7 @@ const props = defineProps<{
   read: Read;
   errors: Record<string, string>;
   secrets: Record<string, boolean>;
+  upstreamPasswordsSet?: boolean[];
   saves: number;
   marks: Record<string, TabMark>;
   wizard?: boolean;

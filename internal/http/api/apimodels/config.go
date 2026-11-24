@@ -30,12 +30,13 @@ import (
 // an admin typed. A secret that it leaves out keeps its running value.
 type POSTConfig struct {
 	config.Config
-	Secret           *string `json:"-"`
-	PasswordSalt     *string `json:"-"`
-	HIBPAPIKey       *string `json:"-"`
-	SMTPPassword     *string `json:"-"`
-	DatabasePassword *string `json:"-"`
-	RedisPassword    *string `json:"-"`
+	Secret            *string  `json:"-"`
+	PasswordSalt      *string  `json:"-"`
+	HIBPAPIKey        *string  `json:"-"`
+	SMTPPassword      *string  `json:"-"`
+	DatabasePassword  *string  `json:"-"`
+	RedisPassword     *string  `json:"-"`
+	UpstreamPasswords *[]string `json:"-"`
 }
 
 type password struct {
@@ -49,6 +50,9 @@ type postSecrets struct {
 	SMTP         password `json:"smtp"`
 	Database     password `json:"database"`
 	Redis        password `json:"redis"`
+	Upstreams    struct {
+		Passwords []string `json:"passwords"`
+	} `json:"upstreams"`
 }
 
 // UnmarshalJSON reads the config and its secrets, which config.Config
@@ -63,13 +67,18 @@ func (p *POSTConfig) UnmarshalJSON(b []byte) error {
 	}
 	p.Secret, p.PasswordSalt, p.HIBPAPIKey = s.Secret, s.PasswordSalt, s.HIBPAPIKey
 	p.SMTPPassword, p.DatabasePassword, p.RedisPassword = s.SMTP.Password, s.Database.Password, s.Redis.Password
+	if s.Upstreams.Passwords != nil {
+		pw := s.Upstreams.Passwords
+		p.UpstreamPasswords = &pw
+	}
 	return nil
 }
 
 type SecretStatus struct {
-	SecretSet       bool `json:"secretSet"`
-	PasswordSaltSet bool `json:"passwordSaltSet"`
-	SMTPPasswordSet bool `json:"smtpPasswordSet"`
+	SecretSet           bool   `json:"secretSet"`
+	PasswordSaltSet     bool   `json:"passwordSaltSet"`
+	SMTPPasswordSet     bool   `json:"smtpPasswordSet"`
+	UpstreamPasswordsSet []bool `json:"upstreamPasswordsSet"`
 }
 
 // ConfigResponse is the config that a replica runs with, without its
@@ -134,6 +143,11 @@ func (p POSTConfig) ToConfig(c *config.Config, fallback *config.Config) {
 		c.SMTP.Password = fallback.SMTP.Password
 		c.Database.Password = fallback.Database.Password
 		c.Redis.Password = fallback.Redis.Password
+		for i := range c.DMR.Upstreams.Networks {
+			if i < len(fallback.DMR.Upstreams.Networks) {
+				c.DMR.Upstreams.Networks[i].Password = fallback.DMR.Upstreams.Networks[i].Password
+			}
+		}
 	}
 	if p.Secret != nil {
 		c.Secret = *p.Secret
@@ -152,5 +166,13 @@ func (p POSTConfig) ToConfig(c *config.Config, fallback *config.Config) {
 	}
 	if p.RedisPassword != nil {
 		c.Redis.Password = *p.RedisPassword
+	}
+	if p.UpstreamPasswords != nil {
+		for i, pw := range *p.UpstreamPasswords {
+			// An empty input keeps the password that is already saved.
+			if pw != "" && i < len(c.DMR.Upstreams.Networks) {
+				c.DMR.Upstreams.Networks[i].Password = pw
+			}
+		}
 	}
 }

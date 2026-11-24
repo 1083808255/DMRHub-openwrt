@@ -83,6 +83,7 @@
       :read="read"
       :errors="errors"
       :secrets="secrets"
+      :upstream-passwords-set="upstreamPasswordsSet"
       :saves="saves"
       :marks="marks"
       @set="set"
@@ -122,9 +123,10 @@ import SetupMenu from '@/components/setup/menu/SetupMenu.vue';
 import { Button as ShadButton } from '@/components/ui/button';
 import { ambeServersError, type AmbeServerRow } from '@/lib/codec';
 import {
-  AMBE_SERVERS, clone, getAt, keepEdits, setAt, tabCheckErrors, tabDirty, tabFields, tabOfHash, tabPaths, tabPayload,
+  AMBE_SERVERS, UPSTREAMS, clone, getAt, keepEdits, setAt, tabCheckErrors, tabDirty, tabFields, tabOfHash, tabPaths, tabPayload,
   tabReadOnly, visibleTabs, TABS, type FieldDef, type TabDef, type TabMark, type Values,
 } from '@/lib/setupMenu';
+import { upstreamOf, upstreamsError } from '@/lib/upstream';
 import {
   emptySetupState, replicaName, serverName, settingLabel, setupStateKey, setupStateOf, stateKeys, type SetupState,
 } from '@/lib/setupState';
@@ -191,6 +193,7 @@ export default defineComponent({
       edited: {} as Values,
       setupState: emptySetupState() as SetupState,
       secrets: {} as Record<string, boolean>,
+      upstreamPasswordsSet: [] as boolean[],
       errors: {} as Record<string, string>,
       savedMsg: {} as Record<string, string>,
       failMsg: '',
@@ -309,6 +312,9 @@ export default defineComponent({
           'password-salt': secrets.passwordSaltSet === true,
           'smtp.password': secrets.smtpPasswordSet === true,
         };
+        this.upstreamPasswordsSet = Array.isArray(secrets.upstreamPasswordsSet)
+          ? (secrets.upstreamPasswordsSet as unknown[]).map((v) => v === true)
+          : [];
         Object.assign(this.setupState, setupStateOf(data));
         const fresh = clone(data);
         for (const key of stateKeys) {
@@ -324,6 +330,10 @@ export default defineComponent({
       }
     },
     localError(tab: TabDef): Record<string, string> {
+      if (tab.custom === 'upstream') {
+        const error = upstreamsError(upstreamOf(getAt(this.edited, UPSTREAMS)), this.upstreamPasswordsSet);
+        return error ? { [UPSTREAMS]: error } : {};
+      }
       if (tab.custom !== 'transcoding') {
         return tabCheckErrors(tab, this.read);
       }

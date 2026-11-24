@@ -40,6 +40,7 @@ import (
 	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/mmdvm"
 	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/modem"
 	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/openbridge"
+	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/upstream"
 	"github.com/USA-RedDragon/DMRHub/internal/dmr/transcode"
 	"github.com/USA-RedDragon/DMRHub/internal/kv"
 	"github.com/USA-RedDragon/DMRHub/internal/liveconfig"
@@ -54,11 +55,12 @@ const (
 	MMDVM      Kind = "mmdvm"
 	IPSC       Kind = "ipsc"
 	OpenBridge Kind = "openbridge"
+	Upstream   Kind = "upstream"
 	Modem      Kind = "modem"
 )
 
 func kinds() []Kind {
-	return []Kind{MMDVM, IPSC, OpenBridge, Modem}
+	return []Kind{MMDVM, IPSC, OpenBridge, Upstream, Modem}
 }
 
 // Deps is what the servers share with the rest of DMRHub.
@@ -101,13 +103,14 @@ func (e ApplyError) Unwrap() error {
 // settings is what a server is made with. Any change in it restarts the
 // server.
 type settings struct {
-	enabled bool
-	bind    string
-	port    int
-	id      uint32
-	wt      wtSettings
-	holds   [2]time.Duration
-	modem   config.Modem
+	enabled   bool
+	bind      string
+	port      int
+	id        uint32
+	wt        wtSettings
+	holds     [2]time.Duration
+	modem     config.Modem
+	upstreams string
 }
 
 // wtSettings is config.MMDVMWebTransport in a form that compares, with the
@@ -132,10 +135,30 @@ func settingsOf(k Kind, c *config.Config) settings {
 		return settings{enabled: c.DMR.IPSC.Enabled, bind: c.DMR.IPSC.Bind, port: c.DMR.IPSC.Port, id: c.DMR.IPSC.NetworkID, holds: [2]time.Duration{c.DMR.IPSC.CallHangHold, c.DMR.IPSC.DataHangHold}}
 	case OpenBridge:
 		return settings{enabled: c.DMR.OpenBridge.Enabled, bind: c.DMR.OpenBridge.Bind, port: c.DMR.OpenBridge.Port, id: c.DMR.OpenBridge.ServerID}
+	case Upstream:
+		return settings{enabled: c.DMR.Upstreams.Enabled, upstreams: upstreamFingerprint(c.DMR.Upstreams)}
 	case Modem:
 		return settings{enabled: c.DMR.Modem.Enabled, modem: c.DMR.Modem}
 	}
 	return settings{}
+}
+
+// upstreamFingerprint is a comparable representation of the whole upstream
+// gateway configuration, including the passwords that JSON omits. A change
+// in any field restarts the gateway.
+func upstreamFingerprint(u config.Upstreams) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%t|", u.Enabled)
+	for _, n := range u.Networks {
+		fmt.Fprintf(&b, "%s:%t:%s:%s:%d:%d:%s:%s:%d:%d:%d:%d:%s|",
+			n.Name, n.Enabled, n.Dialect, n.Address, n.Port, n.ID,
+			n.Password, n.Callsign, n.RXFrequency, n.TXFrequency,
+			n.ColorCode, n.Slots, n.Options)
+	}
+	for _, r := range u.Rewrites {
+		fmt.Fprintf(&b, "%s:%d:%d|", r.Network, r.LocalTG, r.UpstreamTG)
+	}
+	return b.String()
 }
 
 // copySettings sets the settings of server k in dst to those in src.
@@ -147,6 +170,8 @@ func copySettings(k Kind, dst, src *config.Config) {
 		dst.DMR.IPSC = src.DMR.IPSC
 	case OpenBridge:
 		dst.DMR.OpenBridge = src.DMR.OpenBridge
+	case Upstream:
+		dst.DMR.Upstreams = src.DMR.Upstreams
 	case Modem:
 		dst.DMR.Modem = src.DMR.Modem
 	}
@@ -159,6 +184,8 @@ func disable(k Kind, c *config.Config) {
 		c.DMR.IPSC.Enabled = false
 	case OpenBridge:
 		c.DMR.OpenBridge.Enabled = false
+	case Upstream:
+		c.DMR.Upstreams.Enabled = false
 	case Modem:
 		c.DMR.Modem.Enabled = false
 	}
@@ -408,6 +435,12 @@ func (m *Manager) build(k Kind, cfg *config.Config) (*running, error) {
 		s, err := openbridge.MakeServer(&own, m.deps.Hub, m.deps.DB, m.deps.PubSub, m.deps.KV)
 		if err != nil {
 			return nil, fmt.Errorf("failed to make the OpenBridge server: %w", err)
+		}
+		r.server = &s
+	case Upstream:
+		s, err := upstream.MakeServer(&own.DMR.Upstreams, m.deps.Hub, m.deps.PubSub, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make the upstream gateway server: %w", err)
 		}
 		r.server = &s
 	case Modem:
