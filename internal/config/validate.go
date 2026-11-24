@@ -60,6 +60,8 @@ const (
 	fieldPrivateVoiceMaxAge  = "dmr.private-calls.voice.max-age"
 	fieldPrivateDataReach    = "dmr.private-calls.data.reach"
 	fieldPrivateDataUnknown  = "dmr.private-calls.data.unknown"
+
+	fieldUpstreamNetworks = "dmr.upstreams.networks"
 )
 
 // isValidURL checks that s is a parseable URL with both a scheme and host.
@@ -200,7 +202,95 @@ var (
 	ErrInvalidDMRPublicAddress = errors.New("enter a host name or IP address with no scheme or port, such as dmr.example.org")
 	// ErrInvalidDMRRepeaterIDURL indicates that the provided DMR repeater ID URL is not valid.
 	ErrInvalidDMRRepeaterIDURL = errors.New("invalid DMR repeater ID URL provided")
+	// ErrInvalidUpstreamName indicates that an upstream network has no name,
+	// or that two networks have the same one.
+	ErrInvalidUpstreamName = errors.New("each upstream network needs a name of its own, which the rewrite table refers to")
+	// ErrInvalidUpstreamAddress indicates that the address of an upstream
+	// network is not a host name or IP address.
+	ErrInvalidUpstreamAddress = errors.New("enter a host name or IP address with no scheme or path, such as master.brandmeister.network")
+	// ErrInvalidUpstreamID indicates that an upstream network has no
+	// repeater ID to log in with.
+	ErrInvalidUpstreamID = errors.New("enter the repeater ID that this hub logs in to the network with")
+	// ErrInvalidUpstreamPort indicates that the port of an upstream network
+	// is not a port number.
+	ErrInvalidUpstreamPort = errors.New("the port must be a whole number from 1 to 65535")
+	// ErrInvalidUpstreamRewrite indicates that a rewrite rule names no
+	// network, or maps no talkgroup.
+	ErrInvalidUpstreamRewrite = errors.New("each rewrite rule needs a talkgroup of 1 to 16777215, other than 4000, on both sides")
+	// ErrUpstreamRewriteNetwork indicates that a rewrite rule names a
+	// network that no network of the list has.
+	ErrUpstreamRewriteNetwork = errors.New("the rewrite names a network that is not in the list")
 )
+
+// ValidateWithFields validates the upstream networks and the rewrite table.
+func (u Upstreams) ValidateWithFields() []ValidationError {
+	if !u.Enabled {
+		return nil
+	}
+	var errs []ValidationError
+	names := make(map[string]struct{}, len(u.Networks))
+	for _, n := range u.Networks {
+		if n.Name == "" {
+			errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrInvalidUpstreamName})
+			continue
+		}
+		if _, dup := names[n.Name]; dup {
+			errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrInvalidUpstreamName})
+		}
+		names[n.Name] = struct{}{}
+		if !n.Enabled {
+			continue
+		}
+		if !isHostOrIP(UpstreamHost(n.Address)) {
+			errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrInvalidUpstreamAddress})
+		}
+		if n.ID == 0 {
+			errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrInvalidUpstreamID})
+		}
+		if n.Port < 1 || n.Port > 65535 {
+			errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrInvalidUpstreamPort})
+		}
+	}
+	for _, r := range u.Rewrites {
+		if r.Network != "" {
+			if _, ok := names[r.Network]; !ok {
+				errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrUpstreamRewriteNetwork})
+				continue
+			}
+		}
+		if !validTalkgroup(r.LocalTG) || !validTalkgroup(r.UpstreamTG) {
+			errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrInvalidUpstreamRewrite})
+		}
+	}
+	return errs
+}
+
+// validTalkgroup reports whether tg is a talkgroup that a rewrite rule maps.
+func validTalkgroup(tg uint) bool {
+	return tg >= 1 && tg <= 16777215 && tg != 4000
+}
+
+// UpstreamHost returns the host of an upstream address as an admin typed
+// it, so that a pasted URL such as https://master.brandmeister.network/
+// still reaches the master. The port stays in its own setting, so a port
+// in the address is dropped.
+func UpstreamHost(address string) string {
+	s := strings.TrimSpace(address)
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndex(s, "@"); i >= 0 {
+		s = s[i+1:]
+	}
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = host
+	}
+	s = strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
+	return strings.TrimSpace(s)
+}
 
 // Validate validates the Redis configuration.
 func (r Redis) Validate() error {
@@ -837,6 +927,7 @@ func (d DMR) ValidateWithFields() (errs []ValidationError) {
 	errs = append(errs, d.Plugins.ValidateWithFields()...)
 	errs = append(errs, d.Transcoding.ValidateWithFields()...)
 	errs = append(errs, d.PrivateCalls.ValidateWithFields()...)
+	errs = append(errs, d.Upstreams.ValidateWithFields()...)
 	errs = append(errs, d.IPLists.ValidateWithFields()...)
 	errs = append(errs, d.Routing.ValidateWithFields()...)
 	if d.RepeaterQuota < 0 {

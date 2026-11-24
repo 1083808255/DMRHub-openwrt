@@ -146,7 +146,7 @@ export const upstreamPayload = (v: UpstreamValue): Record<string, unknown> => ({
     name: n.name.trim(),
     enabled: n.enabled,
     dialect: n.dialect,
-    address: n.address.trim(),
+    address: hostOf(n.address),
     port: Number(n.port) || 0,
     id: Number(n.id) || 0,
     callsign: n.callsign.trim(),
@@ -168,6 +168,28 @@ export const upstreamPasswordsOf = (v: UpstreamValue): string[] => v.networks.ma
 
 const WHOLE = /^[1-9]\d*$/;
 const TG = /^(0|[1-9]\d*)$/;
+/** A host name or an IP address, with no scheme, path or port. */
+const HOST = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
+
+/**
+ * hostOf returns the host of an address as an admin typed it, so that a
+ * pasted URL such as https://master.brandmeister.network/ still saves.
+ * The port belongs in its own field, so a port in the address is dropped.
+ */
+export const hostOf = (address: string): string => {
+  let s = address.trim();
+  const scheme = s.indexOf('://');
+  if (scheme >= 0) s = s.slice(scheme + 3);
+  const cut = s.search(/[/?#]/);
+  if (cut >= 0) s = s.slice(0, cut);
+  const at = s.lastIndexOf('@');
+  if (at >= 0) s = s.slice(at + 1);
+  // A port after the last colon, unless the colons are those of IPv6.
+  const m = /^(\[[^\]]+\]|[^:]+):(\d+)$/.exec(s);
+  if (m) s = m[1] as string;
+  s = s.replace(/^\[/, '').replace(/\]$/, '');
+  return s.trim();
+};
 
 /** upstreamsError is the error shown when the upstream settings cannot be saved. */
 export const upstreamsError = (v: UpstreamValue, passwordsSet: boolean[]): string | undefined => {
@@ -184,6 +206,9 @@ export const upstreamsError = (v: UpstreamValue, passwordsSet: boolean[]): strin
     names.add(name);
     if (!n.address.trim()) {
       return t('Network {n}: an address is required.', { n: at });
+    }
+    if (!HOST.test(hostOf(n.address))) {
+      return t('Network {n}: enter a host name or IP address with no scheme or path, such as master.brandmeister.network.', { n: at });
     }
     if (!WHOLE.test(String(n.id)) || Number(n.id) < 1) {
       return t('Network {n}: the repeater ID must be a whole number of 1 or more.', { n: at });

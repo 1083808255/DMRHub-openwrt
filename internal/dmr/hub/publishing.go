@@ -32,6 +32,23 @@ import (
 	"github.com/USA-RedDragon/DMRHub/internal/dmr/rules"
 )
 
+// PrivateTopic is the topic that carries every private call and data
+// message the hub routes, whether or not it found a repeater or a radio
+// to deliver it to. A gateway that links this hub to an upstream network
+// subscribes to it to forward private calls and text messages upstream,
+// which the hub cannot reach by itself.
+const PrivateTopic = "hub:packets:private"
+
+// publishPrivate queues packet for the upstream gateways that forward
+// private calls and text messages. It is a no-op unless a peer server
+// runs, so a hub without an upstream gateway does no extra work.
+func (h *Hub) publishPrivate(packet models.Packet, sourceName string) {
+	if !h.hasPeerServers() {
+		return
+	}
+	h.marshalAndPublish(h.sourceSlotOf(packet, sourceName), packet, PrivateTopic)
+}
+
 // marshalAndPublish encodes a packet, marshals it as a RawDMRPacket, and
 // queues its publish to topic on the outbox of the source slot key, so that
 // routing never waits on pubsub. The outbox of a source slot publishes in

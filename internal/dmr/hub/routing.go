@@ -241,6 +241,12 @@ func (h *Hub) fanOut(ctx context.Context, packet models.Packet, sourceName strin
 	if !h.handlePrivateCall(ctx, key, packet) && isPlugin {
 		h.publishForPeers(ctx, packet, sourceName)
 	}
+	// A private call or a text message may name a radio that no repeater
+	// of this hub serves. The upstream gateways forward it, so the
+	// networks this hub links to can deliver it.
+	if !isPlugin && h.getServerRole(sourceName) != RolePeer {
+		h.publishPrivate(packet, sourceName)
+	}
 }
 
 // handleSpecialDestinations hands the calls to plugins' IDs to them, and

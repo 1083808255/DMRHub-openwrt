@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  upstreamOf, upstreamPasswordsOf, upstreamPayload, upstreamsError,
+  upstreamOf, upstreamPasswordsOf, upstreamPayload, upstreamsError, hostOf,
   emptyUpstreamNetwork, emptyUpstreamRewrite,
 } from '@/lib/upstream';
 
@@ -106,6 +106,30 @@ describe('upstream config', () => {
     expect(again.networks[0]!.slots).toBe('');
     expect(again.rewrites[0]!.localTg).toBe('');
     expect(upstreamsError(again, [true])).toContain('port');
+  });
+
+  it('accepts a pasted URL and saves only its host', () => {
+    const rows = upstreamOf({
+      networks: [{ name: 'CQDMR', address: 'https://dmr.wakepc.cn/', id: 461244711 }],
+    });
+    expect(upstreamsError(rows, [true])).toBeUndefined();
+
+    const payload = upstreamPayload(rows) as Record<string, unknown>;
+    const network = (payload.networks as Record<string, unknown>[])[0] as Record<string, unknown>;
+    expect(network.address).toBe('dmr.wakepc.cn');
+  });
+
+  it('drops a scheme, path, user and port from the address', () => {
+    for (const [input, want] of [
+      ['dmr.wakepc.cn', 'dmr.wakepc.cn'],
+      ['https://dmr.wakepc.cn', 'dmr.wakepc.cn'],
+      ['http://dmr.wakepc.cn:62031', 'dmr.wakepc.cn'],
+      ['https://user:pw@dmr.wakepc.cn/path?q=1', 'dmr.wakepc.cn'],
+      ['[2001:db8::1]:62031', '2001:db8::1'],
+      ['  10.0.0.5  ', '10.0.0.5'],
+    ] as const) {
+      expect(hostOf(input)).toBe(want);
+    }
   });
 
   it('validates networks and rewrites', () => {

@@ -308,6 +308,16 @@ func (m *Manager) ModemStatus() (modem.Status, bool) {
 	return s.Status(), true
 }
 
+// UpstreamStatus returns the live state of the upstream gateway, and
+// false when it does not run.
+func (m *Manager) UpstreamStatus() (upstream.Status, bool) {
+	s, ok := m.Server(Upstream).(*upstream.Server)
+	if !ok || s == nil {
+		return upstream.Status{}, false
+	}
+	return s.Status(), true
+}
+
 // Apply puts the server settings of next into effect. It starts the
 // servers that next turns on, stops those it turns off and restarts those
 // whose settings it changes, and leaves the others alone. A server that

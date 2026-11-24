@@ -32,6 +32,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHostOf(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"master.brandmeister.network":         "master.brandmeister.network",
+		"https://dmr.wakepc.cn":               "dmr.wakepc.cn",
+		"http://dmr.wakepc.cn/":               "dmr.wakepc.cn",
+		"https://dmr.wakepc.cn:62031":         "dmr.wakepc.cn",
+		"  master.brandmeister.network  ":     "master.brandmeister.network",
+		"dmr.example.org:62031":               "dmr.example.org",
+		"[2001:db8::1]:62031":                 "2001:db8::1",
+		"https://user:pw@dmr.example.org/path": "dmr.example.org",
+	} {
+		got, err := hostOf(in)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
+	for _, bad := range []string{"", "   ", "https://"} {
+		_, err := hostOf(bad)
+		assert.Error(t, err, bad)
+	}
+}
+
 func TestBuildRewriteTable(t *testing.T) {
 	cfg := &config.Upstreams{
 		Enabled: true,
@@ -75,6 +97,18 @@ func TestBuildRewriteTableNil(t *testing.T) {
 	assert.Empty(t, table.outboundTargets(1))
 	_, ok := table.inboundLocal("BM", 1)
 	assert.False(t, ok)
+	assert.False(t, table.private, "no network takes private calls")
+}
+
+// TestPrivateCallsFollowTheEnabledNetworks checks that a private call goes
+// to the networks that are on, even when no rewrite rule exists: a private
+// call names a radio, not a talkgroup.
+func TestPrivateCallsFollowTheEnabledNetworks(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Upstreams{Enabled: true, Networks: []config.UpstreamNetwork{{Name: "BM", Enabled: true}}}
+	assert.True(t, buildRewriteTable(cfg, map[string]struct{}{"BM": {}}).private)
+	assert.False(t, buildRewriteTable(cfg, nil).private, "a gateway with no network carries no private call")
+	assert.False(t, buildRewriteTable(nil, nil).private)
 }
 
 func TestLoopbackGuard(t *testing.T) {

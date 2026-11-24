@@ -2207,5 +2207,19 @@
   "the upstream talkgroup": "上游通话组",
   "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.": "此标签页上的部分设置无效：{reason}请修正标记的字段后重新保存。",
   "this setting takes effect at the start of DMRHub only; set it in the config file or the environment of the deployment": "此设置只在 DMRHub 启动时生效，请在配置文件或部署环境中设置。",
-  "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it": "此设置由部署（配置文件、环境变量或命令行参数）设置，Setup 无法修改。"
+  "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it": "此设置由部署（配置文件、环境变量或命令行参数）设置，Setup 无法修改。",
+  "Network {n}: enter a host name or IP address with no scheme or path, such as master.brandmeister.network.": "网络 {n}：请填写主机名或 IP 地址，不要带协议前缀或路径，例如 master.brandmeister.network。",
+  "The host name or IP address only, with no https:// and no path. The port goes in the field below.": "只填主机名或 IP 地址，不要带 https:// 和路径。端口填在下面的字段里。",
+  "each upstream network needs a name of its own, which the rewrite table refers to": "每个上游网络都需要一个独有的名称，改写表用它来引用",
+  "enter a host name or IP address with no scheme or path, such as master.brandmeister.network": "请填写主机名或 IP 地址，不要带协议前缀或路径，例如 master.brandmeister.network",
+  "enter the repeater ID that this hub logs in to the network with": "请填写本机登录该网络所用的中继台 ID",
+  "the port must be a whole number from 1 to 65535": "端口必须是 1 到 65535 之间的整数",
+  "each rewrite rule needs a talkgroup of 1 to 16777215, other than 4000, on both sides": "每条改写规则的本地和上游通话组都必须是 1 到 16777215 之间、且不是 4000 的号码",
+  "the rewrite names a network that is not in the list": "改写规则引用的网络不在列表中",
+  "Logged in": "已登录",
+  "for {time}": "已持续 {time}",
+  "From upstream: {n} bursts. To upstream: {m} bursts.": "上游发来 {n} 个突发，发往上游 {m} 个突发。",
+  "Last call {time} ago": "最后一次通话在 {time} 前",
+  "From upstream": "上游发来",
+  "To upstream": "发往上游"
 }

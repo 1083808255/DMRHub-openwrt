@@ -300,6 +300,7 @@ func v1(current configPkg.Source, group *gin.RouterGroup, userSuspension gin.Han
 	v1Config.POST("/validate", v1ConfigControllers.POSTConfigValidate)
 	v1Config.GET("/transcoding", v1ConfigControllers.GETTranscoding)
 	v1Config.GET("/modem", v1ConfigControllers.GETModem)
+	v1Config.GET("/upstream", v1ConfigControllers.GETUpstream)
 	v1Config.GET("/modem/ports", v1ConfigControllers.GETModemPorts)
 	v1Config.GET("/prompts/:file", v1PromptsControllers.GETConfigPreview)
 

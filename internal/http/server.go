@@ -87,6 +87,7 @@ type options struct {
 	pluginEngine *wasm.Engine
 	kv           kv.KV
 	modem        *modem.Replicas
+	upstream     v1ConfigControllers.UpstreamStatuser
 	websockets   *websocket.Conns
 }
 
@@ -118,6 +119,12 @@ func WithKV(store kv.KV) Option {
 // WithModem makes the modem API run its requests through r.
 func WithModem(r *modem.Replicas) Option {
 	return func(o *options) { o.modem = r }
+}
+
+// WithUpstreamStatus makes the upstream API report the state of the
+// gateway through s.
+func WithUpstreamStatus(s v1ConfigControllers.UpstreamStatuser) Option {
+	return func(o *options) { o.upstream = s }
 }
 
 // WithWebsockets makes the router keep its websocket connections in
@@ -201,6 +208,9 @@ func addMiddleware(ctx context.Context, config *configPkg.Config, dmrHub *hub.Hu
 		}
 	}
 	r.Use(middleware.Provider(v1ConfigControllers.ModemKey, modemAPI))
+	if o.upstream != nil {
+		r.Use(middleware.Provider(v1ConfigControllers.UpstreamKey, o.upstream))
+	}
 	r.Use(middleware.Provider("Ready", ready))
 	r.Use(middleware.Provider("Hub", dmrHub))
 	r.Use(middleware.Provider("NetScheduler", ns))

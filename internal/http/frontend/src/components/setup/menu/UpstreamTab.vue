@@ -59,6 +59,47 @@
           {{ $t('No network yet. Add one to link this hub to a master.') }}
         </p>
         <div
+          v-for="(link, li) in status.links"
+          :key="`link-${li}`"
+          class="mb-3 rounded-[10px] border px-3.5 py-2.5 text-sm"
+          :class="link.up ? 'border-green-600/40 bg-green-500/5' : 'border-amber-500/45 bg-amber-500/5'"
+          :data-test="`upstream-link-${li}`"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="size-2 rounded-full" :class="link.up ? 'bg-green-600 dark:bg-green-400' : 'bg-amber-500'" />
+            <b>{{ link.name }}</b>
+            <span class="text-muted-foreground">
+              {{ link.up ? $t('Logged in') : $t('Not logged in') }}
+            </span>
+            <span v-if="link.up && (link.since ?? 0) > 0" class="text-xs text-muted-foreground">
+              {{ $t('for {time}', { time: duration(link.since ?? 0) }) }}
+            </span>
+            <span v-else-if="link.reason" class="text-xs text-muted-foreground">
+              {{ link.reason }}
+            </span>
+          </div>
+          <div class="mt-1 text-xs text-muted-foreground">
+            {{ $t('From upstream: {n} bursts. To upstream: {m} bursts.', { n: link.rxBursts, m: link.txBursts }) }}
+            <span v-if="(link.lastHeard ?? 0) > 0"> · {{ $t('Last call {time} ago', { time: duration(link.lastHeard ?? 0) }) }}</span>
+          </div>
+          <table v-if="link.talkgroups.length > 0" class="mt-1.5 w-full text-xs" :data-test="`upstream-link-tgs-${li}`">
+            <thead class="text-muted-foreground">
+              <tr>
+                <th class="text-left font-medium">{{ $t('Talkgroup') }}</th>
+                <th class="text-right font-medium">{{ $t('From upstream') }}</th>
+                <th class="text-right font-medium">{{ $t('To upstream') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="tg in link.talkgroups" :key="tg.tg">
+                <td>TG {{ tg.tg }}</td>
+                <td class="text-right">{{ tg.rx }}</td>
+                <td class="text-right">{{ tg.tx }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div
           v-for="(n, i) in value.networks"
           :key="i"
           class="mb-4 rounded-[10px] border p-3.5"
@@ -90,6 +131,7 @@
             <label class="block text-sm md:col-span-2">
               <span class="mb-1 block font-medium">{{ $t('Master address') }}</span>
               <ShadInput :model-value="n.address" :disabled="locked" placeholder="master.brandmeister.network" :aria-label="$t('Address of network {n}', { n: i + 1 })" :data-test="`upstream-network-address-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'address', String(v))" />
+              <span class="mt-1 block text-xs text-muted-foreground">{{ $t('The host name or IP address only, with no https:// and no path. The port goes in the field below.') }}</span>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Port') }}</span>
@@ -180,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import SettingNote from '@/components/setup/SettingNote.vue';
 import SourceChips from '@/components/setup/menu/SourceChips.vue';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -193,6 +235,20 @@ import {
 } from '@/lib/upstream';
 import { fieldLocked } from '@/lib/setupMenu';
 import type { Setting } from '@/lib/setupState';
+import API from '@/services/API';
+
+type LinkStatus = {
+  name: string;
+  up: boolean;
+  since?: number;
+  lastHeard?: number;
+  reason?: string;
+  rxBursts: number;
+  txBursts: number;
+  talkgroups: { tg: number; rx: number; tx: number }[];
+};
+
+type UpstreamStatus = { enabled: boolean; running: boolean; links: LinkStatus[] };
 
 const props = defineProps<{
   value: unknown;
@@ -222,4 +278,41 @@ const setRewrite = (i: number, key: keyof UpstreamRewriteRow, v: unknown) =>
 const addRewrite = () => commit({ ...value.value, rewrites: [...value.value.rewrites, emptyUpstreamRewrite()] });
 const removeRewrite = (i: number) =>
   commit({ ...value.value, rewrites: value.value.rewrites.filter((_, j) => j !== i) });
+
+// The state of the links comes from the running gateway, not from the
+// settings on the page, so it is polled while the tab is open.
+const status = ref<UpstreamStatus>({ enabled: false, running: false, links: [] });
+let timer: ReturnType<typeof setInterval> | undefined;
+
+const loadStatus = async () => {
+  try {
+    const res = await API.get('/config/upstream');
+    const data = res.data as Partial<UpstreamStatus>;
+    status.value = {
+      enabled: data.enabled === true,
+      running: data.running === true,
+      links: Array.isArray(data.links) ? data.links : [],
+    };
+  } catch {
+    // A gateway that is off has no state to show; keep the last one.
+  }
+};
+
+const duration = (seconds: number): string => {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+};
+
+onMounted(() => {
+  void loadStatus();
+  timer = setInterval(() => void loadStatus(), 5000);
+});
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer);
+});
 </script>

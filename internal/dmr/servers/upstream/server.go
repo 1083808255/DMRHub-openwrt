@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -85,6 +86,105 @@ type uplink struct {
 	// up is set when the peer has completed login. The egress loop reads it
 	// from another goroutine, so it is atomic.
 	up atomic.Bool
+	// stats is what the status page shows about this link. The loops of the
+	// link write it, and a request of the API reads it.
+	stats linkStats
+}
+
+// linkStats is what a link has done since the gateway started.
+type linkStats struct {
+	mu sync.Mutex
+	// since is when the link last came up, zero while it is down.
+	since time.Time
+	// lastHeard is when the last burst came from or went to the master.
+	lastHeard time.Time
+	// reason is why the link last went down.
+	reason string
+	// rx and tx count the bursts of each direction, and rxTG and txTG
+	// count them by talkgroup.
+	rxBursts uint64
+	txBursts uint64
+	rxTG     map[uint]uint64
+	txTG     map[uint]uint64
+}
+
+// LinkStatus is the state of one upstream link, as the API reports it.
+type LinkStatus struct {
+	Name string `json:"name"`
+	// Up is whether the link has logged in to the master.
+	Up bool `json:"up"`
+	// Since is when it came up, in seconds since the gateway started.
+	Since float64 `json:"since,omitempty"`
+	// LastHeard is when the last burst crossed the link, in seconds since
+	// the gateway started.
+	LastHeard float64 `json:"lastHeard,omitempty"`
+	// Reason is why the link last went down.
+	Reason     string     `json:"reason,omitempty"`
+	RxBursts   uint64     `json:"rxBursts"`
+	TxBursts   uint64     `json:"txBursts"`
+	Talkgroups []TGStatus `json:"talkgroups"`
+}
+
+// TGStatus counts the bursts of one talkgroup on a link.
+type TGStatus struct {
+	TG     uint   `json:"tg"`
+	Rx     uint64 `json:"rx"`
+	Tx     uint64 `json:"tx"`
+}
+
+// RewriteStatus is one rule of the rewrite table, as the API reports it.
+type RewriteStatus struct {
+	Network    string `json:"network"`
+	LocalTG    uint   `json:"localTg"`
+	UpstreamTG uint   `json:"upstreamTg"`
+}
+
+// Status is the state of the upstream gateway, as the API reports it.
+type Status struct {
+	Enabled  bool            `json:"enabled"`
+	Running  bool            `json:"running"`
+	Links    []LinkStatus    `json:"links"`
+	Rewrites []RewriteStatus `json:"rewrites"`
+}
+
+// noteUp records that the link came up at now.
+func (l *linkStats) noteUp(now time.Time) {
+	l.mu.Lock()
+	l.since = now
+	l.reason = ""
+	l.mu.Unlock()
+}
+
+// noteDown records that the link went down at now, and why.
+func (l *linkStats) noteDown(now time.Time, reason string) {
+	l.mu.Lock()
+	l.since = time.Time{}
+	l.reason = reason
+	l.mu.Unlock()
+}
+
+// noteRx records a burst that came from the master on talkgroup tg.
+func (l *linkStats) noteRx(now time.Time, tg uint) {
+	l.mu.Lock()
+	l.rxBursts++
+	if l.rxTG == nil {
+		l.rxTG = map[uint]uint64{}
+	}
+	l.rxTG[tg]++
+	l.lastHeard = now
+	l.mu.Unlock()
+}
+
+// noteTx records a burst that went to the master on talkgroup tg.
+func (l *linkStats) noteTx(now time.Time, tg uint) {
+	l.mu.Lock()
+	l.txBursts++
+	if l.txTG == nil {
+		l.txTG = map[uint]uint64{}
+	}
+	l.txTG[tg]++
+	l.lastHeard = now
+	l.mu.Unlock()
 }
 
 // MakeServer creates the upstream gateway server. It does not open sockets
@@ -160,11 +260,14 @@ func (s *Server) Start(ctx context.Context) error {
 	s.hubHandle = s.hub.RegisterServer(hub.ServerConfig{Name: serverName, Role: hub.RolePeer})
 
 	// Subscribe to the local talkgroups named in the rewrite table, so that
-	// hub traffic on them is available for sending upstream.
+	// hub traffic on them is available for sending upstream, and to the
+	// private topic, so that private calls and text messages reach the
+	// networks too.
 	feed := s.pubsub.Feed()
 	for _, tg := range s.rewrites.subscribedLocal() {
 		feed.Add("hub:packets:talkgroup:" + strconv.FormatUint(uint64(tg), 10))
 	}
+	feed.Add(hub.PrivateTopic)
 
 	s.wg.Add(3 + len(s.uplinks))
 	go s.drainPeerPackets(ctx)
@@ -224,13 +327,14 @@ func (s *Server) drainPeerPackets(ctx context.Context) {
 // newUplink opens a UDP socket and prepares the peer state machine for one
 // upstream network.
 func newUplink(c clock.Clock, n *config.UpstreamNetwork) (*uplink, error) {
-	if n.Address == "" {
-		return nil, errors.New("address is empty")
+	host, err := hostOf(n.Address)
+	if err != nil {
+		return nil, err
 	}
 	if n.ID == 0 {
 		return nil, errors.New("repeater ID is zero")
 	}
-	remote, err := net.ResolveUDPAddr("udp", net.JoinHostPort(n.Address, strconv.Itoa(n.Port)))
+	remote, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(n.Port)))
 	if err != nil {
 		return nil, fmt.Errorf("resolving address: %w", err)
 	}
@@ -277,6 +381,17 @@ func newUplink(c clock.Clock, n *config.UpstreamNetwork) (*uplink, error) {
 		dialect: dialect,
 		epoch:   c.Now(),
 	}, nil
+}
+
+// hostOf returns the host of an address that an admin typed, so that a
+// pasted URL such as https://dmr.example.org/ still reaches the master.
+// The port stays in the Port setting; a port in the address is dropped.
+func hostOf(address string) (string, error) {
+	s := config.UpstreamHost(address)
+	if s == "" {
+		return "", errors.New("address is empty")
+	}
+	return s, nil
 }
 
 // buildRPTC constructs the 302/306-octet login configuration message.
@@ -396,9 +511,11 @@ func (s *Server) handlePeerOutput(ctx context.Context, name string, u *uplink, n
 		}
 	case dmrdsession.OutputUp:
 		u.up.Store(true)
+		u.stats.noteUp(s.clock.Now())
 		slog.Info("Upstream link up", "network", name, "id", u.cfg.ID)
 	case dmrdsession.OutputDown:
 		if u.up.Swap(false) {
+			u.stats.noteDown(s.clock.Now(), o.Reason.String())
 			slog.Info("Upstream link down", "network", name, "reason", o.Reason.String())
 		}
 	case dmrdsession.OutputData:
@@ -409,19 +526,24 @@ func (s *Server) handlePeerOutput(ctx context.Context, name string, u *uplink, n
 	}
 }
 
-// handleUpstreamData injects a DMRD burst from an upstream into the hub,
-// rewriting its destination talkgroup from the upstream TG to the local TG.
+// handleUpstreamData injects a DMRD burst from an upstream into the hub.
+// A group burst has its destination talkgroup rewritten from the upstream
+// TG to the local TG; a private call or a text message keeps the radio ID
+// that it names, so the hub delivers it to that radio.
 func (s *Server) handleUpstreamData(ctx context.Context, name string, u *uplink, data []byte, now time.Duration) {
 	d, err := dmrd.DecodeData(data)
 	if err != nil {
 		return
 	}
-	localTG, ok := s.rewrites.inboundLocal(name, uint(d.Destination))
-	if !ok {
-		return
-	}
 	packet := models.PacketFromData(&d, d.Size > dmrconst.MMDVMPacketLength)
-	packet.Dst = localTG
+	if packet.GroupCall {
+		localTG, ok := s.rewrites.inboundLocal(name, uint(d.Destination))
+		if !ok {
+			return
+		}
+		packet.Dst = localTG
+	}
+	u.stats.noteRx(s.clock.Now(), uint(d.Destination))
 	s.hub.RouteStreamAt(ctx, packet, serverName, u.epoch.Add(now), func(admitted bool) {
 		if admitted {
 			s.guard.note(name, packet)
@@ -463,6 +585,13 @@ func (s *Server) egressMessage(msg pubsub.Message) {
 	packet.TrackID = raw.TrackID
 	packet.Codec, packet.Copy, packet.HasCopy = raw.Codec, raw.Copy, raw.HasCopy
 
+	// A private call or a text message names a radio, not a talkgroup. It
+	// goes to every network, which routes it to the radio it names.
+	if !packet.GroupCall {
+		s.sendPrivateUpstream(packet)
+		return
+	}
+
 	targets := s.rewrites.outboundTargets(packet.Dst)
 	if len(targets) == 0 {
 		return
@@ -503,5 +632,77 @@ func (s *Server) sendUpstream(name string, u *uplink, packet models.Packet, upst
 	raw := out.Encode()
 	if _, err := u.conn.WriteToUDP(raw, u.remote); err != nil {
 		slog.Debug("Upstream egress write error", "network", name, "error", err)
+		return
 	}
+	u.stats.noteTx(s.clock.Now(), upstreamTG)
+}
+
+// sendPrivateUpstream sends a private call or a text message to every
+// network that is logged in. The destination stays the radio ID, which the
+// network routes to the radio it names.
+func (s *Server) sendPrivateUpstream(packet models.Packet) {
+	if !s.rewrites.private {
+		return
+	}
+	for name, u := range s.uplinks {
+		if !u.up.Load() {
+			continue
+		}
+		if s.guard.holds(name, packet) {
+			continue
+		}
+		out := packet
+		out.Repeater = uint(u.cfg.ID)
+		raw := out.Encode()
+		if _, err := u.conn.WriteToUDP(raw, u.remote); err != nil {
+			slog.Debug("Upstream private write error", "network", name, "error", err)
+			continue
+		}
+		u.stats.noteTx(s.clock.Now(), packet.Dst)
+	}
+}
+
+// Status returns the state of the gateway and its links, for the API.
+func (s *Server) Status() Status {
+	st := Status{Enabled: s.cfg != nil && s.cfg.Enabled, Running: s.hubHandle != nil}
+	if s.cfg != nil {
+		for _, r := range s.cfg.Rewrites {
+			st.Rewrites = append(st.Rewrites, RewriteStatus{Network: r.Network, LocalTG: r.LocalTG, UpstreamTG: r.UpstreamTG})
+		}
+	}
+	names := make([]string, 0, len(s.uplinks))
+	for name := range s.uplinks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	now := s.clock.Now()
+	for _, name := range names {
+		u := s.uplinks[name]
+		u.stats.mu.Lock()
+		link := LinkStatus{
+			Name: name, Up: u.up.Load(),
+			Reason:   u.stats.reason,
+			RxBursts: u.stats.rxBursts, TxBursts: u.stats.txBursts,
+		}
+		if !u.stats.since.IsZero() {
+			link.Since = now.Sub(u.stats.since).Seconds()
+		}
+		if !u.stats.lastHeard.IsZero() {
+			link.LastHeard = now.Sub(u.stats.lastHeard).Seconds()
+		}
+		tgs := make(map[uint]struct{}, len(u.stats.rxTG)+len(u.stats.txTG))
+		for tg := range u.stats.rxTG {
+			tgs[tg] = struct{}{}
+		}
+		for tg := range u.stats.txTG {
+			tgs[tg] = struct{}{}
+		}
+		for tg := range tgs {
+			link.Talkgroups = append(link.Talkgroups, TGStatus{TG: tg, Rx: u.stats.rxTG[tg], Tx: u.stats.txTG[tg]})
+		}
+		u.stats.mu.Unlock()
+		sort.Slice(link.Talkgroups, func(i, j int) bool { return link.Talkgroups[i].TG < link.Talkgroups[j].TG })
+		st.Links = append(st.Links, link)
+	}
+	return st
 }

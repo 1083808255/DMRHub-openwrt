@@ -38,6 +38,10 @@ type rewriteTable struct {
 	// localTGs is the set of local talkgroups that must be subscribed to
 	// on the hub packet bus to catch outbound traffic.
 	localTGs map[uint]struct{}
+	// private is whether any enabled network takes private calls and text
+	// messages. A rule that maps no talkgroup cannot carry them, so this
+	// is set from the networks alone.
+	private bool
 }
 
 type rewriteTarget struct {
@@ -63,6 +67,7 @@ func buildRewriteTable(cfg *config.Upstreams, active map[string]struct{}) *rewri
 	if cfg == nil {
 		return t
 	}
+	t.private = len(active) > 0
 	for _, r := range cfg.Rewrites {
 		if r.LocalTG == 0 || r.UpstreamTG == 0 {
 			continue

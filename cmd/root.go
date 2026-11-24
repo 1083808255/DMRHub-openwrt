@@ -635,7 +635,7 @@ func initializeServers(ctx context.Context, live *liveconfig.Live, hub *hub.Hub,
 	sm.modem = &modem.Replicas{ID: instanceID, PubSub: pubsubClient, KV: kvStore, Host: sm.dmr}
 	sm.modem.Start(ctx)
 
-	httpServer := http.MakeServer(ctx, cfg, hub, database, pubsubClient, ready, ns, version, commit, http.WithLiveConfig(live), http.WithPluginEngine(pluginEngine), http.WithKV(kvStore), http.WithModem(sm.modem))
+	httpServer := http.MakeServer(ctx, cfg, hub, database, pubsubClient, ready, ns, version, commit, http.WithLiveConfig(live), http.WithPluginEngine(pluginEngine), http.WithKV(kvStore), http.WithModem(sm.modem), http.WithUpstreamStatus(sm.dmr))
 	err = httpServer.Start()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start HTTP server: %w", err)

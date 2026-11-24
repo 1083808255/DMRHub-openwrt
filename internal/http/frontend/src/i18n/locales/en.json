@@ -2207,5 +2207,19 @@
   "the upstream talkgroup": "the upstream talkgroup",
   "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.": "Some settings on this tab are not valid: {reason} Fix the marked fields and save again.",
   "this setting takes effect at the start of DMRHub only; set it in the config file or the environment of the deployment": "this setting takes effect at the start of DMRHub only; set it in the config file or the environment of the deployment",
-  "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it": "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it"
+  "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it": "this setting is set by the deployment, in the config file, the environment or a flag, and Setup cannot change it",
+  "Network {n}: enter a host name or IP address with no scheme or path, such as master.brandmeister.network.": "Network {n}: enter a host name or IP address with no scheme or path, such as master.brandmeister.network.",
+  "The host name or IP address only, with no https:// and no path. The port goes in the field below.": "The host name or IP address only, with no https:// and no path. The port goes in the field below.",
+  "each upstream network needs a name of its own, which the rewrite table refers to": "each upstream network needs a name of its own, which the rewrite table refers to",
+  "enter a host name or IP address with no scheme or path, such as master.brandmeister.network": "enter a host name or IP address with no scheme or path, such as master.brandmeister.network",
+  "enter the repeater ID that this hub logs in to the network with": "enter the repeater ID that this hub logs in to the network with",
+  "the port must be a whole number from 1 to 65535": "the port must be a whole number from 1 to 65535",
+  "each rewrite rule needs a talkgroup of 1 to 16777215, other than 4000, on both sides": "each rewrite rule needs a talkgroup of 1 to 16777215, other than 4000, on both sides",
+  "the rewrite names a network that is not in the list": "the rewrite names a network that is not in the list",
+  "Logged in": "Logged in",
+  "for {time}": "for {time}",
+  "From upstream: {n} bursts. To upstream: {m} bursts.": "From upstream: {n} bursts. To upstream: {m} bursts.",
+  "Last call {time} ago": "Last call {time} ago",
+  "From upstream": "From upstream",
+  "To upstream": "To upstream"
 }
