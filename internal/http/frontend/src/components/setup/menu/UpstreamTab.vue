@@ -120,15 +120,29 @@
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Password') }}</span>
-              <ShadInput
-                type="password"
-                :model-value="n.password"
-                :disabled="locked"
-                :placeholder="passwordsSet[i] ? $t('Already saved') : $t('Required by most networks')"
-                :aria-label="$t('Password of network {n}', { n: i + 1 })"
-                :data-test="`upstream-network-password-${i}`"
-                @update:model-value="(v: string | number) => setNetwork(i, 'password', String(v))"
-              />
+              <div class="relative">
+                <ShadInput
+                  :type="shown.has(i) ? 'text' : 'password'"
+                  class="pr-10"
+                  :model-value="n.password"
+                  :disabled="locked"
+                  :placeholder="passwordsSet[i] ? $t('Already saved') : $t('Required by most networks')"
+                  :aria-label="$t('Password of network {n}', { n: i + 1 })"
+                  :data-test="`upstream-network-password-${i}`"
+                  @update:model-value="(v: string | number) => setNetwork(i, 'password', String(v))"
+                />
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
+                  :aria-label="shown.has(i) ? $t('Hide the password') : $t('Show the password')"
+                  :title="shown.has(i) ? $t('Hide the password') : $t('Show the password')"
+                  :data-test="`upstream-network-password-toggle-${i}`"
+                  @click="toggleShown(i)"
+                >
+                  <EyeOff v-if="shown.has(i)" class="size-4" />
+                  <Eye v-else class="size-4" />
+                </button>
+              </div>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Callsign') }}</span>
@@ -248,6 +262,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { Eye, EyeOff } from 'lucide-vue-next';
 import SettingNote from '@/components/setup/SettingNote.vue';
 import SourceChips from '@/components/setup/menu/SourceChips.vue';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -297,6 +312,19 @@ const setEnabled = (v: boolean) => commit({ ...value.value, enabled: v });
 const setNetwork = (i: number, key: keyof UpstreamNetworkRow, v: unknown) =>
   commit({ ...value.value, networks: value.value.networks.map((n, j) => (j === i ? { ...n, [key]: v } : n)) });
 const atLimit = computed(() => value.value.networks.length >= MAX_NETWORKS);
+
+// shown holds the indexes of the passwords the admin revealed, so a typed
+// password can be checked against the one the network expects.
+const shown = ref(new Set<number>());
+const toggleShown = (i: number) => {
+  const next = new Set(shown.value);
+  if (next.has(i)) {
+    next.delete(i);
+  } else {
+    next.add(i);
+  }
+  shown.value = next;
+};
 const addNetwork = () => {
   if (value.value.networks.length >= MAX_NETWORKS) {
     return;

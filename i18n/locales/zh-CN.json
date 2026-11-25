@@ -2232,5 +2232,7 @@
   "Browser radio": "浏览器电台",
   "At most {n} upstream networks can be linked.": "最多只能连接 {n} 个上游网络。",
   "A hub links to at most {n} upstream networks.": "一个枢纽最多连接 {n} 个上游网络。",
-  "a hub links to at most 5 upstream networks": "一个枢纽最多连接 5 个上游网络"
+  "a hub links to at most 5 upstream networks": "一个枢纽最多连接 5 个上游网络",
+  "Show the password": "显示密码",
+  "Hide the password": "隐藏密码"
 }

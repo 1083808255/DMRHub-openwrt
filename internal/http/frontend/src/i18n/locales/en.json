@@ -2232,5 +2232,7 @@
   "Browser radio": "Browser radio",
   "At most {n} upstream networks can be linked.": "At most {n} upstream networks can be linked.",
   "A hub links to at most {n} upstream networks.": "A hub links to at most {n} upstream networks.",
-  "a hub links to at most 5 upstream networks": "a hub links to at most 5 upstream networks"
+  "a hub links to at most 5 upstream networks": "a hub links to at most 5 upstream networks",
+  "Show the password": "Show the password",
+  "Hide the password": "Hide the password"
 }
