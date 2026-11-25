@@ -66,6 +66,9 @@ export type CallRow = {
   kind?: string;
   sub_kind?: string;
   source_id?: number;
+  /** transport is the server the call came in on, such as mmdvm or
+   * "upstream:<network>" for a call forwarded from an upstream network. */
+  transport?: string;
   bursts?: number;
   fid?: number | null;
   opcode?: number | null;

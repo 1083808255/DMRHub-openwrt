@@ -31,6 +31,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,11 +48,27 @@ import (
 )
 
 const (
-	serverName       = "upstream"
+	// serverPrefix names the servers this gateway registers, one per
+	// network, so that a call the hub records says which network it came
+	// from. The name is serverPrefix + the name of the network.
+	serverPrefix     = "upstream:"
 	readBufferSize   = 1000000
 	packetBufferSize = dmrdsession.MaxPacket + 1
 	tickInterval     = 100 * time.Millisecond
 )
+
+// serverOf returns the name this gateway registers for network.
+func serverOf(network string) string { return serverPrefix + network }
+
+// NetworkOf returns the network of an upstream server name, and false when
+// name is not one. The page shows it as where a call came from.
+func NetworkOf(name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, serverPrefix)
+	if !ok || rest == "" {
+		return "", false
+	}
+	return rest, true
+}
 
 // Server manages the upstream network links. It implements the manager's
 // DMRServer interface.
@@ -61,10 +78,11 @@ type Server struct {
 	pubsub pubsub.PubSub
 	cfg    *config.Upstreams
 
-	hubHandle *hub.ServerHandle
-	rewrites  *rewriteTable
-	uplinks   map[string]*uplink
-	guard     *loopbackGuard
+	// hubHandles are the registrations of this gateway, one per network.
+	hubHandles []*hub.ServerHandle
+	rewrites   *rewriteTable
+	uplinks    map[string]*uplink
+	guard      *loopbackGuard
 
 	done     chan struct{}
 	wg       sync.WaitGroup
@@ -257,7 +275,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.uplinks[n.Name] = u
 	}
 
-	s.hubHandle = s.hub.RegisterServer(hub.ServerConfig{Name: serverName, Role: hub.RolePeer})
+	// Register one server per network, so that a call the hub records says
+	// which network it came from.
+	for name := range s.uplinks {
+		s.hubHandles = append(s.hubHandles, s.hub.RegisterServer(hub.ServerConfig{Name: serverOf(name), Role: hub.RolePeer}))
+	}
 
 	// Subscribe to the local talkgroups named in the rewrite table, so that
 	// hub traffic on them is available for sending upstream, and to the
@@ -269,7 +291,8 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	feed.Add(hub.PrivateTopic)
 
-	s.wg.Add(3 + len(s.uplinks))
+	// drainPeerPackets adds the goroutine it starts for each network.
+	s.wg.Add(2 + 2*len(s.uplinks))
 	go s.drainPeerPackets(ctx)
 	go s.consumeEgress(ctx, feed)
 	for name, u := range s.uplinks {
@@ -285,7 +308,9 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		slog.Info("Stopping upstream gateway")
-		s.hub.UnregisterServer(serverName)
+		for _, h := range s.hubHandles {
+			s.hub.UnregisterServer(h.Name)
+		}
 		close(s.done)
 		s.closeUplinks()
 	})
@@ -307,20 +332,28 @@ func (s *Server) closeUplinks() {
 // with egress rules.
 func (s *Server) drainPeerPackets(ctx context.Context) {
 	defer s.wg.Done()
-	if s.hubHandle == nil {
+	if len(s.hubHandles) == 0 {
 		return
 	}
-	for {
-		select {
-		case <-s.done:
-			return
-		case <-ctx.Done():
-			return
-		case _, ok := <-s.hubHandle.Packets:
-			if !ok {
-				return
+	// One goroutine drains the channel of each network, so a slow network
+	// cannot hold up the bursts of another.
+	for _, h := range s.hubHandles {
+		s.wg.Add(1)
+		go func(h *hub.ServerHandle) {
+			defer s.wg.Done()
+			for {
+				select {
+				case <-s.done:
+					return
+				case <-ctx.Done():
+					return
+				case _, ok := <-h.Packets:
+					if !ok {
+						return
+					}
+				}
 			}
-		}
+		}(h)
 	}
 }
 
@@ -544,7 +577,7 @@ func (s *Server) handleUpstreamData(ctx context.Context, name string, u *uplink,
 		packet.Dst = localTG
 	}
 	u.stats.noteRx(s.clock.Now(), uint(d.Destination))
-	s.hub.RouteStreamAt(ctx, packet, serverName, u.epoch.Add(now), func(admitted bool) {
+	s.hub.RouteStreamAt(ctx, packet, serverOf(name), u.epoch.Add(now), func(admitted bool) {
 		if admitted {
 			s.guard.note(name, packet)
 		}
@@ -664,7 +697,7 @@ func (s *Server) sendPrivateUpstream(packet models.Packet) {
 
 // Status returns the state of the gateway and its links, for the API.
 func (s *Server) Status() Status {
-	st := Status{Enabled: s.cfg != nil && s.cfg.Enabled, Running: s.hubHandle != nil}
+	st := Status{Enabled: s.cfg != nil && s.cfg.Enabled, Running: len(s.hubHandles) > 0}
 	if s.cfg != nil {
 		for _, r := range s.cfg.Rewrites {
 			st.Rewrites = append(st.Rewrites, RewriteStatus{Network: r.Network, LocalTG: r.LocalTG, UpstreamTG: r.UpstreamTG})

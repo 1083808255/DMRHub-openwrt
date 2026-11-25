@@ -60,7 +60,9 @@ describe('UserDetailsPage', () => {
       },
     });
     await flushPromises();
-    expect(wrapper.text()).toMatch(/Registered\s*3 days ago/);
+    // The page shows the clock time of the registration, and how long ago
+    // it was only on hover.
+    expect(wrapper.text()).toMatch(/Registered\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
     wrapper.unmount();
   });
 

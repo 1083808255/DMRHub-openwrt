@@ -101,7 +101,8 @@ describe('RepeaterDetailsPage details', () => {
       created_at: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString(),
     });
     expect(text).toMatch(/Owner\s*N0DEMO/);
-    expect(text).toMatch(/Created\s*3 days ago/);
+    // The clock time of the creation, not how long ago it was.
+    expect(text).toMatch(/Created\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
   });
 
   it('shows no rules to a visitor who does not own the repeater', async () => {

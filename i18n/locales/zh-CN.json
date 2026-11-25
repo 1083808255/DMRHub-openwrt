@@ -2227,5 +2227,7 @@
   "Link state": "链路状态",
   "since {time}": "自 {time} 起",
   "Last call at {time}": "最后通话 {time}",
-  "The settings could not be read, so this tab shows nothing. Reload the page to try again.": "无法读取设置，因此此标签页没有显示任何内容。请刷新页面重试。"
+  "The settings could not be read, so this tab shows nothing. Reload the page to try again.": "无法读取设置，因此此标签页没有显示任何内容。请刷新页面重试。",
+  "Forwarded from the upstream network {name}": "由上游网络 {name} 转发",
+  "Browser radio": "浏览器电台"
 }

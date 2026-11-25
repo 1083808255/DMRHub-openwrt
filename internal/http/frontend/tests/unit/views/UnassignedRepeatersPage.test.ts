@@ -105,7 +105,8 @@ describe('UnassignedRepeatersPage', () => {
     expect(rows[0]!.text()).toContain('Modem, hotspot');
     expect(rows[0]!.text()).toContain('N6CALL');
     expect(rows[0]!.text()).toContain('438.8000 MHz');
-    expect(rows[0]!.text()).toContain('12 minutes ago');
+    // The clock time it connected, not how long ago that was.
+    expect(rows[0]!.text()).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
     expect(rows[0]!.text()).toContain('Oct 24, 2026');
     expect(rows[1]!.text()).toContain('Modem, repeater');
     expect(rows[1]!.text()).toContain('None');

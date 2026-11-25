@@ -125,7 +125,8 @@ describe('TalkgroupDetailsPage details', () => {
 
   it('shows when the talkgroup was made and its admins and NCOs', async () => {
     await page({ loggedIn: false }, false);
-    expect(lastText).toMatch(/Created\s*\d+ \w+ ago/);
+    // The clock time of the creation, not how long ago it was.
+    expect(lastText).toMatch(/Created\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
     expect(lastText).toContain('W9CALL');
     expect(lastText).toContain('W0CALL');
   });
