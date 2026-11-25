@@ -702,6 +702,11 @@ func (s *Server) Status() Status {
 			link.Talkgroups = append(link.Talkgroups, TGStatus{TG: tg, Rx: u.stats.rxTG[tg], Tx: u.stats.txTG[tg]})
 		}
 		u.stats.mu.Unlock()
+		if link.Talkgroups == nil {
+			// A link that carried nothing yet sends an empty list, not a
+			// null that the page would have to guard against.
+			link.Talkgroups = []TGStatus{}
+		}
 		sort.Slice(link.Talkgroups, func(i, j int) bool { return link.Talkgroups[i].TG < link.Talkgroups[j].TG })
 		st.Links = append(st.Links, link)
 	}

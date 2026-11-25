@@ -2226,5 +2226,6 @@
   "This network is off. Nothing is sent to it or received from it until this is on.": "此网络已关闭。在开启之前，不会向它发送任何内容，也不会从它接收任何内容。",
   "Link state": "链路状态",
   "since {time}": "自 {time} 起",
-  "Last call at {time}": "最后通话 {time}"
+  "Last call at {time}": "最后通话 {time}",
+  "The settings could not be read, so this tab shows nothing. Reload the page to try again.": "无法读取设置，因此此标签页没有显示任何内容。请刷新页面重试。"
 }

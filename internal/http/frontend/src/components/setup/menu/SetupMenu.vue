@@ -79,6 +79,13 @@
         </span>
         <span>{{ startNote }}</span>
       </div>
+      <div
+        v-if="!state.loaded"
+        class="rounded-[10px] border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive-foreground"
+        data-test="settings-not-loaded"
+      >
+        {{ $t('The settings could not be read, so this tab shows nothing. Reload the page to try again.') }}
+      </div>
       <template v-if="state.loaded">
         <TranscodingTab
           v-if="tab.custom === 'transcoding'"
@@ -92,7 +99,7 @@
         <UpstreamTab
           v-else-if="tab.custom === 'upstream'"
           :value="read(UPSTREAMS)"
-          :setting="state.settings[UPSTREAMS]"
+          :setting="state.settings[`${UPSTREAMS}.networks`]"
           :error="errors[UPSTREAMS]"
           :saves="saves"
           :wizard="wizard"

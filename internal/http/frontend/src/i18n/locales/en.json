@@ -2226,5 +2226,6 @@
   "This network is off. Nothing is sent to it or received from it until this is on.": "This network is off. Nothing is sent to it or received from it until this is on.",
   "Link state": "Link state",
   "since {time}": "since {time}",
-  "Last call at {time}": "Last call at {time}"
+  "Last call at {time}": "Last call at {time}",
+  "The settings could not be read, so this tab shows nothing. Reload the page to try again.": "The settings could not be read, so this tab shows nothing. Reload the page to try again."
 }

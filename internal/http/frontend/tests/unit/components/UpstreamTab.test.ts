@@ -124,6 +124,30 @@ describe('UpstreamTab per-network switch', () => {
     wrapper.unmount();
   });
 
+  // The gateway sends null for the talkgroups of a link that carried nothing
+  // yet. Reading .length of that null threw, which stopped the render of the
+  // whole tab: no network card and no Add button, while the settings were
+  // still there to fail validation on save.
+  it('shows the network inputs even when a link has no talkgroups', async () => {
+    mockAPI.get.mockResolvedValue({
+      data: {
+        enabled: true, running: true,
+        links: [
+          { name: 'CDN860', up: false, reason: 'Refused', rxBursts: 0, txBursts: 0, talkgroups: null },
+          { name: 'CQDMR', up: true, since: '2026-11-25T00:26:06.895755186Z', rxBursts: 0, txBursts: 0, talkgroups: null },
+        ],
+      },
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await flushPromises();
+    expect(wrapper.find('[data-test="upstream-network-add"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="upstream-network-0"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="upstream-network-1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="upstream-network-name-0"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="upstream-links"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it('puts the inputs above the link state, so a new network is not pushed out of view', async () => {
     mockAPI.get.mockResolvedValue({
       data: {

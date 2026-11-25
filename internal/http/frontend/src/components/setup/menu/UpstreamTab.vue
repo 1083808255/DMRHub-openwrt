@@ -314,7 +314,14 @@ const loadStatus = async () => {
     status.value = {
       enabled: data.enabled === true,
       running: data.running === true,
-      links: Array.isArray(data.links) ? data.links : [],
+      // The gateway sends null for a list that is empty, so guard every
+      // field the template reads: one null must not blank the whole tab.
+      links: (Array.isArray(data.links) ? data.links : []).map((l) => ({
+        ...l,
+        rxBursts: l.rxBursts ?? 0,
+        txBursts: l.txBursts ?? 0,
+        talkgroups: Array.isArray(l.talkgroups) ? l.talkgroups : [],
+      })),
     };
   } catch {
     // A gateway that is off has no state to show; keep the last one.
