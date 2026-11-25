@@ -264,6 +264,7 @@ type dMRShadow struct {
 	DisableRadioIDValidation *bool                `json:"disable-radio-id-validation" toml:"disable-radio-id-validation" yaml:"disable-radio-id-validation"`
 	RadioIDChecks            *radioIDChecksShadow `json:"radio-id-checks"             toml:"radio-id-checks"             yaml:"radio-id-checks"`
 	RadioIDURL               *string              `json:"radio-id-url"                toml:"radio-id-url"                yaml:"radio-id-url"`
+	RadioIDExtraURL          *string              `json:"radio-id-extra-url"          toml:"radio-id-extra-url"          yaml:"radio-id-extra-url"`
 	RepeaterIDURL            *string              `json:"repeater-id-url"             toml:"repeater-id-url"             yaml:"repeater-id-url"`
 	PublicAddress            *string              `json:"public-address"              toml:"public-address"              yaml:"public-address"`
 	Retention                *retentionShadow     `json:"retention"                   toml:"retention"                   yaml:"retention"`
@@ -448,6 +449,8 @@ func configApplyDefaults(cfg *Config, sep string, set configulator.SetOrigin) er
 	set("dmr.radio-id-checks.hotspot-ids", configulator.LayerDefault, "default tag")
 	cfg.DMR.RadioIDURL = "https://www.radioid.net/static/users.json"
 	set("dmr.radio-id-url", configulator.LayerDefault, "default tag")
+	cfg.DMR.RadioIDExtraURL = ""
+	set("dmr.radio-id-extra-url", configulator.LayerDefault, "default tag")
 	cfg.DMR.RepeaterIDURL = "https://www.radioid.net/static/rptrs.json"
 	set("dmr.repeater-id-url", configulator.LayerDefault, "default tag")
 	cfg.DMR.Retention.Messages = 0
@@ -1065,6 +1068,10 @@ func (s *configShadow) applyTo(cfg *Config, _ string, set configulator.SetOrigin
 		if s.DMR.RadioIDURL != nil {
 			cfg.DMR.RadioIDURL = *s.DMR.RadioIDURL
 			set("dmr.radio-id-url", configulator.LayerFile, file)
+		}
+		if s.DMR.RadioIDExtraURL != nil {
+			cfg.DMR.RadioIDExtraURL = *s.DMR.RadioIDExtraURL
+			set("dmr.radio-id-extra-url", configulator.LayerFile, file)
 		}
 		if s.DMR.RepeaterIDURL != nil {
 			cfg.DMR.RepeaterIDURL = *s.DMR.RepeaterIDURL
@@ -2217,6 +2224,10 @@ func configApplyEnv(cfg *Config, ec configulator.EnvContext, set configulator.Se
 	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "radio-id-url"); ok {
 		cfg.DMR.RadioIDURL = v
 		set("dmr.radio-id-url", configulator.LayerEnv, n)
+	}
+	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "radio-id-extra-url"); ok {
+		cfg.DMR.RadioIDExtraURL = v
+		set("dmr.radio-id-extra-url", configulator.LayerEnv, n)
 	}
 	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "repeater-id-url"); ok {
 		cfg.DMR.RepeaterIDURL = v

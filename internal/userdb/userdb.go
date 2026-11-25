@@ -24,6 +24,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ func newDB(compressed []byte, dateStr string) *dmrdb.DB[DMRUser] {
 		Presize:        250000,
 		EntityName:     "users",
 		Decode:         streamDecodeUsers,
+		DecodeRaw:      decodeUsersDat,
 	})
 }
 
@@ -244,6 +246,60 @@ func Update(url string) error {
 		return fmt.Errorf("userdb: %w", err)
 	}
 	return nil
+}
+
+// UpdateMerge fetches the supplement list and adds the IDs that the primary
+// list does not have. Existing entries stay as they are.
+func UpdateMerge(url string) error {
+	if strings.TrimSpace(url) == "" {
+		return nil
+	}
+	if err := userDB.UpdateMerge(url); err != nil {
+		return fmt.Errorf("userdb: %w", err)
+	}
+	return nil
+}
+
+// decodeUsersDat parses the semicolon separated dump that mirrors such as
+// radiowo.com serve, one user per line:
+//
+//	id;callsign;name;city;state;country;comment;
+//
+// The trailing fields may be empty. The name column holds the whole name,
+// so Surname stays empty and FName carries it, as the JSON dump splits
+// names differently and the callers of Get only read Callsign and City.
+func decodeUsersDat(data []byte, m *xsync.Map[uint, DMRUser]) (int, error) {
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Split(line, ";")
+		if len(fields) < 6 {
+			return count, fmt.Errorf("%w: line %q does not have 6 fields", ErrDecodingDB, line)
+		}
+		id, err := strconv.ParseUint(strings.TrimSpace(fields[0]), 10, 32)
+		if err != nil {
+			return count, fmt.Errorf("%w: line %q has an id that is not a number: %w", ErrDecodingDB, line, err)
+		}
+		user := DMRUser{
+			ID:       uint(id),
+			RadioID:  uint(id),
+			Callsign: strings.TrimSpace(fields[1]),
+			Name:     strings.TrimSpace(fields[2]),
+			FName:    strings.TrimSpace(fields[2]),
+			City:     strings.TrimSpace(fields[3]),
+			State:    strings.TrimSpace(fields[4]),
+			Country:  strings.TrimSpace(fields[5]),
+		}
+		if user.ID == 0 || user.Callsign == "" {
+			continue
+		}
+		m.Store(user.ID, user)
+		count++
+	}
+	return count, nil
 }
 
 func GetDate() (time.Time, error) {

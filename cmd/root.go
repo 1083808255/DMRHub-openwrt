@@ -402,6 +402,10 @@ func scheduleDailyUpdate(scheduler gocron.Scheduler, name string, url func() str
 func setupDMRDatabaseJobs(current config.Source, scheduler gocron.Scheduler) {
 	scheduleDailyUpdate(scheduler, "repeater", func() string { return current.Get().DMR.RepeaterIDURL }, repeaterdb.Update)
 	scheduleDailyUpdate(scheduler, "user", func() string { return current.Get().DMR.RadioIDURL }, userdb.Update)
+	// The supplement list only fills the IDs the primary list misses, so it
+	// always runs after the primary one, which the scheduler orders by start
+	// time and the merge tolerates either order anyway.
+	scheduleDailyUpdate(scheduler, "user-extra", func() string { return current.Get().DMR.RadioIDExtraURL }, userdb.UpdateMerge)
 }
 
 // serverManager holds all the server instances and their dependencies

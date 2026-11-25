@@ -213,6 +213,7 @@ const labels: Record<string, string> = {
   'http.session-length': 'Login lasts',
   'visibility': 'Visitors who are not logged in see',
   'dmr.radio-id-url': 'Radio ID URL',
+  'dmr.radio-id-extra-url': 'Radio ID extra URL',
   'dmr.repeater-id-url': 'Repeater ID URL',
   'dmr.public-address': 'Public server address',
   'dmr.retention.messages': 'Keep messages',

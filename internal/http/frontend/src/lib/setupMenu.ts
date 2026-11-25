@@ -487,7 +487,8 @@ export const TABS: TabDef[] = [
       {
         get title() { return t('Radio IDs'); },
         rows: [
-          { path: 'dmr.radio-id-url', get label() { return t('Radio ID list'); }, kind: 'text', get help() { return t('In the format of RadioID.net.'); } },
+          { path: 'dmr.radio-id-url', get label() { return t('Radio ID list'); }, kind: 'text', get help() { return t('In the format of RadioID.net, or a semicolon separated dump such as the dmrid.dat of radiowo.com.'); } },
+          { path: 'dmr.radio-id-extra-url', get label() { return t('Extra radio ID list'); }, kind: 'text', get help() { return t('Optional second list that only fills the IDs the primary list misses, such as the dmrid.dat of radiowo.com when the primary list is RadioID.net.'); } },
           { path: 'dmr.repeater-id-url', get label() { return t('Repeater ID list'); }, kind: 'text', get help() { return t('In the format of RadioID.net.'); } },
         ],
       },
