@@ -65,16 +65,20 @@ func (p *POSTConfig) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 	var s postSecrets
-	// The secrets of the payload are nested under "secrets", so read them
-	// from there: at the top level they would all be nil, and a password
-	// the page sent would never reach the config.
+	// The page sends the secrets nested under "secrets", and an older client
+	// sends them at the top level. Read the nested form, and fall back to
+	// the top level when it is absent, so neither loses a secret.
 	var wrapped struct {
-		Secrets postSecrets `json:"secrets"`
+		Secrets *postSecrets `json:"secrets"`
 	}
 	if err := json.Unmarshal(b, &wrapped); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
-	s = wrapped.Secrets
+	if wrapped.Secrets != nil {
+		s = *wrapped.Secrets
+	} else if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
 	p.Secret, p.PasswordSalt, p.HIBPAPIKey = s.Secret, s.PasswordSalt, s.HIBPAPIKey
 	p.SMTPPassword, p.DatabasePassword, p.RedisPassword = s.SMTP.Password, s.Database.Password, s.Redis.Password
 	if s.Upstreams.Passwords != nil {
