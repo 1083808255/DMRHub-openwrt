@@ -92,6 +92,13 @@ type upstreamNetworkShadow struct {
 	ColorCode   *int    `json:"color-code"   toml:"color-code"   yaml:"color-code"`
 	Slots       *int    `json:"slots"        toml:"slots"        yaml:"slots"`
 	Options     *string `json:"options"      toml:"options"      yaml:"options"`
+	Latitude    *string `json:"latitude"     toml:"latitude"     yaml:"latitude"`
+	Longitude   *string `json:"longitude"    toml:"longitude"    yaml:"longitude"`
+	Location    *string `json:"location"     toml:"location"     yaml:"location"`
+	Description *string `json:"description"  toml:"description"  yaml:"description"`
+	URL         *string `json:"url"          toml:"url"          yaml:"url"`
+	SoftwareID  *string `json:"software-id"  toml:"software-id"  yaml:"software-id"`
+	PackageID   *string `json:"package-id"   toml:"package-id"   yaml:"package-id"`
 }
 
 type upstreamRewriteShadow struct {
@@ -814,6 +821,34 @@ func (s *configShadow) applyTo(cfg *Config, _ string, set configulator.SetOrigin
 					if esh.Options != nil {
 						e.Options = *esh.Options
 						set(idx+".options", configulator.LayerFile, file)
+					}
+					if esh.Latitude != nil {
+						e.Latitude = *esh.Latitude
+						set(idx+".latitude", configulator.LayerFile, file)
+					}
+					if esh.Longitude != nil {
+						e.Longitude = *esh.Longitude
+						set(idx+".longitude", configulator.LayerFile, file)
+					}
+					if esh.Location != nil {
+						e.Location = *esh.Location
+						set(idx+".location", configulator.LayerFile, file)
+					}
+					if esh.Description != nil {
+						e.Description = *esh.Description
+						set(idx+".description", configulator.LayerFile, file)
+					}
+					if esh.URL != nil {
+						e.URL = *esh.URL
+						set(idx+".url", configulator.LayerFile, file)
+					}
+					if esh.SoftwareID != nil {
+						e.SoftwareID = *esh.SoftwareID
+						set(idx+".software-id", configulator.LayerFile, file)
+					}
+					if esh.PackageID != nil {
+						e.PackageID = *esh.PackageID
+						set(idx+".package-id", configulator.LayerFile, file)
 					}
 					out[i] = e
 				}

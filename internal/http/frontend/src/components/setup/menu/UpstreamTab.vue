@@ -124,12 +124,12 @@
                 <ShadInput
                   :type="shown.has(i) ? 'text' : 'password'"
                   class="pr-10"
-                  :model-value="n.password"
+                  :model-value="fieldText(i)"
                   :disabled="locked"
                   :placeholder="passwordsSet[i] ? $t('Already saved') : $t('Required by most networks')"
                   :aria-label="$t('Password of network {n}', { n: i + 1 })"
                   :data-test="`upstream-network-password-${i}`"
-                  @update:model-value="(v: string | number) => setNetwork(i, 'password', String(v))"
+                  @update:model-value="(v: string | number) => onPassword(i, v)"
                 />
                 <button
                   type="button"
@@ -137,12 +137,15 @@
                   :aria-label="shown.has(i) ? $t('Hide the password') : $t('Show the password')"
                   :title="shown.has(i) ? $t('Hide the password') : $t('Show the password')"
                   :data-test="`upstream-network-password-toggle-${i}`"
-                  @click="toggleShown(i)"
+                  @click="toggleShown(i, n.password)"
                 >
                   <EyeOff v-if="shown.has(i)" class="size-4" />
                   <Eye v-else class="size-4" />
                 </button>
               </div>
+              <span class="mt-1 block text-xs text-muted-foreground" :data-test="`upstream-network-password-note-${i}`">
+                {{ passwordNote(i) }}
+              </span>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Callsign') }}</span>
@@ -169,8 +172,38 @@
               <span class="mb-1 block font-medium">{{ $t('Transmit frequency (Hz)') }}</span>
               <ShadInput :model-value="String(n.txFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Transmit frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-tx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'txFrequency', v)" />
             </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Latitude') }}</span>
+              <ShadInput :model-value="n.latitude" :disabled="locked" placeholder="+29.6800" :aria-label="$t('Latitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-latitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'latitude', String(v))" />
+              <span class="mt-1 block text-xs text-muted-foreground">{{ $t('Sent in the login. A master reads it as a number, so it must not be empty.') }}</span>
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Longitude') }}</span>
+              <ShadInput :model-value="n.longitude" :disabled="locked" placeholder="+106.5900" :aria-label="$t('Longitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-longitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'longitude', String(v))" />
+              <span class="mt-1 block text-xs text-muted-foreground">{{ $t('Sent in the login. A master reads it as a number, so it must not be empty.') }}</span>
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Location') }}</span>
+              <ShadInput :model-value="n.location" :disabled="locked" :placeholder="$t('Nowhere')" :aria-label="$t('Location of network {n}', { n: i + 1 })" :data-test="`upstream-network-location-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'location', String(v))" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Description') }}</span>
+              <ShadInput :model-value="n.description" :disabled="locked" :placeholder="$t('MMDVM Hotspot')" :aria-label="$t('Description of network {n}', { n: i + 1 })" :data-test="`upstream-network-description-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'description', String(v))" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Info URL') }}</span>
+              <ShadInput :model-value="n.url" :disabled="locked" :placeholder="$t('The info page of this network')" :aria-label="$t('URL of network {n}', { n: i + 1 })" :data-test="`upstream-network-url-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'url', String(v))" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Software ID') }}</span>
+              <ShadInput :model-value="n.softwareId" :disabled="locked" placeholder="20250828" :aria-label="$t('Software ID of network {n}', { n: i + 1 })" :data-test="`upstream-network-software-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'softwareId', String(v))" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium">{{ $t('Package ID') }}</span>
+              <ShadInput :model-value="n.packageId" :disabled="locked" placeholder="MMDVM_MMDVM_HS_Dual_Hat" :aria-label="$t('Package ID of network {n}', { n: i + 1 })" :data-test="`upstream-network-package-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'packageId', String(v))" />
+              <span class="mt-1 block text-xs text-muted-foreground">{{ $t('These identity fields go out in the login to this master. Masters such as BrandMeister refuse a login whose text fields are blank, so blank ones send the defaults shown here.') }}</span>
+            </label>
             <label class="block text-sm md:col-span-2 lg:col-span-3">
-              <span class="mb-1 block font-medium">{{ $t('Login options') }}</span>
               <ShadInput :model-value="n.options" :disabled="locked" placeholder="TS2=91" :aria-label="$t('Options of network {n}', { n: i + 1 })" :data-test="`upstream-network-options-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'options', String(v))" />
               <span class="mt-1 block text-xs text-muted-foreground">{{ $t('Sent to the master after login, such as TS2=91 for a static talkgroup on slot 2.') }}</span>
             </label>
@@ -195,8 +228,8 @@
               <span v-if="link.up && link.since" class="text-xs text-muted-foreground" :title="timeAgo(link.since)">
                 {{ $t('since {time}', { time: clockTime(link.since) }) }}
               </span>
-              <span v-else-if="link.reason" class="text-xs text-muted-foreground">
-                {{ link.reason }}
+              <span v-else class="text-xs text-muted-foreground" :data-test="`upstream-link-why-${li}`">
+                {{ linkDownText(link.reason, link.stage) }}
               </span>
             </div>
             <div class="mt-1 text-xs text-muted-foreground">
@@ -270,10 +303,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input as ShadInput } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
-  MAX_NETWORKS, emptyUpstreamNetwork, emptyUpstreamRewrite, upstreamOf,
+  MAX_NETWORKS, emptyUpstreamNetwork, emptyUpstreamRewrite, linkDownText, upstreamOf,
   type UpstreamNetworkRow, type UpstreamRewriteRow, type UpstreamValue,
 } from '@/lib/upstream';
 import { fieldLocked } from '@/lib/setupMenu';
+import { t } from '@/i18n';
 import type { Setting } from '@/lib/setupState';
 import { formatDateTime, formatDistanceToNowStrictLocal } from '@/lib/dateFormat';
 import API from '@/services/API';
@@ -284,6 +318,7 @@ type LinkStatus = {
   since?: string;
   lastHeard?: string;
   reason?: string;
+  stage?: string;
   rxBursts: number;
   txBursts: number;
   talkgroups: { tg: number; rx: number; tx: number }[];
@@ -316,12 +351,80 @@ const atLimit = computed(() => value.value.networks.length >= MAX_NETWORKS);
 // shown holds the indexes of the passwords the admin revealed, so a typed
 // password can be checked against the one the network expects.
 const shown = ref(new Set<number>());
-const toggleShown = (i: number) => {
+
+// saved holds the password the hub has on disk, read only when the eye is
+// pressed on a field the admin has not typed into. The config API keeps the
+// secrets back, so an empty field would otherwise reveal nothing at all and
+// the admin could not tell a mistyped password from one the master refuses.
+const saved = ref<Record<number, string>>({});
+const reading = ref(new Set<number>());
+
+// fieldText is what the password box shows: what the admin typed, or, while
+// the eye is open on an untouched field, the password the hub will send.
+// The saved text is display only and never enters the rows, so pressing the
+// eye cannot turn into a save of a password the admin did not type.
+const fieldText = (i: number): string => {
+  const typed = value.value.networks[i]?.password ?? '';
+  if (typed || !shown.value.has(i)) return typed;
+  return saved.value[i] ?? '';
+};
+
+// onPassword keeps the rows holding only what the admin typed. Clearing the
+// box while the saved password is on show means "keep the saved one", which
+// is an empty row, not an empty password sent to the master.
+const onPassword = (i: number, v: string | number) => {
+  const typed = String(v);
+  const showingSaved = shown.value.has(i) && !value.value.networks[i]?.password;
+  if (showingSaved && (typed === '' || typed === (saved.value[i] ?? ''))) {
+    setNetwork(i, 'password', '');
+    return;
+  }
+  setNetwork(i, 'password', typed);
+  // What was read back is now out of date: the next look must ask again.
+  if (saved.value[i] !== undefined) {
+    const next = { ...saved.value };
+    delete next[i];
+    saved.value = next;
+  }
+};
+
+const passwordNote = (i: number): string => {
+  if (!passwordsSet.value[i]) {
+    return t('No password is saved yet. Type the one this network gave you, then save.');
+  }
+  if (reading.value.has(i)) {
+    return t('Reading the saved password from the hub…');
+  }
+  if (shown.value.has(i) && !value.value.networks[i]?.password) {
+    return t('This is the password the hub has saved and will send. Type over it to change it, or clear it and save to keep this one.');
+  }
+  return t('A password is saved. The eye shows the saved password, or what you type; leave the field empty to keep the saved one.');
+};
+
+const readSaved = async (i: number) => {
+  if (saved.value[i] !== undefined || reading.value.has(i)) return;
+  reading.value = new Set(reading.value).add(i);
+  try {
+    const res = await API.get(`/config/upstream/password/${i}`);
+    const pw = (res.data as { password?: string }).password ?? '';
+    saved.value = { ...saved.value, [i]: pw };
+  } catch {
+    // A hub that will not hand the password back leaves the field empty;
+    // the note still says one is saved, so nothing looks lost.
+  } finally {
+    const next = new Set(reading.value);
+    next.delete(i);
+    reading.value = next;
+  }
+};
+
+const toggleShown = (i: number, typed: string) => {
   const next = new Set(shown.value);
   if (next.has(i)) {
     next.delete(i);
   } else {
     next.add(i);
+    if (!typed && passwordsSet.value[i]) void readSaved(i);
   }
   shown.value = next;
 };
@@ -331,8 +434,32 @@ const addNetwork = () => {
   }
   commit({ ...value.value, networks: [...value.value.networks, emptyUpstreamNetwork()] });
 };
-const removeNetwork = (i: number) =>
+const removeNetwork = (i: number) => {
+  // The revealed passwords are held by row number, so every row after the
+  // one that goes must move with it, or the eye would show the password of
+  // a different network.
+  const move = <T,>(m: Record<number, T>): Record<number, T> => {
+    const out: Record<number, T> = {};
+    for (const [k, v] of Object.entries(m)) {
+      const at = Number(k);
+      if (at < i) out[at] = v;
+      else if (at > i) out[at - 1] = v;
+    }
+    return out;
+  };
+  saved.value = move(saved.value);
+  const shift = (s: Set<number>): Set<number> => {
+    const out = new Set<number>();
+    for (const at of s) {
+      if (at < i) out.add(at);
+      else if (at > i) out.add(at - 1);
+    }
+    return out;
+  };
+  shown.value = shift(shown.value);
+  reading.value = shift(reading.value);
   commit({ ...value.value, networks: value.value.networks.filter((_, j) => j !== i) });
+};
 const setRewrite = (i: number, key: keyof UpstreamRewriteRow, v: unknown) =>
   commit({ ...value.value, rewrites: value.value.rewrites.map((r, j) => (j === i ? { ...r, [key]: v } : r)) });
 const addRewrite = () => commit({ ...value.value, rewrites: [...value.value.rewrites, emptyUpstreamRewrite()] });
@@ -340,7 +467,9 @@ const removeRewrite = (i: number) =>
   commit({ ...value.value, rewrites: value.value.rewrites.filter((_, j) => j !== i) });
 
 // The state of the links comes from the running gateway, not from the
-// settings on the page, so it is polled while the tab is open.
+// settings on the page, so it is polled while the tab is open. A login
+// takes a few seconds to settle, so the state is read every three.
+const statusPollMs = 3000;
 const status = ref<UpstreamStatus>({ enabled: false, running: false, links: [] });
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -381,7 +510,7 @@ const timeAgo = (at?: string): string => {
 
 onMounted(() => {
   void loadStatus();
-  timer = setInterval(() => void loadStatus(), 5000);
+  timer = setInterval(() => void loadStatus(), statusPollMs);
 });
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer);

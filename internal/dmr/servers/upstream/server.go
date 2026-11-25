@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,6 +56,14 @@ const (
 	readBufferSize   = 1000000
 	packetBufferSize = dmrdsession.MaxPacket + 1
 	tickInterval     = 100 * time.Millisecond
+
+	// softwareID and packageID name this gateway in the login configuration.
+	// A master keeps them to show who is connected, and some refuse a login
+	// whose configuration carries no software at all: DMRGateway fills both
+	// fields, so an empty pair makes this gateway look unlike any repeater
+	// the master has seen. The hub names itself the same way when it reads
+	// the configuration of a repeater that left them blank.
+	softwareID = "USA-RedDragon/DMRHub"
 )
 
 // serverOf returns the name this gateway registers for network.
@@ -122,6 +131,11 @@ type linkStats struct {
 	lastHeard time.Time
 	// reason is why the link last went down.
 	reason string
+	// stage is the login step the master refused at. A refusal of the
+	// RPTL is an ID the master does not know, while a refusal of the RPTK
+	// is a password it does not accept: the two need different fixes, so
+	// the page must be able to tell them apart.
+	stage string
 	// rx and tx count the bursts of each direction, and rxTG and txTG
 	// count them by talkgroup.
 	rxBursts uint64
@@ -141,7 +155,10 @@ type LinkStatus struct {
 	// page shows as it is.
 	LastHeard *time.Time `json:"lastHeard,omitempty"`
 	// Reason is why the link last went down.
-	Reason     string     `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// Stage is the login step a refusal came at: Login, Auth, Config,
+	// Options or Running. It is empty when the master never answered.
+	Stage      string     `json:"stage,omitempty"`
 	RxBursts   uint64     `json:"rxBursts"`
 	TxBursts   uint64     `json:"txBursts"`
 	Talkgroups []TGStatus `json:"talkgroups"`
@@ -174,14 +191,18 @@ func (l *linkStats) noteUp(now time.Time) {
 	l.mu.Lock()
 	l.since = now
 	l.reason = ""
+	l.stage = ""
 	l.mu.Unlock()
 }
 
-// noteDown records that the link went down at now, and why.
-func (l *linkStats) noteDown(now time.Time, reason string) {
+// noteDown records that the link went down at now, why, and at which login
+// step. The stage is kept even when the link was never up: a master that
+// refuses the RPTK has answered, and that answer is what the admin needs.
+func (l *linkStats) noteDown(now time.Time, reason, stage string) {
 	l.mu.Lock()
 	l.since = time.Time{}
 	l.reason = reason
+	l.stage = stage
 	l.mu.Unlock()
 }
 
@@ -446,7 +467,19 @@ func hostOf(address string) (string, error) {
 	return s, nil
 }
 
-// buildRPTC constructs the 302/306-octet login configuration message.
+// pktHead returns the tag of a packet, or nil when it is too short to have
+// one. The read loop uses it to leave the voice frames out of the log.
+func pktHead(pkt []byte) []byte {
+	if len(pkt) < 4 {
+		return nil
+	}
+	return pkt[:4]
+}
+
+// buildRPTC constructs the 302/306-octet login configuration message. The
+// position and text fields come from the network's own settings; blank
+// fields fall back to the DMRGateway-style defaults, which masters such as
+// BrandMeister accept.
 func buildRPTC(dialect dmrd.Dialect, n *config.UpstreamNetwork) ([]byte, error) {
 	callsign := n.Callsign
 	if callsign == "" {
@@ -467,6 +500,10 @@ func buildRPTC(dialect dmrd.Dialect, n *config.UpstreamNetwork) ([]byte, error) 
 	if tx == 0 {
 		tx = 438800000
 	}
+	// The power goes out as a two digit number of watts. A zero reads as a
+	// transmitter that cannot send, and a master may refuse a repeater
+	// that claims no power, so a network that does not say sends ten.
+	power := 10
 	if dialect == dmrd.DialectHBRP {
 		var c dmrd.HBRPConfig
 		c.Reset()
@@ -482,6 +519,21 @@ func buildRPTC(dialect dmrd.Dialect, n *config.UpstreamNetwork) ([]byte, error) 
 		}
 		if err := c.SetColorCode(enums.ColorCode(color)); err != nil {
 			return nil, fmt.Errorf("setting color code: %w", err)
+		}
+		if err := c.SetPower(uint8(power)); err != nil { //nolint:gosec // checked above
+			return nil, fmt.Errorf("setting power: %w", err)
+		}
+		if err := c.SetLatitude([]byte("0.000000")); err != nil {
+			return nil, fmt.Errorf("setting latitude: %w", err)
+		}
+		if err := c.SetLongitude([]byte("00.000000")); err != nil {
+			return nil, fmt.Errorf("setting longitude: %w", err)
+		}
+		if err := c.SetSoftwareID([]byte(softwareID)); err != nil {
+			return nil, fmt.Errorf("setting software ID: %w", err)
+		}
+		if err := c.SetPackageID([]byte(runtime.Version())); err != nil {
+			return nil, fmt.Errorf("setting package ID: %w", err)
 		}
 		return c[:], nil
 	}
@@ -500,8 +552,67 @@ func buildRPTC(dialect dmrd.Dialect, n *config.UpstreamNetwork) ([]byte, error) 
 	if err := c.SetColorCode(enums.ColorCode(color)); err != nil {
 		return nil, fmt.Errorf("setting color code: %w", err)
 	}
+	if err := c.SetPower(uint8(power)); err != nil { //nolint:gosec // checked above
+		return nil, fmt.Errorf("setting power: %w", err)
+	}
 	if err := c.SetSlots(uint8(slots)); err != nil { //nolint:gosec // checked above
 		return nil, fmt.Errorf("setting slots: %w", err)
+	}
+	// The position and text fields carry the values the admin set for this
+	// network on the setup page, or the DMRGateway-style defaults when they
+	// left them blank. Masters such as BrandMeister refuse a login whose
+	// location, description, URL, software or package fields are blank, and
+	// the position must parse as a number; a blank one reads as garbage to
+	// their parser. These defaults match the values a DMRGateway sends,
+	// which every master accepts.
+	lat := n.Latitude
+	if lat == "" {
+		lat = "+29.6800"
+	}
+	lon := n.Longitude
+	if lon == "" {
+		lon = "+106.5900"
+	}
+	location := n.Location
+	if location == "" {
+		location = "Nowhere"
+	}
+	description := n.Description
+	if description == "" {
+		description = "MMDVM Hotspot"
+	}
+	url := n.URL
+	if url == "" {
+		url = "https://github.com/g4klx/MMDVMHost"
+	}
+	software := n.SoftwareID
+	if software == "" {
+		software = "20250828"
+	}
+	pkg := n.PackageID
+	if pkg == "" {
+		pkg = "MMDVM_MMDVM_HS_Dual_Hat"
+	}
+	if err := c.SetLatitude([]byte(lat)); err != nil {
+		return nil, fmt.Errorf("setting latitude: %w", err)
+	}
+	if err := c.SetLongitude([]byte(lon)); err != nil {
+		return nil, fmt.Errorf("setting longitude: %w", err)
+	}
+	if err := c.SetLocation([]byte(location)); err != nil {
+		return nil, fmt.Errorf("setting location: %w", err)
+	}
+	if err := c.SetDescription([]byte(description)); err != nil {
+		return nil, fmt.Errorf("setting description: %w", err)
+	}
+	if err := c.SetURL([]byte(url)); err != nil {
+		return nil, fmt.Errorf("setting URL: %w", err)
+	}
+	if err := c.SetSoftwareID([]byte(software)); err != nil {
+		return nil, fmt.Errorf("setting software ID: %w", err)
+	}
+	if err := c.SetPackageID([]byte(pkg)); err != nil {
+		return nil, fmt.Errorf("setting package ID: %w", err)
 	}
 	return c[:], nil
 }
@@ -522,6 +633,16 @@ func (s *Server) readLoop(ctx context.Context, name string, u *uplink) {
 		}
 		now := s.clock.Since(u.epoch)
 		pkt := append([]byte(nil), buf[:n]...)
+		// A master that refuses the configuration usually says nothing
+		// about why, but some answer with a payload after the tag, and the
+		// address the answer came from names the master that answered.
+		// Both go to the log at debug, so a refusal at the Config stage can
+		// be told apart from one at the master in front of it.
+		if head := pktHead(pkt); len(head) > 0 && string(head[:4]) != "DMRD" {
+			slog.Debug("Upstream packet",
+				"network", name, "from", u.conn.RemoteAddr(), "len", n,
+				"hex", fmt.Sprintf("%x", pkt[:min(len(pkt), 64)]))
+		}
 		var outs [dmrdsession.MaxOutputs]dmrdsession.Output
 		// OutputSend points into the peer, so the outputs must be handled
 		// before the machine is called again. Keep the lock through them.
@@ -563,6 +684,14 @@ func (s *Server) handlePeerOutput(ctx context.Context, name string, u *uplink, n
 			slog.Warn("Upstream address unresolved", "network", name, "error", err)
 			break
 		}
+		// The login exchange is logged at debug, so a refusal at one stage
+		// can be matched against the packet that caused it. The voice
+		// frames stay out: only the short control packets are shown.
+		if head := pktHead(o.Packet); head != nil && string(head) != "DMRD" {
+			slog.Debug("Upstream send",
+				"network", name, "len", len(o.Packet),
+				"hex", fmt.Sprintf("%x", o.Packet[:min(len(o.Packet), 320)]))
+		}
 		if _, err := u.conn.WriteToUDP(o.Packet, to); err != nil {
 			slog.Warn("Upstream write error", "network", name, "error", err)
 		}
@@ -571,10 +700,14 @@ func (s *Server) handlePeerOutput(ctx context.Context, name string, u *uplink, n
 		u.stats.noteUp(s.clock.Now())
 		slog.Info("Upstream link up", "network", name, "id", u.cfg.ID)
 	case dmrdsession.OutputDown:
-		if u.up.Swap(false) {
-			u.stats.noteDown(s.clock.Now(), o.Reason.String())
-			slog.Info("Upstream link down", "network", name, "reason", o.Reason.String())
-		}
+		// The refusal is recorded whether or not the link was up. A master
+		// that answers MSTNAK to the RPTK never lets the link come up, and
+		// dropping that answer would leave the page saying only that no
+		// answer came, which sends the admin to look at the address
+		// instead of at the password.
+		u.up.Store(false)
+		u.stats.noteDown(s.clock.Now(), o.Reason.String(), o.State.String())
+		slog.Info("Upstream link down", "network", name, "reason", o.Reason.String(), "stage", o.State.String())
 	case dmrdsession.OutputData:
 		if o.Command == dmrd.CommandDMRD {
 			s.handleUpstreamData(ctx, name, u, o.Packet, now)
@@ -748,6 +881,7 @@ func (s *Server) Status() Status {
 		link := LinkStatus{
 			Name: name, Up: u.up.Load(),
 			Reason:   u.stats.reason,
+			Stage:    u.stats.stage,
 			RxBursts: u.stats.rxBursts, TxBursts: u.stats.txBursts,
 		}
 		if !u.stats.since.IsZero() {
