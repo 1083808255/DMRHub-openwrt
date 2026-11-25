@@ -7,6 +7,7 @@ import {
   upstreamOf, upstreamPasswordsOf, upstreamPayload, upstreamsError, hostOf,
   emptyUpstreamNetwork, emptyUpstreamRewrite,
 } from '@/lib/upstream';
+import { TABS, tabPayload } from '@/lib/setupMenu';
 
 describe('upstream config', () => {
   it('reads a config value and writes it back with kebab-case keys', () => {
@@ -40,6 +41,31 @@ describe('upstream config', () => {
     const payload = upstreamPayload(rows) as Record<string, unknown>;
     expect(JSON.stringify(payload)).not.toContain('typed');
     expect(upstreamPasswordsOf(rows)).toEqual(['typed']);
+  });
+
+  // The hub reads the passwords of the networks at secrets.upstreams.passwords.
+  // At the top level the payload is an unknown setting, so the hub dropped
+  // them and the password of a network added after the first save was never
+  // stored, which made the save fail.
+  it('sends the passwords where the hub reads them', () => {
+    const tab = TABS.find((t) => t.custom === 'upstream')!;
+    const rows = upstreamOf({
+      enabled: true,
+      networks: [
+        { name: 'A', address: 'a.example.org', id: 1, 'rx-frequency': 1, 'tx-frequency': 1, 'color-code': 1, slots: 3, port: 1 },
+        { name: 'B', address: 'b.example.org', id: 2, 'rx-frequency': 1, 'tx-frequency': 1, 'color-code': 1, slots: 3, port: 1 },
+        { name: 'C', address: 'c.example.org', id: 3, 'rx-frequency': 1, 'tx-frequency': 1, 'color-code': 1, slots: 3, port: 1 },
+      ],
+      rewrites: [],
+    });
+    rows.networks[0]!.password = 'one';
+    rows.networks[1]!.password = 'two';
+    rows.networks[2]!.password = 'three';
+    const edited = { dmr: { upstreams: rows }, secrets: { upstreams: { passwords: upstreamPasswordsOf(rows) } } };
+    const payload = tabPayload(tab, { dmr: { upstreams: { enabled: true, networks: [], rewrites: [] } } }, edited) as Record<string, unknown>;
+    const secrets = payload.secrets as { upstreams?: { passwords?: string[] } } | undefined;
+    expect(secrets?.upstreams?.passwords).toEqual(['one', 'two', 'three']);
+    expect(payload).not.toHaveProperty('upstreams');
   });
 
   it('keeps typed values when the editor re-derives rows from the committed value', () => {

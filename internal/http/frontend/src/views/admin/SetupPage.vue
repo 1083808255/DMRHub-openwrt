@@ -300,6 +300,14 @@ export default defineComponent({
       for (const [p, v] of fieldsByPath[path]?.also?.(value, this.read) ?? []) {
         setAt(this.edited, p, clone(v));
       }
+      if (path === UPSTREAMS) {
+        // The hub reports the saved passwords in network order, so a
+        // network added or removed moves them along with it. Keep the
+        // flags the same length as the list, or a network after a removed
+        // one would read the flag of the network before it.
+        const rows = upstreamOf(value).networks;
+        this.upstreamPasswordsSet = rows.map((_, i) => this.upstreamPasswordsSet[i] === true);
+      }
       delete this.savedMsg[this.tab.id];
       delete this.errors[path];
       this.failMsg = '';

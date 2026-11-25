@@ -294,6 +294,52 @@ describe('Admin Setup page dirty tracking', () => {
     wrapper.unmount();
   });
 
+  it('saves the password of a network added after the first save', async () => {
+    // Two networks are saved with their passwords, then a third is added.
+    const saved = {
+      enabled: true,
+      networks: [
+        { name: 'A', enabled: true, dialect: 'mmdvm', address: 'a.example.org', port: 62031, id: 1, 'rx-frequency': 1, 'tx-frequency': 1, 'color-code': 1, slots: 3, options: '' },
+        { name: 'B', enabled: true, dialect: 'mmdvm', address: 'b.example.org', port: 62031, id: 2, 'rx-frequency': 1, 'tx-frequency': 1, 'color-code': 1, slots: 3, options: '' },
+      ],
+      rewrites: [],
+    };
+    getConfig(() => ({
+      data: {
+        ...config(),
+        dmr: { ...config().dmr, upstreams: saved },
+        secrets: { secretSet: true, passwordSaltSet: true, smtpPasswordSet: false, upstreamPasswordsSet: [true, true] },
+        revision: 41, disagree: false,
+        settings: settings({ 'dmr.upstreams': { ...plain, default: { enabled: false, networks: [], rewrites: [] } } }),
+        replicas: [],
+      },
+    }));
+    const { wrapper } = await mountAt('/admin/setup#upstreams');
+    await wrapper.find('[data-test="upstream-network-add"]').trigger('click');
+    await flushPromises();
+    const vm = wrapper.vm as unknown as {
+      set: (p: string, v: unknown) => void;
+      save: () => Promise<void>;
+    };
+    // Fill the third network, as an admin would.
+    const edited = (wrapper.vm as unknown as { read: (p: string) => unknown }).read('dmr.upstreams') as {
+      enabled: boolean;
+      networks: Record<string, unknown>[];
+      rewrites: unknown[];
+    };
+    edited.networks[2] = { ...edited.networks[2], name: 'C', address: 'c.example.org', id: 3, password: 'three' };
+    vm.set('dmr.upstreams', edited);
+    await vm.save();
+    await flushPromises();
+
+    const payload = mockAPI.post.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(payload).toBeDefined();
+    const secrets = payload!.secrets as { upstreams?: { passwords?: string[] } } | undefined;
+    expect(secrets?.upstreams?.passwords).toHaveLength(3);
+    expect(secrets?.upstreams?.passwords?.[2]).toBe('three');
+    wrapper.unmount();
+  });
+
   it('shows a validation failure instead of an older saved message', async () => {
     mockAPI.post.mockResolvedValue({ data: { valid: false, errors: { dmr: { 'public-address': 'enter a host name' } } } });
     const { wrapper } = await mountAt('/admin/setup#dmr');

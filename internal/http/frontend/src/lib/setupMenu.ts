@@ -1010,7 +1010,10 @@ export const tabFields = (tab: TabDef): FieldDef[] => cardFields(tab.cards);
 
 export const AMBE_SERVERS = 'dmr.transcoding.ambe-servers';
 export const UPSTREAMS = 'dmr.upstreams';
-export const UPSTREAM_PASSWORDS = 'upstreams.passwords';
+// The passwords of the upstream networks go under secrets, which is where
+// the hub reads them; at the top level they would be dropped as an
+// unknown setting.
+export const UPSTREAM_PASSWORDS = 'secrets.upstreams.passwords';
 
 /** The paths of the settings that the Save of a tab saves. */
 export const tabPaths = (tab: TabDef): string[] => {

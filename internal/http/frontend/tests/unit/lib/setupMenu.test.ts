@@ -44,7 +44,8 @@ describe('setup menu tabs', () => {
     expect(tabPaths(tab('metrics'))).toEqual(expect.arrayContaining(['metrics.enabled', 'pprof.enabled']));
     expect(tabPaths(tab('dmr'))).toContain('dmr.public-address');
     expect(tabPaths(tab('transcoding'))).toEqual(['dmr.transcoding.ambe-servers']);
-    expect(tabPaths(tab('upstreams'))).toEqual(['dmr.upstreams', 'upstreams.passwords']);
+    // The passwords go under secrets, where the hub reads them.
+    expect(tabPaths(tab('upstreams'))).toEqual(['dmr.upstreams', 'secrets.upstreams.passwords']);
   });
 
   it('puts each setting on one tab only', () => {
