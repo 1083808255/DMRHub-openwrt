@@ -2229,5 +2229,8 @@
   "Last call at {time}": "Last call at {time}",
   "The settings could not be read, so this tab shows nothing. Reload the page to try again.": "The settings could not be read, so this tab shows nothing. Reload the page to try again.",
   "Forwarded from the upstream network {name}": "Forwarded from the upstream network {name}",
-  "Browser radio": "Browser radio"
+  "Browser radio": "Browser radio",
+  "At most {n} upstream networks can be linked.": "At most {n} upstream networks can be linked.",
+  "A hub links to at most {n} upstream networks.": "A hub links to at most {n} upstream networks.",
+  "a hub links to at most 5 upstream networks": "a hub links to at most 5 upstream networks"
 }

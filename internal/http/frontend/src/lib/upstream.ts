@@ -167,6 +167,9 @@ export const upstreamPayload = (v: UpstreamValue): Record<string, unknown> => ({
   })),
 });
 
+/** MAX_NETWORKS is how many upstream networks one hub links to at most. */
+export const MAX_NETWORKS = 5;
+
 /**
  * upstreamPasswordsOf returns the passwords of the networks that have one,
  * keyed by network name. The hub matches them by name, so a network added,
@@ -211,6 +214,9 @@ export const hostOf = (address: string): string => {
 
 /** upstreamsError is the error shown when the upstream settings cannot be saved. */
 export const upstreamsError = (v: UpstreamValue, passwordsSet: boolean[]): string | undefined => {
+  if (v.networks.length > MAX_NETWORKS) {
+    return t('At most {n} upstream networks can be linked.', { n: MAX_NETWORKS });
+  }
   const names = new Set<string>();
   for (const [i, n] of v.networks.entries()) {
     const at = i + 1;

@@ -77,6 +77,23 @@ describe('UpstreamTab per-network switch', () => {
     wrapper.unmount();
   });
 
+  it('stops adding networks at five', async () => {
+    const five = Array.from({ length: 5 }, (_, i) => ({
+      name: `N${i}`, enabled: true, dialect: 'mmdvm', address: `n${i}.example.org`,
+      port: 62031, id: i + 1, password: '', callsign: 'DMRHUB',
+      rxFrequency: 438800000, txFrequency: 438800000, colorCode: 1, slots: 3, options: '',
+    }));
+    const wrapper = await mountTab({ enabled: true, networks: five, rewrites: [] });
+    const add = wrapper.find('[data-test="upstream-network-add"]');
+    expect(add.attributes('disabled')).toBeDefined();
+    expect(wrapper.find('[data-test="upstream-network-limit"]').exists()).toBe(true);
+
+    // The handler refuses too, not only the button.
+    await add.trigger('click');
+    expect(wrapper.emitted('set')).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it('adds a network with every input, from an empty list', async () => {
     const wrapper = await mountTab({ enabled: true, networks: [], rewrites: [] });
     await wrapper.find('[data-test="upstream-network-add"]').trigger('click');

@@ -35,6 +35,18 @@ describe('upstream config', () => {
     expect(rewrite['upstream-tg']).toBe(3100);
   });
 
+  it('refuses more than five networks', () => {
+    const net = (i: number) => ({
+      name: `N${i}`, address: `n${i}.example.org`, id: i + 1,
+      'rx-frequency': 1, 'tx-frequency': 1, 'color-code': 1, slots: 3, port: 1,
+    });
+    const five = upstreamOf({ enabled: true, networks: [1, 2, 3, 4, 5].map(net), rewrites: [] });
+    expect(upstreamsError(five, [true, true, true, true, true])).toBeUndefined();
+
+    const six = upstreamOf({ enabled: true, networks: [1, 2, 3, 4, 5, 6].map(net), rewrites: [] });
+    expect(upstreamsError(six, [true, true, true, true, true, true])).toMatch(/at most/i);
+  });
+
   it('keeps typed passwords out of the config and into the secrets payload', () => {
     const rows = upstreamOf({ networks: [{ name: 'BM' }] });
     rows.networks[0]!.password = 'typed';

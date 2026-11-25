@@ -50,11 +50,14 @@
     <Card class="mb-5" data-test="upstreams-networks">
       <CardHeader class="flex flex-wrap items-center justify-between gap-2">
         <CardTitle>{{ $t('Networks') }}</CardTitle>
-        <ShadButton type="button" variant="outline" size="sm" :disabled="locked" data-test="upstream-network-add" @click="addNetwork">
+        <ShadButton type="button" variant="outline" size="sm" :disabled="locked || atLimit" data-test="upstream-network-add" @click="addNetwork">
           {{ $t('Add a network') }}
         </ShadButton>
       </CardHeader>
       <CardContent>
+        <p v-if="atLimit" class="mb-3 text-sm text-muted-foreground" data-test="upstream-network-limit">
+          {{ $t('A hub links to at most {n} upstream networks.', { n: MAX_NETWORKS }) }}
+        </p>
         <p v-if="value.networks.length === 0" class="mb-3 text-sm text-muted-foreground">
           {{ $t('No network yet. Add one to link this hub to a master.') }}
         </p>
@@ -252,7 +255,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input as ShadInput } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
-  emptyUpstreamNetwork, emptyUpstreamRewrite, upstreamOf,
+  MAX_NETWORKS, emptyUpstreamNetwork, emptyUpstreamRewrite, upstreamOf,
   type UpstreamNetworkRow, type UpstreamRewriteRow, type UpstreamValue,
 } from '@/lib/upstream';
 import { fieldLocked } from '@/lib/setupMenu';
@@ -293,7 +296,13 @@ const commit = (next: UpstreamValue) => emit('set', 'dmr.upstreams', next);
 const setEnabled = (v: boolean) => commit({ ...value.value, enabled: v });
 const setNetwork = (i: number, key: keyof UpstreamNetworkRow, v: unknown) =>
   commit({ ...value.value, networks: value.value.networks.map((n, j) => (j === i ? { ...n, [key]: v } : n)) });
-const addNetwork = () => commit({ ...value.value, networks: [...value.value.networks, emptyUpstreamNetwork()] });
+const atLimit = computed(() => value.value.networks.length >= MAX_NETWORKS);
+const addNetwork = () => {
+  if (value.value.networks.length >= MAX_NETWORKS) {
+    return;
+  }
+  commit({ ...value.value, networks: [...value.value.networks, emptyUpstreamNetwork()] });
+};
 const removeNetwork = (i: number) =>
   commit({ ...value.value, networks: value.value.networks.filter((_, j) => j !== i) });
 const setRewrite = (i: number, key: keyof UpstreamRewriteRow, v: unknown) =>

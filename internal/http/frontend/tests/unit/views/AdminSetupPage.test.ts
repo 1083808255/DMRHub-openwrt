@@ -334,9 +334,10 @@ describe('Admin Setup page dirty tracking', () => {
 
     const payload = mockAPI.post.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
     expect(payload).toBeDefined();
-    const secrets = payload!.secrets as { upstreams?: { passwords?: string[] } } | undefined;
-    expect(secrets?.upstreams?.passwords).toHaveLength(3);
-    expect(secrets?.upstreams?.passwords?.[2]).toBe('three');
+    // Keyed by name: the password of the third network reaches the hub even
+    // though the first two saved theirs earlier.
+    const secrets = payload!.secrets as { upstreams?: { passwords?: Record<string, string> } } | undefined;
+    expect(secrets?.upstreams?.passwords).toEqual({ C: 'three' });
     wrapper.unmount();
   });
 
