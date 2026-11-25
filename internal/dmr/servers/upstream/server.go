@@ -93,9 +93,13 @@ type Server struct {
 type uplink struct {
 	cfg     *config.UpstreamNetwork
 	conn    *net.UDPConn
-	remote  *net.UDPAddr
 	peer    *dmrdsession.Peer
 	dialect dmrd.Dialect
+	// remoteMu guards remote, which is resolved on first use and kept, so
+	// that a name that does not resolve yet is tried again on the next
+	// tick instead of stopping the gateway from starting.
+	remoteMu sync.Mutex
+	remote   *net.UDPAddr
 	// mu serializes Tick and Packet: dmrdsession.Peer is not safe for
 	// concurrent use.
 	mu sync.Mutex
@@ -358,18 +362,11 @@ func (s *Server) drainPeerPackets(ctx context.Context) {
 }
 
 // newUplink opens a UDP socket and prepares the peer state machine for one
-// upstream network.
+// upstream network. The address is resolved on the first send, so that a
+// name that does not resolve yet does not stop the gateway from starting.
 func newUplink(c clock.Clock, n *config.UpstreamNetwork) (*uplink, error) {
-	host, err := hostOf(n.Address)
-	if err != nil {
-		return nil, err
-	}
 	if n.ID == 0 {
 		return nil, errors.New("repeater ID is zero")
-	}
-	remote, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(n.Port)))
-	if err != nil {
-		return nil, fmt.Errorf("resolving address: %w", err)
 	}
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
@@ -409,11 +406,33 @@ func newUplink(c clock.Clock, n *config.UpstreamNetwork) (*uplink, error) {
 	return &uplink{
 		cfg:     n,
 		conn:    conn,
-		remote:  remote,
 		peer:    peer,
 		dialect: dialect,
 		epoch:   c.Now(),
 	}, nil
+}
+
+// remoteAddr returns where the packets of this link go, resolving the name
+// the first time and keeping the answer. A name that does not resolve yet
+// is not a reason to refuse the settings: the link keeps its socket and the
+// next tick tries again, so a slow or missing DNS at save time no longer
+// rolls the saved settings back.
+func (u *uplink) remoteAddr() (*net.UDPAddr, error) {
+	u.remoteMu.Lock()
+	defer u.remoteMu.Unlock()
+	if u.remote != nil {
+		return u.remote, nil
+	}
+	host, err := hostOf(u.cfg.Address)
+	if err != nil {
+		return nil, err
+	}
+	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(u.cfg.Port)))
+	if err != nil {
+		return nil, fmt.Errorf("resolving address: %w", err)
+	}
+	u.remote = addr
+	return addr, nil
 }
 
 // hostOf returns the host of an address that an admin typed, so that a
@@ -539,7 +558,12 @@ func (s *Server) tickLoop(ctx context.Context, name string, u *uplink) {
 func (s *Server) handlePeerOutput(ctx context.Context, name string, u *uplink, now time.Duration, o dmrdsession.Output) {
 	switch o.Kind {
 	case dmrdsession.OutputSend:
-		if _, err := u.conn.WriteToUDP(o.Packet, u.remote); err != nil {
+		to, err := u.remoteAddr()
+		if err != nil {
+			slog.Warn("Upstream address unresolved", "network", name, "error", err)
+			break
+		}
+		if _, err := u.conn.WriteToUDP(o.Packet, to); err != nil {
 			slog.Warn("Upstream write error", "network", name, "error", err)
 		}
 	case dmrdsession.OutputUp:
@@ -663,7 +687,12 @@ func (s *Server) sendUpstream(name string, u *uplink, packet models.Packet, upst
 	out.Dst = upstreamTG
 	out.Repeater = uint(u.cfg.ID)
 	raw := out.Encode()
-	if _, err := u.conn.WriteToUDP(raw, u.remote); err != nil {
+	to, err := u.remoteAddr()
+	if err != nil {
+		slog.Debug("Upstream address unresolved", "network", name, "error", err)
+		return
+	}
+	if _, err := u.conn.WriteToUDP(raw, to); err != nil {
 		slog.Debug("Upstream egress write error", "network", name, "error", err)
 		return
 	}
@@ -687,7 +716,12 @@ func (s *Server) sendPrivateUpstream(packet models.Packet) {
 		out := packet
 		out.Repeater = uint(u.cfg.ID)
 		raw := out.Encode()
-		if _, err := u.conn.WriteToUDP(raw, u.remote); err != nil {
+		to, err := u.remoteAddr()
+		if err != nil {
+			slog.Debug("Upstream address unresolved", "network", name, "error", err)
+			continue
+		}
+		if _, err := u.conn.WriteToUDP(raw, to); err != nil {
 			slog.Debug("Upstream private write error", "network", name, "error", err)
 			continue
 		}
