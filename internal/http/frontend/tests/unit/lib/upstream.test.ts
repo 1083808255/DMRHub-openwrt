@@ -161,4 +161,46 @@ describe('upstream config', () => {
     rows.networks[1]!.name = 'DMRPlus';
     expect(upstreamsError(rows, [true, true])).toContain('not in the list');
   });
+
+  // The hub saves the password of a network and sends it back, so the
+  // presence of a password says nothing about where the value came from.
+  // The kebab-case keys say it, and they must be read as such.
+  it('reads the API shape even when it carries a password', () => {
+    const rows = upstreamOf({
+      enabled: true,
+      networks: [{
+        name: 'CQDMR', enabled: true, dialect: 'mmdvm', address: 'dmr.wakepc.cn',
+        port: 62031, id: 461244711, password: 'a-secret', callsign: 'BH8GLN',
+        'rx-frequency': 434500000, 'tx-frequency': 439500000, 'color-code': 1,
+        slots: 3, options: 'TS2=86023',
+      }],
+      rewrites: [{ network: 'CQDMR', 'local-tg': 100, 'upstream-tg': 86023 }],
+    });
+    const n = rows.networks[0]!;
+    expect(n.rxFrequency).toBe(434500000);
+    expect(n.txFrequency).toBe(439500000);
+    expect(n.colorCode).toBe(1);
+    expect(n.slots).toBe(3);
+    expect(n.port).toBe(62031);
+    expect(n.id).toBe(461244711);
+    expect(rows.rewrites[0]!.localTg).toBe(100);
+    expect(rows.rewrites[0]!.upstreamTg).toBe(86023);
+    expect(upstreamsError(rows, [true])).toBeUndefined();
+  });
+
+  it('keeps a cleared field cleared in the editor shape', () => {
+    const rows = upstreamOf({
+      networks: [{
+        name: 'BM', enabled: true, dialect: 'mmdvm', address: 'a', port: '', id: '',
+        password: '', callsign: '', rxFrequency: '', txFrequency: '', colorCode: '',
+        slots: '', options: '',
+      }],
+      rewrites: [],
+    });
+    const n = rows.networks[0]!;
+    // A cleared callsign stays empty, so the field can be cleared.
+    expect(n.callsign).toBe('');
+    expect(n.rxFrequency).toBe('');
+    expect(n.slots).toBe('');
+  });
 });

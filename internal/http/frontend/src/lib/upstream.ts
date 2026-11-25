@@ -50,13 +50,6 @@ export type UpstreamValue = {
   rewrites: UpstreamRewriteRow[];
 };
 
-const num = (v: unknown, dflt: number | string): number | string => {
-  if (v === undefined || v === null || v === '') {
-    return dflt;
-  }
-  return typeof v === 'number' && Number.isFinite(v) ? v : String(v);
-};
-
 const text = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
 
 /** A new, empty network with usable defaults. */
@@ -87,20 +80,33 @@ export const emptyUpstreamRewrite = (): UpstreamRewriteRow => ({
  * upstreamOf turns a config value into rows the editor can show.
  *
  * It accepts two shapes because the editor commits its rows back to the same
- * config path: the API shape (kebab-case keys, no password) when first loaded,
- * and the editor's own row shape (camelCase keys plus a password key) on every
- * following recompute.
+ * config path: the API shape (kebab-case keys) when first loaded, and the
+ * editor's own row shape (camelCase keys) on every following recompute.
  *
- * The distinction matters: defaults must be applied only once, when reading
- * the API value. The editor shape always carries a `password` key (even when
- * the user typed nothing), so its values are kept verbatim. Otherwise a user
- * clearing the callsign or a numeric field would have the default silently
- * put straight back, making the field impossible to clear and hiding the real
- * validation error. The hub never sends a password, so the key can only come
- * from this browser.
+ * Each field is read from whichever key is there, so a value of either shape
+ * shows as it is. The password is no guide: the hub now saves it and sends
+ * it back, so it is present in both shapes.
+ *
+ * A default is applied only when the field is missing, never when it is
+ * empty: a user who clears a field must see it stay empty, or the default
+ * comes straight back and the real validation error stays hidden.
  */
 const rowValue = (v: unknown): number | string =>
   typeof v === 'number' || typeof v === 'string' ? v : '';
+
+/** pick returns the value of the first key of raw that is present. */
+const pick = (raw: Record<string, unknown>, ...keys: string[]): { v: unknown; found: boolean } => {
+  for (const k of keys) {
+    if (k in raw) return { v: raw[k], found: true };
+  }
+  return { v: undefined, found: false };
+};
+
+/** value reads a numeric field from either key, with a default when absent. */
+const value = (raw: Record<string, unknown>, camel: string, kebab: string, dflt: number | string): number | string => {
+  const { v, found } = pick(raw, camel, kebab);
+  return found ? rowValue(v) : dflt;
+};
 
 export const upstreamOf = (v: unknown): UpstreamValue => {
   const src = typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -110,30 +116,28 @@ export const upstreamOf = (v: unknown): UpstreamValue => {
     enabled: src.enabled === true,
     networks: networks.map((raw) => {
       const n = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
-      const edited = 'password' in n;
       return {
         name: text(n.name),
         enabled: n.enabled !== false,
         dialect: n.dialect === 'hbrp' ? 'hbrp' : 'mmdvm',
         address: text(n.address),
-        port: edited ? rowValue(n.port) : num(n.port, 62031),
-        id: edited ? rowValue(n.id) : num(n.id, ''),
+        port: value(n, 'port', 'port', 62031),
+        id: value(n, 'id', 'id', ''),
         password: text(n.password),
         callsign: text(n.callsign),
-        rxFrequency: edited ? rowValue(n.rxFrequency) : num(n['rx-frequency'], 438800000),
-        txFrequency: edited ? rowValue(n.txFrequency) : num(n['tx-frequency'], 438800000),
-        colorCode: edited ? rowValue(n.colorCode) : num(n['color-code'], 1),
-        slots: edited ? rowValue(n.slots) : num(n.slots, 3),
+        rxFrequency: value(n, 'rxFrequency', 'rx-frequency', 438800000),
+        txFrequency: value(n, 'txFrequency', 'tx-frequency', 438800000),
+        colorCode: value(n, 'colorCode', 'color-code', 1),
+        slots: value(n, 'slots', 'slots', 3),
         options: text(n.options),
       };
     }),
     rewrites: rewrites.map((raw) => {
       const r = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
-      const edited = 'localTg' in r;
       return {
         network: text(r.network),
-        localTg: edited ? rowValue(r.localTg) : num(r['local-tg'], ''),
-        upstreamTg: edited ? rowValue(r.upstreamTg) : num(r['upstream-tg'], ''),
+        localTg: value(r, 'localTg', 'local-tg', ''),
+        upstreamTg: value(r, 'upstreamTg', 'upstream-tg', ''),
       };
     }),
   };
