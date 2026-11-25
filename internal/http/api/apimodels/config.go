@@ -33,10 +33,10 @@ type POSTConfig struct {
 	Secret            *string  `json:"-"`
 	PasswordSalt      *string  `json:"-"`
 	HIBPAPIKey        *string  `json:"-"`
-	SMTPPassword      *string  `json:"-"`
-	DatabasePassword  *string  `json:"-"`
-	RedisPassword     *string  `json:"-"`
-	UpstreamPasswords *[]string `json:"-"`
+	SMTPPassword      *string            `json:"-"`
+	DatabasePassword  *string            `json:"-"`
+	RedisPassword     *string            `json:"-"`
+	UpstreamPasswords map[string]string  `json:"-"`
 }
 
 type password struct {
@@ -51,7 +51,10 @@ type postSecrets struct {
 	Database     password `json:"database"`
 	Redis        password `json:"redis"`
 	Upstreams    struct {
-		Passwords []string `json:"passwords"`
+		// Passwords maps the name of a network to its password, so that a
+		// network added, renamed or removed does not move the password of
+		// another one, as a list in network order would.
+		Passwords map[string]string `json:"passwords"`
 	} `json:"upstreams"`
 }
 
@@ -68,8 +71,7 @@ func (p *POSTConfig) UnmarshalJSON(b []byte) error {
 	p.Secret, p.PasswordSalt, p.HIBPAPIKey = s.Secret, s.PasswordSalt, s.HIBPAPIKey
 	p.SMTPPassword, p.DatabasePassword, p.RedisPassword = s.SMTP.Password, s.Database.Password, s.Redis.Password
 	if s.Upstreams.Passwords != nil {
-		pw := s.Upstreams.Passwords
-		p.UpstreamPasswords = &pw
+		p.UpstreamPasswords = s.Upstreams.Passwords
 	}
 	return nil
 }
@@ -143,9 +145,17 @@ func (p POSTConfig) ToConfig(c *config.Config, fallback *config.Config) {
 		c.SMTP.Password = fallback.SMTP.Password
 		c.Database.Password = fallback.Database.Password
 		c.Redis.Password = fallback.Redis.Password
+		// The password follows the network of the same name, so a network
+		// added before another does not take its password.
+		saved := make(map[string]string, len(fallback.DMR.Upstreams.Networks))
+		for _, n := range fallback.DMR.Upstreams.Networks {
+			if n.Password != "" {
+				saved[n.Name] = n.Password
+			}
+		}
 		for i := range c.DMR.Upstreams.Networks {
-			if i < len(fallback.DMR.Upstreams.Networks) {
-				c.DMR.Upstreams.Networks[i].Password = fallback.DMR.Upstreams.Networks[i].Password
+			if pw, ok := saved[c.DMR.Upstreams.Networks[i].Name]; ok {
+				c.DMR.Upstreams.Networks[i].Password = pw
 			}
 		}
 	}
@@ -168,10 +178,12 @@ func (p POSTConfig) ToConfig(c *config.Config, fallback *config.Config) {
 		c.Redis.Password = *p.RedisPassword
 	}
 	if p.UpstreamPasswords != nil {
-		for i, pw := range *p.UpstreamPasswords {
+		for i := range c.DMR.Upstreams.Networks {
+			n := &c.DMR.Upstreams.Networks[i]
+			pw, ok := p.UpstreamPasswords[n.Name]
 			// An empty input keeps the password that is already saved.
-			if pw != "" && i < len(c.DMR.Upstreams.Networks) {
-				c.DMR.Upstreams.Networks[i].Password = pw
+			if ok && pw != "" {
+				n.Password = pw
 			}
 		}
 	}

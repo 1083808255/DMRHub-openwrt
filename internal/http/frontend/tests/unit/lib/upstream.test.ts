@@ -40,7 +40,7 @@ describe('upstream config', () => {
     rows.networks[0]!.password = 'typed';
     const payload = upstreamPayload(rows) as Record<string, unknown>;
     expect(JSON.stringify(payload)).not.toContain('typed');
-    expect(upstreamPasswordsOf(rows)).toEqual(['typed']);
+    expect(upstreamPasswordsOf(rows)).toEqual({ BM: 'typed' });
   });
 
   // The hub reads the passwords of the networks at secrets.upstreams.passwords.
@@ -63,8 +63,9 @@ describe('upstream config', () => {
     rows.networks[2]!.password = 'three';
     const edited = { dmr: { upstreams: rows }, secrets: { upstreams: { passwords: upstreamPasswordsOf(rows) } } };
     const payload = tabPayload(tab, { dmr: { upstreams: { enabled: true, networks: [], rewrites: [] } } }, edited) as Record<string, unknown>;
-    const secrets = payload.secrets as { upstreams?: { passwords?: string[] } } | undefined;
-    expect(secrets?.upstreams?.passwords).toEqual(['one', 'two', 'three']);
+    const secrets = payload.secrets as { upstreams?: { passwords?: Record<string, string> } } | undefined;
+    // Keyed by name, so the order of the networks cannot move a password.
+    expect(secrets?.upstreams?.passwords).toEqual({ A: 'one', B: 'two', C: 'three' });
     expect(payload).not.toHaveProperty('upstreams');
   });
 
@@ -89,7 +90,7 @@ describe('upstream config', () => {
     expect(again.networks[0]!.colorCode).toBe(2);
     expect(again.rewrites[0]!.localTg).toBe(91);
     expect(upstreamsError(again, [false])).toBeUndefined();
-    expect(upstreamPasswordsOf(again)).toEqual(['typed']);
+    expect(upstreamPasswordsOf(again)).toEqual({ BM: 'typed' });
   });
 
   it('lets the user clear the callsign without the default coming back', () => {

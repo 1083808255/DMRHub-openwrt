@@ -139,7 +139,7 @@ func TestPOSTConfigKeepsPasswords(t *testing.T) {
 func TestPOSTConfigHandlesUpstreamPasswords(t *testing.T) {
 	t.Parallel()
 	body := `{"dmr":{"upstreams":{"enabled":true,"networks":[{"name":"BM"},{"name":"DMR+"}]}},` +
-		`"upstreams":{"passwords":["typed",""]}}`
+		`"secrets":{"upstreams":{"passwords":{"BM":"typed","DMR+":""}}}}`
 	var req apimodels.POSTConfig
 	require.NoError(t, json.Unmarshal([]byte(body), &req))
 
@@ -155,6 +155,30 @@ func TestPOSTConfigHandlesUpstreamPasswords(t *testing.T) {
 	require.Len(t, cfg.DMR.Upstreams.Networks, 2)
 	assert.Equal(t, "typed", cfg.DMR.Upstreams.Networks[0].Password, "a typed password replaces the saved one")
 	assert.Equal(t, "saved-dmr", cfg.DMR.Upstreams.Networks[1].Password, "a blank password keeps the saved one")
+}
+
+// A network added before another must not take the password of the one it
+// pushed down, which is what a list in network order did.
+func TestPOSTConfigKeepsEachUpstreamPasswordWithItsNetwork(t *testing.T) {
+	t.Parallel()
+	body := `{"dmr":{"upstreams":{"enabled":true,"networks":[` +
+		`{"name":"NEW"},{"name":"BM"},{"name":"DMR+"}]}},` +
+		`"secrets":{"upstreams":{"passwords":{"NEW":"new-pw"}}}}`
+	var req apimodels.POSTConfig
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+	current := &config.Config{}
+	current.DMR.Upstreams.Networks = []config.UpstreamNetwork{
+		{Name: "BM", Password: "saved-bm"},
+		{Name: "DMR+", Password: "saved-dmr"},
+	}
+	var cfg config.Config
+	req.ToConfig(&cfg, current)
+
+	require.Len(t, cfg.DMR.Upstreams.Networks, 3)
+	assert.Equal(t, "new-pw", cfg.DMR.Upstreams.Networks[0].Password, "the new network keeps its own password")
+	assert.Equal(t, "saved-bm", cfg.DMR.Upstreams.Networks[1].Password, "BM keeps its password after moving down")
+	assert.Equal(t, "saved-dmr", cfg.DMR.Upstreams.Networks[2].Password, "DMR+ keeps its password after moving down")
 }
 
 func TestPOSTConfigKeepsUpstreamPasswordsItLacks(t *testing.T) {

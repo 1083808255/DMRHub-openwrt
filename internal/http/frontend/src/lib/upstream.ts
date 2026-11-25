@@ -167,8 +167,22 @@ export const upstreamPayload = (v: UpstreamValue): Record<string, unknown> => ({
   })),
 });
 
-/** upstreamPasswordsOf returns the passwords in network order, for the secrets payload. */
-export const upstreamPasswordsOf = (v: UpstreamValue): string[] => v.networks.map((n) => text(n.password));
+/**
+ * upstreamPasswordsOf returns the passwords of the networks that have one,
+ * keyed by network name. The hub matches them by name, so a network added,
+ * renamed or removed does not move the password of another one.
+ */
+export const upstreamPasswordsOf = (v: UpstreamValue): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const n of v.networks) {
+    const name = n.name.trim();
+    const pw = text(n.password);
+    if (name && pw) {
+      out[name] = pw;
+    }
+  }
+  return out;
+};
 
 const WHOLE = /^[1-9]\d*$/;
 const TG = /^(0|[1-9]\d*)$/;
