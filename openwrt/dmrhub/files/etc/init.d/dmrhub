@@ -60,6 +60,10 @@ EOF
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+    # A graceful stop needs time: DMRHub waits for the calls in progress
+    # before it closes the database. Five seconds of the procd default
+    # SIGKILLed it mid write and corrupted the database at an OTA.
+    procd_set_param term_timeout 30
     procd_close_instance
 }
 
@@ -103,4 +107,17 @@ status() {
     else
         echo "DMRHub is not running"
     fi
+}
+
+# stop_service waits until the process of the instance is gone, so that the
+# steps after a stop, such as the backup of an OTA, never see a database
+# that its writer still holds. Without the wait a SIGKILL from procd lands
+# mid write and leaves the SQLite image malformed.
+stop_service() {
+    local n=0
+    while pgrep -f "dmrhub --config" >/dev/null 2>&1; do
+        n=$((n+1))
+        [ "$n" -ge 30 ] && break
+        sleep 1
+    done
 }

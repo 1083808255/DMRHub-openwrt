@@ -344,6 +344,14 @@ cmd_firmware() {
 	# stopping it lets SQLite fold the log into the database file, so that
 	# the archive holds a consistent copy.
 	/etc/init.d/dmrhub stop 2>/dev/null || true
+	# The stop only asks procd. Wait until the process has left, so the
+	# backup tar never catches SQLite mid write.
+	local n=0
+	while pgrep -f "dmrhub --config" >/dev/null 2>&1; do
+		n=$((n+1))
+		[ "$n" -ge 30 ] && break
+		sleep 1
+	done
 	# -k writes the list of the installed packages into the backup, -u skips
 	# the files that are the same as in /rom. Neither of them keeps the
 	# configuration of DMRHub: the data is kept because /opt/dmrhub is

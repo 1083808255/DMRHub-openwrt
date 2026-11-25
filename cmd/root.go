@@ -676,9 +676,20 @@ func setupShutdownHandlers(ctx context.Context, scheduler gocron.Scheduler, hub 
 
 	hub.StartDraining()
 
-	// Wait for all active calls to complete.
-	// No timeout — we wait as long as needed.
-	hub.WaitForCalls()
+	// Wait for the active calls, but never for long: a supervisor such as
+	// procd kills the process when the stop takes too many seconds, and a
+	// kill mid write leaves the SQLite image malformed. Ten seconds of
+	// waiting covers the calls of a normal voice burst.
+	callsDone := make(chan struct{})
+	go func() {
+		hub.WaitForCalls()
+		close(callsDone)
+	}()
+	select {
+	case <-callsDone:
+	case <-time.After(10 * time.Second):
+		slog.Warn("Shutdown timed out waiting for the calls in progress; closing the database anyway")
+	}
 
 	// All calls are done. Now tear everything down.
 	servers.stopDMRServers(ctx)
