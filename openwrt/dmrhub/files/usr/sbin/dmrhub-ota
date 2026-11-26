@@ -424,10 +424,11 @@ cmd_firmware() {
 	log "正在刷写固件，设备即将重启"
 	cmd_flash_guard
 	# -k writes the list of the installed packages into the backup, -u skips
-	# the files that are the same as in /rom. Neither of them keeps the
-	# configuration of DMRHub: the data is kept because /opt/dmrhub is
-	# named in /lib/upgrade/keep.d/dmrhub.
-	sysupgrade -k -u "$FW_FILE"
+	# the files that are the same as in /rom, and -p keeps the partition table
+	# so the data partition of dmrhub-data survives the flash. It only helps
+	# while the image layout matches the disk; a changed KERNEL_PARTSIZE or
+	# ROOTFS_PARTSIZE rewrites the table and takes the data partition with it.
+	sysupgrade -k -u -p "$FW_FILE"
 }
 
 # json_escape - make a string safe to embed in a JSON double-quoted value.

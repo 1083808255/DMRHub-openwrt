@@ -38,6 +38,7 @@ define Package/dmrhub/install
 	$(INSTALL_BIN) ./files/usr/bin/dmrhub $(1)/usr/bin/dmrhub
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/dmrhub $(1)/etc/init.d/dmrhub
+	$(INSTALL_BIN) ./files/etc/init.d/dmrhub-data $(1)/etc/init.d/dmrhub-data
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/etc/config/dmrhub $(1)/etc/config/dmrhub
 	$(INSTALL_DIR) $(1)/etc/uci-defaults

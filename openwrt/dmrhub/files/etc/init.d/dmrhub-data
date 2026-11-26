@@ -1,0 +1,118 @@
+#!/bin/sh /etc/rc.common
+# Give DMRHub a data partition that fills the rest of the disk.
+#
+# The rootfs overlay lives inside the fixed-size rootfs partition, and on x86
+# sysupgrade stages its configuration archive on the small boot partition.
+# Keeping the database there either truncates it or ties it to the flash. This
+# script creates an ext4 partition on the free space of the disk at first boot,
+# grows it whenever the disk itself grows, and mounts it over /opt/dmrhub.
+# sysupgrade runs with -p, so the partition survives a firmware upgrade.
+
+START=15
+# Stop after DMRHub (START=95) so the database is closed before we unmount.
+STOP=99
+
+MOUNT_POINT=/opt/dmrhub
+LABEL=dmrhub
+# Leave at least 32 MiB of free space, otherwise the rootfs stays in charge.
+MIN_FREE_SECTORS=65536
+
+log() {
+	logger -t dmrhub-data "$*"
+	echo "dmrhub-data: $*" >&2
+}
+
+# The boot partition always lives on the same disk as the rootfs.
+data_disk() {
+	local dev
+	dev=$(awk '$2 == "/boot" && $1 ~ /^\/dev\// { print $1; exit }' /proc/mounts)
+	[ -n "$dev" ] || return 1
+	echo "$dev" | sed 's/[0-9][0-9]*$//'
+}
+
+part_end() { # part_end <disk> <partition number>
+	parted -s -m "$1" unit s print 2>/dev/null |
+		awk -F: -v n="$2" '$1 == n { sub(/s$/, "", $3); print $3; exit }'
+}
+
+is_mounted() {
+	awk -v m="$1" '$2 == m { found = 1 } END { exit !found }' /proc/mounts
+}
+
+create_partition() { # create_partition <disk> <start sector>
+	local disk="$1" start="$2" part="$1"3
+	log "创建数据分区 ${start}s -> 磁盘末尾"
+	parted -s "$disk" unit s mkpart primary ext4 "${start}s" 100% || return 1
+	partx -a "$disk" >/dev/null 2>&1
+	sleep 1
+	[ -b "$part" ] || { log "分区设备 $part 未出现"; return 1; }
+	mke2fs -q -t ext4 -L "$LABEL" -m 0 "$part" || return 1
+	return 0
+}
+
+grow_partition() { # grow_partition <disk> <partition> <disk end sector>
+	local disk="$1" part="$2" disk_end="$3" end
+	end=$(part_end "$disk" 3)
+	[ -n "$end" ] || return 0
+	[ "$end" -lt $((disk_end - 2048)) ] || return 0
+	log "磁盘已扩大，扩展数据分区至 ${disk_end}s"
+	parted -s "$disk" unit s resizepart 3 100% || { log "扩展分区失败"; return 0; }
+	partx -u -n 3 "$disk" >/dev/null 2>&1
+	sleep 1
+	resize2fs "$part" >/dev/null 2>&1 || log "resize2fs 失败，下次启动会重试"
+	return 0
+}
+
+start() {
+	local disk part disk_end p2_end end fresh=0
+	[ -x /usr/sbin/parted ] || { log "parted 未安装，跳过分区管理"; return 0; }
+	disk=$(data_disk) || return 0
+	[ -b "$disk" ] || return 0
+	part="${disk}3"
+
+	mkdir -p "$MOUNT_POINT"
+	is_mounted "$MOUNT_POINT" && return 0
+
+	disk_end=$(cat "/sys/block/$(basename "$disk")/size" 2>/dev/null)
+	[ -n "$disk_end" ] || { log "无法读取磁盘大小"; return 1; }
+
+	if [ ! -b "$part" ]; then
+		p2_end=$(part_end "$disk" 2)
+		[ -n "$p2_end" ] || { log "无法读取分区表"; return 1; }
+		if [ $((disk_end - p2_end)) -lt $MIN_FREE_SECTORS ]; then
+			log "磁盘剩余空间不足，数据继续放在根分区"
+			return 0
+		fi
+		create_partition "$disk" "$((p2_end + 1))" || return 1
+		fresh=1
+	else
+		grow_partition "$disk" "$part" "$disk_end"
+	fi
+
+	# First creation: move whatever the rootfs already holds into the new
+	# partition, so an in-place upgrade keeps its database and settings.
+	if [ "$fresh" = 1 ] && [ -n "$(ls -A "$MOUNT_POINT" 2>/dev/null)" ]; then
+		mkdir -p /mnt/dmrhub-migrate
+		if mount -t ext4 -o noatime "$part" /mnt/dmrhub-migrate; then
+			cp -a "$MOUNT_POINT/." /mnt/dmrhub-migrate/
+			umount /mnt/dmrhub-migrate
+			log "已把现有数据迁移到数据分区"
+		else
+			log "无法挂载新分区用于迁移"
+		fi
+	fi
+
+	mount -t ext4 -o noatime "$part" "$MOUNT_POINT" || {
+		log "挂载数据分区失败"
+		return 1
+	}
+	end=$(df -h "$MOUNT_POINT" | awk 'NR == 2 { print $2 }')
+	log "数据分区已挂载到 $MOUNT_POINT（$end）"
+	return 0
+}
+
+stop() {
+	is_mounted "$MOUNT_POINT" || return 0
+	sync
+	umount "$MOUNT_POINT" 2>/dev/null || log "卸载数据分区失败"
+}

@@ -147,7 +147,7 @@ jobs:
           PKG=openwrt/dmrhub
           mkdir -p "$PKG/files/usr/bin" "$PKG/files/usr/sbin"
           cp artifacts/dmrhub "$PKG/files/usr/bin/dmrhub"
-          chmod +x "$PKG/files/etc/init.d/dmrhub" "$PKG/files/etc/uci-defaults/99-dmrhub" "$PKG/files/usr/sbin/dmrhub-ota" "$PKG/files/usr/sbin/dmrhub-db-protect"
+          chmod +x "$PKG/files/etc/init.d/dmrhub" "$PKG/files/etc/init.d/dmrhub-data" "$PKG/files/etc/uci-defaults/99-dmrhub" "$PKG/files/usr/sbin/dmrhub-ota" "$PKG/files/usr/sbin/dmrhub-db-protect"
           chmod +x "$PKG/files/usr/bin/dmrhub"
           cd "$PKG"
           # Build a portable .ipk (ar archive with debian-binary + control.tar.gz + data.tar.gz)
@@ -218,15 +218,17 @@ jobs:
           # Disable signature verification so the unsigned local feed is accepted.
           sed -i '/option check_signature/d' repositories.conf
           echo "==> repositories.conf:"; cat repositories.conf
-          # Base set: LuCI web UI (Chinese) + DMRHub + certs
-          PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates sqlite3-cli"
-          # DMRHub binary is ~80MB; enlarge rootfs partition so it fits.
-          # The boot partition must also hold the sysupgrade config archive
-          # (which carries the database snapshot) during a flash: the stock
-          # 16 MB is too small and silently truncates it, so use 200 MB and
-          # shrink rootfs accordingly to stay inside the 528 MB disk.
-          echo "==> make image PACKAGES=$PACKAGES KERNEL_PARTSIZE=200 ROOTFS_PARTSIZE=320"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" KERNEL_PARTSIZE=200 ROOTFS_PARTSIZE=320
+          # Base set: LuCI web UI (Chinese) + DMRHub + certs. parted, resize2fs
+          # and partx manage the data partition that init.d/dmrhub-data creates
+          # on the free space of the disk at first boot.
+          PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates sqlite3-cli parted resize2fs partx-utils"
+          # DMRHub binary is ~80MB. The boot partition only stages the small
+          # configuration archive now that the database lives on its own data
+          # partition, so 64 MB is plenty; the rootfs keeps 192 MB for the
+          # squashfs (32 MB) and the overlay. Everything left on the disk goes
+          # to the DMRHub data partition at first boot.
+          echo "==> make image PACKAGES=$PACKAGES KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=192"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=192
           ls -lh bin/targets/x86/64/*.img.gz
 
       - name: Collect firmware artifacts

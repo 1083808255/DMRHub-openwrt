@@ -10,8 +10,9 @@
 #   snapshot - checkpoint a stopped database and refresh the snapshot
 #   check    - only report whether the live database passes integrity_check
 #
-# The snapshot lives next to the database, so sysupgrade keeps it because
-# /lib/upgrade/keep.d/dmrhub keeps the whole /opt/dmrhub directory.
+# The snapshot lives next to the database on the data partition, which
+# sysupgrade -p leaves untouched and which never travels through the
+# configuration archive.
 
 DATA_DIR="${DMRHUB_DATA_DIR:-/opt/dmrhub/data}"
 DB="$DATA_DIR/DMRHub.db"
@@ -146,6 +147,12 @@ startup() {
 		return 1
 	fi
 	if [ ! -f "$DB" ]; then
+		# A fresh install has no database and no snapshot: there is nothing
+		# to check or restore, and DMRHub creates the database on first start.
+		if [ ! -f "$GOOD" ]; then
+			log "没有数据库，按全新安装继续"
+			return 0
+		fi
 		restore_from_good || return 1
 	fi
 	if db_ok "$DB"; then

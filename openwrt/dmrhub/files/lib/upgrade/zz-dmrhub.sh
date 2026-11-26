@@ -1,15 +1,12 @@
 # sysupgrade hook: keep SQLite's live files out of the configuration archive.
 #
-# /lib/upgrade/keep.d/dmrhub keeps /opt/dmrhub, so sysupgrade archives
-# DMRHub.db together with its WAL and SHM files. On this device that copy has
-# produced a truncated database even after the writer was stopped. The
-# dmrhub-db-protect script keeps a verified single-file snapshot at
-# DMRHub.db.good, which is safe to archive and is restored at the next boot.
-# Drop the three live files, plus the quarantined evidence copies that
-# db-protect leaves behind (DMRHub.db.bad-*). The evidence files are only
-# useful on the device and can be many megabytes; including them in the
-# archive is what overflowed the 16 MB boot partition and silently truncated
-# the restore. Temporary snapshot files are skipped for the same reason.
+# The database lives on the data partition (init.d/dmrhub-data) and that
+# partition does not belong to the backup at all, so normally this hook has
+# nothing to do. It stays as a guard for installs where the data partition
+# could not be created: there /opt/dmrhub still sits in the rootfs overlay and
+# a previous version of keep.d may have put it in the archive. Drop the live
+# files and the quarantined evidence copies (DMRHub.db.bad-*), which are large
+# and once overflowed the boot partition that stages the archive.
 
 dmrhub_filter_backup_db() {
 	local list="$1"
