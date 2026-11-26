@@ -31,6 +31,9 @@ import (
 type WSCallResponseUser struct {
 	ID       uint   `json:"id"`
 	Callsign string `json:"callsign"`
+	// Registered marks a user who has an account on this server. A user
+	// whose callsign only comes from the radio ID database is not.
+	Registered bool `json:"registered"`
 }
 
 type WSCallResponseRepeater struct {
@@ -168,6 +171,7 @@ func NewWSCallResponseFromCall(call *models.Call) WSCallResponse {
 	}
 	resp.User.ID = call.User.ID
 	resp.User.Callsign = call.User.Callsign
+	resp.User.Registered = call.User.ID != 0
 	if resp.User.ID == 0 {
 		resp.User.ID = call.SourceID
 	}
@@ -205,6 +209,7 @@ func NewWSCallResponseFromCall(call *models.Call) WSCallResponse {
 	if call.IsToUser {
 		resp.ToUser.ID = call.ToUser.ID
 		resp.ToUser.Callsign = call.ToUser.Callsign
+		resp.ToUser.Registered = call.ToUser.ID != 0
 	}
 	if call.IsToRepeater {
 		resp.ToRepeater.RadioID = call.ToRepeater.ID
