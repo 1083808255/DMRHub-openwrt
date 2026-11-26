@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/userdb"
 	"gorm.io/gorm"
 )
 
@@ -169,6 +170,14 @@ func NewWSCallResponseFromCall(call *models.Call) WSCallResponse {
 	resp.User.Callsign = call.User.Callsign
 	if resp.User.ID == 0 {
 		resp.User.ID = call.SourceID
+	}
+	// A call from a radio that is not a registered user has no callsign.
+	// Fall back to the radio ID database so the last heard table shows the
+	// callsign of upstream and unregistered talkers.
+	if resp.User.Callsign == "" && userdb.IsValidUserID(resp.User.ID) {
+		if u, ok := userdb.Get(resp.User.ID); ok {
+			resp.User.Callsign = u.Callsign
+		}
 	}
 	if resp.SourceID == 0 {
 		resp.SourceID = resp.User.ID
