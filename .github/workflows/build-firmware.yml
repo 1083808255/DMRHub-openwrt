@@ -221,8 +221,12 @@ jobs:
           # Base set: LuCI web UI (Chinese) + DMRHub + certs
           PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates sqlite3-cli"
           # DMRHub binary is ~80MB; enlarge rootfs partition so it fits.
-          echo "==> make image PACKAGES=$PACKAGES ROOTFS_PARTSIZE=512"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" ROOTFS_PARTSIZE=512
+          # The boot partition must also hold the sysupgrade config archive
+          # (which carries the database snapshot) during a flash: the stock
+          # 16 MB is too small and silently truncates it, so use 200 MB and
+          # shrink rootfs accordingly to stay inside the 528 MB disk.
+          echo "==> make image PACKAGES=$PACKAGES KERNEL_PARTSIZE=200 ROOTFS_PARTSIZE=320"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" KERNEL_PARTSIZE=200 ROOTFS_PARTSIZE=320
           ls -lh bin/targets/x86/64/*.img.gz
 
       - name: Collect firmware artifacts

@@ -5,12 +5,17 @@
 # produced a truncated database even after the writer was stopped. The
 # dmrhub-db-protect script keeps a verified single-file snapshot at
 # DMRHub.db.good, which is safe to archive and is restored at the next boot.
-# Drop only the three live files; every evidence backup stays in the archive.
+# Drop the three live files, plus the quarantined evidence copies that
+# db-protect leaves behind (DMRHub.db.bad-*). The evidence files are only
+# useful on the device and can be many megabytes; including them in the
+# archive is what overflowed the 16 MB boot partition and silently truncated
+# the restore. Temporary snapshot files are skipped for the same reason.
 
 dmrhub_filter_backup_db() {
 	local list="$1"
 	[ -f "$list" ] || return 0
-	grep -Ev '^/?opt/dmrhub/data/DMRHub\.db(-wal|-shm)?$' "$list" > "$list.dmrhub" || true
+	grep -Ev '^/?opt/dmrhub/data/DMRHub\.db(-wal|-shm)?$|^/?opt/dmrhub/data/DMRHub\.db\.(bad-.*|good\.tmp.*)$' \
+		"$list" > "$list.dmrhub" || true
 	mv -f "$list.dmrhub" "$list"
 }
 
