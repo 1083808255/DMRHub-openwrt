@@ -529,8 +529,27 @@ func POSTRepeater(c *gin.Context) {
 			}
 		case hotspotRegex.MatchString(fmt.Sprintf("%d", json.RadioID)):
 			if config.DMR.Checks().HotspotIDs {
-				if !strings.HasPrefix(fmt.Sprintf("%d", json.RadioID), fmt.Sprintf("%d", owner.ID)) {
-					c.JSON(http.StatusBadRequest, gin.H{errorKey: "Hotspot ID must start with user ID"})
+				idStr := fmt.Sprintf("%d", json.RadioID)
+				allowed := strings.HasPrefix(idStr, fmt.Sprintf("%d", owner.ID))
+				if !allowed {
+					// A hotspot may also start with any radio ID the user
+					// added on the settings page, so that a club or an
+					// alternate callsign can own hotspots of its own.
+					ids, listErr := models.ListUserRadioIDs(db, owner.ID)
+					if listErr != nil {
+						slog.Error("Error listing the radio IDs of a user", "userID", owner.ID, "error", listErr)
+						c.JSON(http.StatusInternalServerError, gin.H{errorKey: msgTryAgainLater})
+						return
+					}
+					for _, rid := range ids {
+						if strings.HasPrefix(idStr, fmt.Sprintf("%d", rid.RadioID)) {
+							allowed = true
+							break
+						}
+					}
+				}
+				if !allowed {
+					c.JSON(http.StatusBadRequest, gin.H{errorKey: "Hotspot ID must start with the ID of the user or one of its added radio IDs"})
 					return
 				}
 			}

@@ -63,7 +63,7 @@ func TestRepeaterAndHotspotIDChecksAreApart(t *testing.T) {
 					resp, w = testutils.CreateRepeater(t, router, jar, apimodels.RepeaterPost{RadioID: 300375601})
 					assert.Equal(t, tc.spot, w.Code, resp.Error)
 					if tc.hotspot {
-						assert.Equal(t, "Hotspot ID must start with user ID", resp.Error)
+						assert.Equal(t, "Hotspot ID must start with the ID of the user or one of its added radio IDs", resp.Error)
 					}
 				})
 			}

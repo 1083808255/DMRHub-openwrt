@@ -125,7 +125,7 @@ func TestRadioIDChecksUseTheChosenOwner(t *testing.T) {
 		post apimodels.RepeaterPost
 		msg  string
 	}{
-		{"hotspot of another user", apimodels.RepeaterPost{RadioID: 999000201, Owner: n0call}, "Hotspot ID must start with user ID"},
+		{"hotspot of another user", apimodels.RepeaterPost{RadioID: 999000201, Owner: n0call}, "Hotspot ID must start with the ID of the user or one of its added radio IDs"},
 		{"repeater the owner is no trustee of", apimodels.RepeaterPost{RadioID: 999998, Owner: n0call}, "Repeater ID does not match assigned callsign"},
 	} {
 		code, msg := enroll(adminJar, tc.post)

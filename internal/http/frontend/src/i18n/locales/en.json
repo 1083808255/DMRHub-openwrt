@@ -2037,6 +2037,7 @@
   "Failed to generate a peer password": "Failed to generate a peer password",
   "Failed to generate a repeater password": "Failed to generate a repeater password",
   "Hotspot ID must start with user ID": "Hotspot ID must start with user ID",
+  "Hotspot ID must start with the ID of the user or one of its added radio IDs": "Hotspot ID must start with the ID of the user or one of its added radio IDs",
   "IPSC is not enabled on this server": "IPSC is not enabled on this server",
   "IPSC repeaters carry only AMBE": "IPSC repeaters carry only AMBE",
   "Invalid ": "Invalid ",
