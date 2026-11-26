@@ -54,11 +54,22 @@ grow_partition() { # grow_partition <disk> <partition> <disk end sector>
 	local disk="$1" part="$2" disk_end="$3" end
 	end=$(part_end "$disk" 3)
 	[ -n "$end" ] || return 0
-	[ "$end" -lt $((disk_end - 2048)) ] || return 0
-	log "磁盘已扩大，扩展数据分区至 ${disk_end}s"
-	parted -s "$disk" unit s resizepart 3 100% || { log "扩展分区失败"; return 0; }
-	partx -u -n 3 "$disk" >/dev/null 2>&1
-	sleep 1
+	# A disk that shrank leaves the partition past its end. Do not rewrite the
+	# table then: the filesystem is still readable, and moving it would only
+	# risk the data.
+	if [ "$end" -gt "$disk_end" ]; then
+		log "数据分区超出磁盘末尾（${end}s > ${disk_end}s），跳过扩容"
+		return 0
+	fi
+	if [ "$end" -lt $((disk_end - 2048)) ]; then
+		log "磁盘已扩大，扩展数据分区至 ${disk_end}s"
+		parted -s "$disk" unit s resizepart 3 100% || { log "扩展分区失败"; return 0; }
+		partx -u -n 3 "$disk" >/dev/null 2>&1
+		sleep 1
+	fi
+	# resize2fs is idempotent and runs on every boot: when the partition has
+	# already reached the end of the disk, a failed resize would otherwise
+	# never be retried, and the filesystem would stay small forever.
 	resize2fs "$part" >/dev/null 2>&1 || log "resize2fs 失败，下次启动会重试"
 	return 0
 }
