@@ -70,6 +70,7 @@ func setupPaths() []string {
 		"dmr.disable-radio-id-validation",
 		"dmr.radio-id-checks",
 		"dmr.radio-id-url",
+		"dmr.radio-id-extra-url",
 		"dmr.repeater-id-url",
 		"dmr.public-address",
 		"dmr.retention",
