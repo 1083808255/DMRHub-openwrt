@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -171,9 +172,25 @@ func (db *DB[T]) Get(id uint) (T, bool) {
 	return db.dataMap.Load(id)
 }
 
+// ExtraSource describes an additional database source that is merged into
+// the primary database during UpdateMerged. The decode function receives the
+// map being built for the new database state and returns the number of
+// entries it added.
+type ExtraSource[T any] struct {
+	URL    string
+	Decode func(r io.Reader, m *xsync.Map[uint, T]) (int, error)
+}
+
 // Update fetches a fresh copy of the database from the given URL
 // and replaces the in-memory map.
 func (db *DB[T]) Update(url string) error {
+	return db.UpdateMerged(url, nil)
+}
+
+// UpdateMerged behaves like Update, then merges each extra source into the
+// new database state. Failures of an extra source are logged but do not fail
+// the update, since the primary source was loaded successfully.
+func (db *DB[T]) UpdateMerged(url string, extras []ExtraSource[T]) error {
 	if err := db.ensureLoaded(); err != nil {
 		slog.Error("Error unpacking database", "entity", db.config.EntityName, "error", err)
 		return ErrUpdateFailed
@@ -214,6 +231,15 @@ func (db *DB[T]) Update(url string) error {
 		return fmt.Errorf("%w: %w", ErrUpdateFailed, ErrNoEntries)
 	}
 
+	for _, extra := range extras {
+		extraCount, extraErr := db.fetchExtra(ctx, extra, db.updatingMap)
+		if extraErr != nil {
+			slog.Warn("Error loading extra database source", "entity", db.config.EntityName, "url", extra.URL, "error", extraErr)
+			continue
+		}
+		count += extraCount
+	}
+
 	db.metadata.Store(dbMetadata{Count: count, Date: time.Now()})
 	db.dataMap = db.updatingMap
 	db.updatingMap = xsync.NewMap[uint, T]()
@@ -221,6 +247,31 @@ func (db *DB[T]) Update(url string) error {
 	slog.Info("Update complete", "entity", db.config.EntityName, "loaded", db.Len())
 
 	return nil
+}
+
+// fetchExtra downloads and decodes a single extra source into m.
+func (db *DB[T]) fetchExtra(ctx context.Context, extra ExtraSource[T], m *xsync.Map[uint, T]) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(extra.URL), nil)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			slog.Error("Error closing response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	return extra.Decode(resp.Body, m)
 }
 
 // GetDate returns the date of the currently loaded database.

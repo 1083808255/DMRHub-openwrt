@@ -22,8 +22,11 @@ package userdb
 import (
 	// Embed the users.json.xz file into the binary.
 	_ "embed"
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -240,10 +243,58 @@ func Get(dmrID uint) (DMRUser, bool) {
 }
 
 func Update(url string) error {
-	if err := userDB.Update(url); err != nil {
+	if err := userDB.UpdateMerged(url, []dmrdb.ExtraSource[DMRUser]{
+		{URL: secondaryURL, Decode: decodeDATUsers},
+	}); err != nil {
 		return fmt.Errorf("userdb: %w", err)
 	}
 	return nil
+}
+
+// DefaultSecondaryURL is the radiowo.com dmrid.dat supplement that is merged
+// into the user database on every update.
+const DefaultSecondaryURL = "https://radiowo.com/id_library/dmrid.dat"
+
+// secondaryURL is the URL of the supplementary user database merged on update.
+var secondaryURL = DefaultSecondaryURL //nolint:gochecknoglobals
+
+// decodeDATUsers parses the semicolon-separated radiowo.com dmrid.dat format
+// (ID;CALLSIGN;NAME;CITY;STATE;COUNTRY;REMARKS, with a variable number of
+// fields) and fills IDs that are missing from the primary database. Entries
+// already present in the primary source always win.
+func decodeDATUsers(r io.Reader, m *xsync.Map[uint, DMRUser]) (int, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, ";")
+		if len(fields) < 2 {
+			continue
+		}
+		id, err := strconv.ParseUint(strings.TrimSpace(fields[0]), 10, 32)
+		if err != nil || id == 0 || fields[1] == "" {
+			continue
+		}
+		if _, ok := m.Load(uint(id)); ok {
+			continue
+		}
+
+		user := DMRUser{ID: uint(id), Callsign: fields[1]}
+		if len(fields) > 2 {
+			user.Name = fields[2]
+		}
+		if len(fields) > 5 {
+			user.City, user.State, user.Country = fields[3], fields[4], fields[5]
+		}
+		m.Store(user.ID, user)
+		count++
+	}
+	return count, scanner.Err()
 }
 
 func GetDate() (time.Time, error) {

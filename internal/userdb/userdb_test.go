@@ -238,6 +238,49 @@ func TestUpdateIgnoresNewFields(t *testing.T) {
 	}
 }
 
+func TestUpdateMergedSecondary(t *testing.T) {
+	t.Parallel()
+	primary := dbtest.NewServer(t, 0, readFixture(t, "users-current.json"))
+	secondary := dbtest.NewServer(t, 0, []byte("1002010;BH8GDV;BH8GDV;???;???;China;????;\n3002207;N0EXTRA;Extra;X;Y;Z;\ninvalid-line\n"))
+	db := newFixtureDB(t)
+	sources := []dmrdb.ExtraSource[DMRUser]{{URL: secondary.URL, Decode: decodeDATUsers}}
+	if err := db.UpdateMerged(primary.URL, sources); err != nil {
+		t.Fatalf("UpdateMerged failed: %v", err)
+	}
+	if db.Len() != 3 {
+		t.Errorf("expected 3 users, got %d", db.Len())
+	}
+	// The primary source wins for IDs it already contains.
+	if user, ok := db.Get(3002207); !ok || user.Callsign != "K9CALL" {
+		t.Errorf("primary source did not win for 3002207: %+v", user)
+	}
+	want := DMRUser{
+		ID:       1002010,
+		Callsign: "BH8GDV",
+		Name:     "BH8GDV",
+		City:     "???",
+		State:    "???",
+		Country:  "China",
+	}
+	if user, ok := db.Get(1002010); !ok || user != want {
+		t.Errorf("expected %+v, got %+v", want, user)
+	}
+}
+
+func TestUpdateMergedSecondaryFailure(t *testing.T) {
+	t.Parallel()
+	primary := dbtest.NewServer(t, 0, readFixture(t, "users-current.json"))
+	secondary := dbtest.NewServer(t, 1, nil)
+	db := newFixtureDB(t)
+	sources := []dmrdb.ExtraSource[DMRUser]{{URL: secondary.URL, Decode: decodeDATUsers}}
+	if err := db.UpdateMerged(primary.URL, sources); err != nil {
+		t.Fatalf("UpdateMerged failed: %v", err)
+	}
+	if db.Len() != 2 {
+		t.Errorf("expected 2 users, got %d", db.Len())
+	}
+}
+
 func TestUpdateRetriesWithBackoff(t *testing.T) {
 	t.Parallel()
 	srv := dbtest.NewServer(t, 2, readFixture(t, "users-current.json"))
