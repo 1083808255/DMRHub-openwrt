@@ -70,7 +70,7 @@ export default {
       page: 1,
       rows: 30,
       filter: defaultFilter() as TypeFilterValue,
-      socket: null as { close(): void } | null,
+      sockets: [] as { close(): void }[],
       loading: false,
       now: Date.now(),
       timeInterval: null as ReturnType<typeof setInterval> | null,
@@ -85,9 +85,7 @@ export default {
     if (this.timeInterval !== null) {
       clearInterval(this.timeInterval);
     }
-    if (this.socket) {
-      this.socket.close();
-    }
+    this.closeSockets();
   },
   watch: {
     loggedIn() {
@@ -118,12 +116,24 @@ export default {
     },
   },
   methods: {
-    connectSocket() {
-      if (this.socket) {
-        this.socket.close();
+    closeSockets() {
+      for (const socket of this.sockets) {
+        socket.close();
       }
-      const path = this.loggedIn ? '/calls' : '/lastheard';
-      this.socket = ws.connect(getWebsocketURI() + path, this.onWebsocketMessage);
+      this.sockets = [];
+    },
+    connectSocket() {
+      this.closeSockets();
+      const uri = getWebsocketURI();
+      // The global Last Heard list needs every public call, including calls
+      // from upstream networks that are not routed through the viewer's own
+      // repeaters. /ws/lastheard carries that stream. /ws/calls is still
+      // needed for private calls addressed to the viewer or their repeaters.
+      // Duplicate frames are harmless because messages are merged by call id.
+      this.sockets.push(ws.connect(uri + '/lastheard', this.onWebsocketMessage));
+      if (this.loggedIn) {
+        this.sockets.push(ws.connect(uri + '/calls', this.onWebsocketMessage));
+      }
     },
     handlePageIndexUpdate(pageIndex: number) {
       const nextPage = pageIndex + 1;

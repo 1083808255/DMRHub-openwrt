@@ -110,7 +110,7 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
         if (call.active) {
           return t('Active');
         }
-        return h(RelativeTimestamp, { time: call.start_time, active: call.active });
+        return h(RelativeTimestamp, { time: call.start_time, active: call.active, relative: true });
       },
     },
     {

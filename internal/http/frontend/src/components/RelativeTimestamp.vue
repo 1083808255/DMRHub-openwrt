@@ -25,10 +25,10 @@
       <Tooltip>
         <TooltipTrigger as-child>
           <span v-if="active">{{ $t("Active") }}</span>
-          <span v-else>{{ absoluteTime }}</span>
+          <span v-else>{{ relative ? relativeTime : absoluteTime }}</span>
         </TooltipTrigger>
         <TooltipContent side="top" class="max-w-xs">
-          <p>{{ relativeTime }}</p>
+          <p>{{ relative ? absoluteTime : relativeTime }}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -57,7 +57,12 @@ export default {
       type: Boolean,
       required: false,
       default: false,
-    }
+    },
+    relative: {
+      type: Boolean,
+      required: false,
+      default: false,
+    },
   },
   data() {
     return {

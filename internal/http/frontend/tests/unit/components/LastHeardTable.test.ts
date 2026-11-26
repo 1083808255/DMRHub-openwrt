@@ -44,7 +44,7 @@ async function socketPath(loggedIn: boolean) {
   const wrapper = mount(LastHeardTable, { global: { plugins: [pinia], stubs: { RouterLink: true } } });
   await flushPromises();
   wrapper.unmount();
-  return new URL(mockWS.connect.mock.calls[0]![0] as string).pathname;
+  return mockWS.connect.mock.calls.map((c) => new URL(c[0] as string).pathname);
 }
 
 describe('LastHeardTable live updates', () => {
@@ -53,11 +53,11 @@ describe('LastHeardTable live updates', () => {
   });
 
   it('uses the public websocket for a visitor', async () => {
-    expect(await socketPath(false)).toBe('/ws/lastheard');
+    expect(await socketPath(false)).toEqual(['/ws/lastheard']);
   });
 
-  it('uses the calls websocket for a logged-in user', async () => {
-    expect(await socketPath(true)).toBe('/ws/calls');
+  it('uses both websockets for a logged-in user', async () => {
+    expect(await socketPath(true)).toEqual(['/ws/lastheard', '/ws/calls']);
   });
 
   it('moves to the calls websocket when the visitor logs in', async () => {
@@ -70,7 +70,7 @@ describe('LastHeardTable live updates', () => {
     user.loggedIn = true;
     await flushPromises();
     const paths = mockWS.connect.mock.calls.map((c) => new URL(c[0] as string).pathname);
-    expect(paths).toEqual(['/ws/lastheard', '/ws/calls']);
+    expect(paths).toEqual(['/ws/lastheard', '/ws/lastheard', '/ws/calls']);
     expect(mockWS.connect.mock.results[0]!.value.close).toHaveBeenCalled();
     wrapper.unmount();
   });
