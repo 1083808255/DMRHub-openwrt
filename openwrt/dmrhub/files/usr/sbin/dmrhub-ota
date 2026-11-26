@@ -325,6 +325,33 @@ cmd_app() {
 	log "应用程序已更新至 $REMOTE_VERSION"
 }
 
+# cmd_flash_guard - stop the SQLite writer before sysupgrade touches its files.
+# sysupgrade backs up /opt/dmrhub, including DMRHub.db and its WAL/SHM files.
+# If DMRHub is still running, that backup can capture a truncated WAL snapshot,
+# which is exactly how the database was corrupted. Refuse to continue unless
+# the process is really gone.
+cmd_flash_guard() {
+	if pidof dmrhub >/dev/null 2>&1; then
+		log "正在停止 DMRHub，以便安全保存数据库…"
+		/etc/init.d/dmrhub stop >/dev/null 2>&1 || die "无法停止 DMRHub，已取消刷机以保护数据库"
+		i=0
+		while [ $i -lt 60 ]; do
+			i=$((i + 1))
+			pidof dmrhub >/dev/null 2>&1 || break
+			sleep 1
+		done
+		if pidof dmrhub >/dev/null 2>&1; then
+			die "DMRHub 仍在运行（$(pidof dmrhub)），已取消刷机以保护数据库"
+		fi
+	fi
+	# The init script also snapshots after a normal stop, but sysupgrade is
+	# the point of no return: verify the writer is gone and the snapshot is
+	# fresh here as well, and refuse to flash if either check fails.
+	[ -x /usr/sbin/dmrhub-db-protect ] || die "数据库保护脚本缺失，已取消刷机以保护数据库"
+	/usr/sbin/dmrhub-db-protect snapshot || die "无法更新数据库快照，已取消刷机以保护数据库"
+	log "DMRHub 已停止，数据库快照已更新，可以安全备份"
+}
+
 cmd_firmware() {
 	load_release
 	[ -n "$REMOTE_FW_URL" ] || die "版本清单中没有固件镜像信息"
@@ -340,10 +367,7 @@ cmd_firmware() {
 		echo "$REMOTE_FW_SHA  $FW_FILE" | sha256sum -c - >/dev/null || die "SHA256 校验不通过，文件可能已损坏"
 	fi
 	log "正在刷写固件，设备即将重启"
-	# Stop the service before the backup. The database runs in WAL mode, and
-	# stopping it lets SQLite fold the log into the database file, so that
-	# the archive holds a consistent copy.
-	/etc/init.d/dmrhub stop 2>/dev/null || true
+	cmd_flash_guard
 	# -k writes the list of the installed packages into the backup, -u skips
 	# the files that are the same as in /rom. Neither of them keeps the
 	# configuration of DMRHub: the data is kept because /opt/dmrhub is
@@ -465,8 +489,11 @@ firmware)
 feed)
 	cmd_feed "${2:-}"
 	;;
+flash-guard)
+	cmd_flash_guard
+	;;
 *)
-	echo "用法：$0 {check|status|app|firmware|feed}"
+	echo "用法：$0 {check|status|app|firmware|feed|flash-guard}"
 	exit 1
 	;;
 esac

@@ -122,11 +122,12 @@ func serverParameters(params []string) []string {
 	})
 }
 
-// sqliteSynchronous is the synchronous pragma of a SQLite file. In WAL
-// mode, NORMAL does not wait for the disk on each commit, only at a
-// checkpoint: a power cut can lose the last commits, but the database stays
-// consistent.
-const sqliteSynchronous = "_pragma=synchronous(NORMAL)"
+// sqliteSynchronous is the synchronous pragma of a SQLite file. WAL mode is
+// crash-consistent, but NORMAL does not wait for the disk on each commit, so
+// an unclean shutdown can lose the newest calls. FULL keeps every committed
+// change durable, which matters on a device whose power can be cut at any
+// time.
+const sqliteSynchronous = "_pragma=synchronous(FULL)"
 
 // mysqlSQLMode is the default sql_mode of MySQL 8.4 without NO_ZERO_DATE
 // and NO_ZERO_IN_DATE, since the driver writes a zero time.Time as
@@ -141,12 +142,13 @@ func mysqlParameters(params []string) []string {
 }
 
 func sqliteParameters(params []string) []string {
-	out := slices.Clone(params)
-	if !slices.ContainsFunc(params, func(p string) bool {
+	// The shipped config used synchronous(NORMAL). Drop every explicit
+	// synchronous pragma so an old config file cannot silently keep that
+	// weaker setting after an upgrade.
+	out := slices.DeleteFunc(slices.Clone(params), func(p string) bool {
 		return strings.HasPrefix(strings.ToLower(p), "_pragma=synchronous")
-	}) {
-		out = append(out, sqliteSynchronous)
-	}
+	})
+	out = append(out, sqliteSynchronous)
 	if slices.ContainsFunc(params, func(p string) bool {
 		return strings.HasPrefix(p, "_txlock=") || p == "cache=shared"
 	}) {

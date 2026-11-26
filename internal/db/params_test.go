@@ -32,6 +32,24 @@ import (
 	"gorm.io/driver/postgres"
 )
 
+func TestSQLiteParametersAlwaysUseFullSynchronous(t *testing.T) {
+	t.Parallel()
+	got := db.SQLiteParameters([]string{
+		"_pragma=foreign_keys(1)",
+		"_pragma=journal_mode(WAL)",
+		"_pragma=synchronous(NORMAL)",
+	})
+	assert.Contains(t, got, "_pragma=synchronous(FULL)")
+	assert.NotContains(t, got, "_pragma=synchronous(NORMAL)")
+	count := 0
+	for _, p := range got {
+		if strings.HasPrefix(strings.ToLower(p), "_pragma=synchronous") {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "exactly one synchronous pragma should remain")
+}
+
 func TestServerDatabasesLeaveOutSQLitePragmas(t *testing.T) {
 	t.Parallel()
 	for _, driver := range []config.DatabaseDriver{config.DatabaseDriverPostgres, config.DatabaseDriverMySQL} {

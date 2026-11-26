@@ -20,6 +20,22 @@ HELPER_ANCHOR = "var mapdata={actions:{},config:{}};"
 # The section is added right before the page renders.
 SECTION_ANCHOR = "return m.render();},"
 
+# Native flash/restore also has to stop the SQLite writer before sysupgrade
+# archives /opt/dmrhub. The minified view calls sysupgrade in two places.
+FLASH_CALL_ANCHOR = "args.push('/tmp/firmware.bin');fs.exec('/sbin/sysupgrade',args);"
+FLASH_CALL_GUARDED = (
+    "args.push('/tmp/firmware.bin');"
+    "return dmrhubFlashGuard().then(function(){"
+    "return fs.exec('/sbin/sysupgrade',args);}).then(function(){"
+)
+FLASH_END_ANCHOR = "ui.awaitReconnect('192.168.1.1','openwrt.lan');},handleBackupList"
+FLASH_END_GUARDED = "ui.awaitReconnect('192.168.1.1','openwrt.lan');});},handleBackupList"
+RESTORE_ANCHOR = "return fs.exec('/sbin/sysupgrade',['--restore-backup','/tmp/backup.tar.gz']).then("
+RESTORE_GUARDED = (
+    "return dmrhubFlashGuard().then(function(){"
+    "return fs.exec('/sbin/sysupgrade',['--restore-backup','/tmp/backup.tar.gz']);}).then("
+)
+
 
 def fail(message: str) -> None:
     print(f"patch-luci-flash: {message}", file=sys.stderr)
@@ -43,17 +59,28 @@ def main() -> None:
         print("patch-luci-flash: already patched")
         return
 
-    if HELPER_ANCHOR not in flash:
-        fail(f"helper anchor not found in {flash_path}; the LuCI view changed")
-    if SECTION_ANCHOR not in flash:
-        fail(f"section anchor not found in {flash_path}; the LuCI view changed")
+    for name, anchor in (
+        ("helper", HELPER_ANCHOR),
+        ("section", SECTION_ANCHOR),
+        ("native flash call", FLASH_CALL_ANCHOR),
+        ("native flash end", FLASH_END_ANCHOR),
+        ("backup restore", RESTORE_ANCHOR),
+    ):
+        if anchor not in flash:
+            fail(f"{name} anchor not found in {flash_path}; the LuCI view changed")
 
     helpers = f"{BEGIN_MARK}\n{ota}\n{END_MARK}\n"
 
     # 1. The helpers, before the view object is created.
     flash = flash.replace(HELPER_ANCHOR, helpers + HELPER_ANCHOR, 1)
 
-    # 2. The block, after the page has rendered. It cannot be a form section:
+    # 2. Guard the native "Flash image..." and "Apply backup?" handlers so a
+    #    direct sysupgrade cannot archive a live SQLite writer.
+    flash = flash.replace(FLASH_CALL_ANCHOR, FLASH_CALL_GUARDED, 1)
+    flash = flash.replace(FLASH_END_ANCHOR, FLASH_END_GUARDED, 1)
+    flash = flash.replace(RESTORE_ANCHOR, RESTORE_GUARDED, 1)
+
+    # 3. The block, after the page has rendered. It cannot be a form section:
     #    this LuCI release builds the view on JSONMap, where a section added
     #    from outside renders its title but never its options.
     call = ("return Promise.resolve(m.render()).then(function(nodes){"

@@ -15,7 +15,7 @@ define Package/dmrhub
   SECTION:=net
   CATEGORY:=Network
   TITLE:=DMRHub DMR network server (Chinese localization build)
-  DEPENDS:=+ca-certificates
+  DEPENDS:=+ca-certificates +sqlite3-cli
   PKGARCH:=all
 endef
 
@@ -44,6 +44,7 @@ define Package/dmrhub/install
 	$(INSTALL_BIN) ./files/etc/uci-defaults/99-dmrhub $(1)/etc/uci-defaults/99-dmrhub
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./files/usr/sbin/dmrhub-ota $(1)/usr/sbin/dmrhub-ota
+	$(INSTALL_BIN) ./files/usr/sbin/dmrhub-db-protect $(1)/usr/sbin/dmrhub-db-protect
 	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(INSTALL_DATA) ./files/lib/upgrade/keep.d/dmrhub $(1)/lib/upgrade/keep.d/dmrhub
 	# The signing key that lets opkg verify our feed. The image keeps

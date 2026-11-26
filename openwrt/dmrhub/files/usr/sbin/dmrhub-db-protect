@@ -1,0 +1,178 @@
+#!/bin/sh
+# DMRHub SQLite safety helpers.
+#
+# The device can lose power without a clean shutdown. SQLite in WAL mode is
+# crash-consistent, but the newest commits can still be missing if it was
+# opened with synchronous(NORMAL), and a truncated file cannot repair itself.
+# This script keeps a verified single-file snapshot under /opt/dmrhub/data:
+#
+#   startup  - check the database, restore the snapshot if it is damaged
+#   snapshot - checkpoint a stopped database and refresh the snapshot
+#   check    - only report whether the live database passes integrity_check
+#
+# The snapshot lives next to the database, so sysupgrade keeps it because
+# /lib/upgrade/keep.d/dmrhub keeps the whole /opt/dmrhub directory.
+
+DATA_DIR="${DMRHUB_DATA_DIR:-/opt/dmrhub/data}"
+DB="$DATA_DIR/DMRHub.db"
+GOOD="$DATA_DIR/DMRHub.db.good"
+SQLITE="${DMRHUB_SQLITE:-/usr/bin/sqlite3}"
+
+log() {
+	if command -v logger >/dev/null 2>&1; then
+		logger -t dmrhub-db-protect "$1"
+	fi
+	echo "dmrhub-db-protect: $1" >&2
+}
+
+need_sqlite() {
+	[ -x "$SQLITE" ] || {
+		log "sqlite3 不可用，无法保护数据库"
+		return 1
+	}
+}
+
+db_ok() {
+	db="$1"
+	[ -f "$db" ] || return 1
+	out=$("$SQLITE" -bail "$db" "PRAGMA integrity_check;" 2>/dev/null) || return 1
+	[ "$out" = "ok" ]
+}
+
+wait_writer_gone() {
+	i=0
+	while [ "$i" -lt 60 ]; do
+		pidof dmrhub >/dev/null 2>&1 || return 0
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
+
+preserve_sidecars() {
+	stamp="$(date +%Y%m%d%H%M%S)-$$"
+	for suffix in -wal -shm; do
+		if [ -e "$DB$suffix" ]; then
+			mv "$DB$suffix" "$DB$suffix.bad-$stamp" 2>/dev/null || true
+		fi
+	done
+}
+
+checkpoint_ok() {
+	out=$("$SQLITE" -bail "$DB" "PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;" 2>/dev/null) || return 1
+	last=$(printf '%s\n' "$out" | tail -n 1)
+	[ "$last" = "ok" ]
+}
+
+snapshot() {
+	need_sqlite || return 1
+	if ! wait_writer_gone; then
+		log "DMRHub 仍在运行，拒绝生成数据库快照"
+		return 1
+	fi
+	if [ ! -f "$DB" ]; then
+		log "数据库不存在，无法生成快照"
+		return 1
+	fi
+	if ! checkpoint_ok; then
+		preserve_sidecars
+		if ! checkpoint_ok; then
+			log "数据库完整性检查失败，拒绝生成快照"
+			return 1
+		fi
+	fi
+
+	tmp="$GOOD.tmp.$$"
+	rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+	if ! "$SQLITE" -bail "$DB" ".backup $tmp" >/dev/null 2>&1; then
+		rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+		log "数据库备份失败"
+		return 1
+	fi
+	if ! db_ok "$tmp"; then
+		rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+		log "备份数据库完整性检查失败"
+		return 1
+	fi
+	mv -f "$tmp" "$GOOD" || {
+		rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+		log "无法写入数据库快照"
+		return 1
+	}
+	rm -f "$tmp-wal" "$tmp-shm"
+	sync
+	log "数据库快照已更新"
+	return 0
+}
+
+restore_from_good() {
+	stamp="$(date +%Y%m%d%H%M%S)-$$"
+	if [ ! -f "$GOOD" ]; then
+		log "没有可用的数据库快照"
+		return 1
+	fi
+	if ! db_ok "$GOOD"; then
+		log "数据库快照完整性检查失败"
+		return 1
+	fi
+	if [ -f "$DB" ]; then
+		mv "$DB" "$DB.bad-$stamp" || {
+			log "无法保存损坏的数据库"
+			return 1
+		}
+	fi
+	preserve_sidecars
+	if ! cp "$GOOD" "$DB"; then
+		log "无法从快照恢复数据库"
+		return 1
+	fi
+	rm -f "$DB-wal" "$DB-shm"
+	sync
+	log "数据库已损坏，已从快照恢复；坏库保存为 $DB.bad-$stamp"
+	return 0
+}
+
+startup() {
+	need_sqlite || return 1
+	mkdir -p "$DATA_DIR"
+	if ! wait_writer_gone; then
+		log "DMRHub 仍在运行，拒绝在写入时检查数据库"
+		return 1
+	fi
+	if [ ! -f "$DB" ]; then
+		restore_from_good || return 1
+	fi
+	if db_ok "$DB"; then
+		snapshot || return 1
+		return 0
+	fi
+
+	log "数据库完整性检查失败，尝试清除残留 WAL/SHM 后重试"
+	preserve_sidecars
+	if db_ok "$DB"; then
+		snapshot || return 1
+		return 0
+	fi
+
+	restore_from_good || return 1
+	snapshot || return 1
+	return 0
+}
+
+case "${1:-startup}" in
+startup)
+	startup
+	;;
+snapshot)
+	snapshot
+	;;
+check)
+	need_sqlite || exit 1
+	db_ok "$DB" || exit 1
+	echo ok
+	;;
+*)
+	echo "用法：$0 {startup|snapshot|check}"
+	exit 1
+	;;
+esac

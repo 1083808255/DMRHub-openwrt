@@ -46,6 +46,11 @@ func Dialect(config *configPkg.Config) gorm.Dialector {
 	return getDialect(config)
 }
 
+// SQLiteParameters is sqliteParameters.
+func SQLiteParameters(params []string) []string {
+	return sqliteParameters(params)
+}
+
 // Migrate is migrate.
 func Migrate(db *gorm.DB, config *configPkg.Config) error {
 	return migrate(db, config)

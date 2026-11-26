@@ -9,6 +9,7 @@ EXTRA_HELP="        status  Show DMRHub run status"
 
 CONF_DIR=/opt/dmrhub
 BIN=/usr/bin/dmrhub
+DB_PROTECT=/usr/sbin/dmrhub-db-protect
 
 start_service() {
     refreshOpkgFeed
@@ -36,11 +37,27 @@ log-level: "info"
 database:
   driver: "sqlite"
   database: "$CONF_DIR/data/DMRHub.db"
-  extra-parameters: ["_pragma=foreign_keys(1)", "_pragma=journal_mode(WAL)", "_pragma=synchronous(NORMAL)"]
+  extra-parameters: ["_pragma=foreign_keys(1)", "_pragma=journal_mode(WAL)", "_pragma=synchronous(FULL)"]
 http:
   bind: "[::]"
   port: 3005
 EOF
+    fi
+
+    # Older images shipped synchronous(NORMAL), which can lose the newest
+    # commits after an unclean shutdown. The binary now forces FULL, so keep
+    # the config file truthful as well.
+    sed -i 's/_pragma=synchronous(NORMAL)/_pragma=synchronous(FULL)/g' \
+        "$CONF_DIR/config.yaml" 2>/dev/null || true
+
+    # Check the database before procd starts the writer. A damaged file is
+    # preserved and restored from the verified snapshot; if even that fails,
+    # no instance is created and the service stays stopped.
+    if [ -x "$DB_PROTECT" ]; then
+        "$DB_PROTECT" startup || {
+            logger -t dmrhub "数据库保护失败，拒绝启动 DMRHub"
+            return 1
+        }
     fi
 
     # DMRHub makes the secret and the password salt itself and keeps them
@@ -61,6 +78,14 @@ EOF
     procd_set_param stderr 1
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
     procd_close_instance
+}
+
+# service_stopped runs after procd has killed the instance. The writer is gone
+# now, so checkpoint the WAL and refresh the known-good snapshot. If this
+# fails, the next start will repair from the previous snapshot.
+service_stopped() {
+    [ -x "$DB_PROTECT" ] || return 0
+    "$DB_PROTECT" snapshot || logger -t dmrhub "数据库快照失败，下次启动将尝试恢复"
 }
 
 # refreshOpkgFeed keeps the DMRHub feed on the mirror "option ota_mirror"

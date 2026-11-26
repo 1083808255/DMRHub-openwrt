@@ -41,6 +41,17 @@ function dmrhubOtaCall(args) {
 	});
 }
 
+/* dmrhubFlashGuard - stop the SQLite writer before the native LuCI flash form
+ * calls sysupgrade. The guard fails the call when DMRHub will not stop, so the
+ * database can never be archived while it is still being written. */
+function dmrhubFlashGuard() {
+	return dmrhubOtaCall(['flash-guard']).then(function (res) {
+		if (!res.ok)
+			throw new Error('已取消刷机以保护数据库：' + res.text);
+		return res;
+	});
+}
+
 /* dmrhubOtaPoll - follow a background job until it finishes, updating a
  * notification with the last log line. Firmware flashes reboot the box, so a
  * lost connection during polling is treated as success. */
