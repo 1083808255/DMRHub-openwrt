@@ -152,9 +152,9 @@ type DMR struct {
 // does. Each network is a client connection to a DMR master; the rewrite
 // table maps talkgroups between this hub and the upstreams.
 type Upstreams struct {
-	Enabled  bool               `json:"enabled,omitempty" name:"enabled" description:"Enable upstream network links, as DMRGateway does" default:"false"`
-	Networks []UpstreamNetwork  `json:"networks" yaml:"networks" name:"networks" description:"Upstream DMR networks that DMRHub connects to. Each one logs in as a repeater with its own ID and password"`
-	Rewrites []UpstreamRewrite  `json:"rewrites" yaml:"rewrites" name:"rewrites" description:"Talkgroup rewrite table: which local talkgroup is sent to which upstream network and talkgroup, and which upstream talkgroups are received"`
+	Enabled  bool              `json:"enabled,omitempty" name:"enabled" description:"Enable upstream network links, as DMRGateway does" default:"false"`
+	Networks []UpstreamNetwork `json:"networks" yaml:"networks" name:"networks" description:"Upstream DMR networks that DMRHub connects to. Each one logs in as a repeater with its own ID and password"`
+	Rewrites []UpstreamRewrite `json:"rewrites" yaml:"rewrites" name:"rewrites" description:"Talkgroup rewrite table: which local talkgroup is sent to which upstream network and talkgroup, and which upstream talkgroups are received"`
 }
 
 // UpstreamNetwork is one upstream DMR master that DMRHub logs into as a
@@ -173,6 +173,13 @@ type UpstreamNetwork struct {
 	ColorCode   int    `json:"color-code" yaml:"color-code" name:"color-code" description:"Color code sent to the upstream master, 0 to 15" default:"1"`
 	Slots       int    `json:"slots" yaml:"slots" name:"slots" description:"Slots sent to the upstream master: 1, 2, 3 (both, duplex) or 4 (simplex)" default:"3"`
 	Options     string `json:"options" yaml:"options" name:"options" description:"Options (RPTO) sent to the upstream master after login, such as TS2=91; for a static talkgroup"`
+	Latitude    string `json:"latitude" yaml:"latitude" name:"latitude" description:"Latitude sent to this master in the login configuration, such as +29.6800. Blank sends the DMRGateway default" default:"+29.6800"`
+	Longitude   string `json:"longitude" yaml:"longitude" name:"longitude" description:"Longitude sent to this master in the login configuration, such as +106.5900. Blank sends the DMRGateway default" default:"+106.5900"`
+	Location    string `json:"location" yaml:"location" name:"location" description:"Location (QTH) sent to this master. Masters such as BrandMeister refuse a login whose location is blank" default:"Nowhere"`
+	Description string `json:"description" yaml:"description" name:"description" description:"Description sent to this master. BrandMeister refuses a login whose description is blank" default:"MMDVM Hotspot"`
+	URL         string `json:"url" yaml:"url" name:"url" description:"Info URL sent to this master. BrandMeister refuses a login whose URL is blank" default:"https://github.com/g4klx/MMDVMHost"`
+	SoftwareID  string `json:"software-id" yaml:"software-id" name:"software-id" description:"Software ID sent to this master" default:"20250828"`
+	PackageID   string `json:"package-id" yaml:"package-id" name:"package-id" description:"Package ID sent to this master" default:"MMDVM_MMDVM_HS_Dual_Hat"`
 }
 
 // UpstreamRewrite maps one talkgroup between this hub and an upstream

@@ -34,6 +34,13 @@ export type UpstreamNetworkRow = {
   colorCode: number | string;
   slots: number | string;
   options: string;
+  latitude: string;
+  longitude: string;
+  location: string;
+  description: string;
+  url: string;
+  softwareId: string;
+  packageId: string;
 };
 
 /** One DMRGateway style talkgroup rewrite row while it is edited. */
@@ -67,6 +74,13 @@ export const emptyUpstreamNetwork = (): UpstreamNetworkRow => ({
   colorCode: 1,
   slots: 3,
   options: '',
+  latitude: '+29.6800',
+  longitude: '+106.5900',
+  location: 'Nowhere',
+  description: 'MMDVM Hotspot',
+  url: 'https://github.com/g4klx/MMDVMHost',
+  softwareId: '20250828',
+  packageId: 'MMDVM_MMDVM_HS_Dual_Hat',
 });
 
 /** A new, empty rewrite rule. */
@@ -130,6 +144,13 @@ export const upstreamOf = (v: unknown): UpstreamValue => {
         colorCode: value(n, 'colorCode', 'color-code', 1),
         slots: value(n, 'slots', 'slots', 3),
         options: text(n.options),
+        latitude: text(n.latitude),
+        longitude: text(n.longitude),
+        location: text(n.location),
+        description: text(n.description),
+        url: text(n.url),
+        softwareId: text(n['software-id'] ?? n.softwareId),
+        packageId: text(n['package-id'] ?? n.packageId),
       };
     }),
     rewrites: rewrites.map((raw) => {
@@ -159,6 +180,13 @@ export const upstreamPayload = (v: UpstreamValue): Record<string, unknown> => ({
     'color-code': Number(n.colorCode) || 0,
     slots: Number(n.slots) || 0,
     options: n.options.trim(),
+    latitude: n.latitude.trim(),
+    longitude: n.longitude.trim(),
+    location: n.location.trim(),
+    description: n.description.trim(),
+    url: n.url.trim(),
+    'software-id': n.softwareId.trim(),
+    'package-id': n.packageId.trim(),
   })),
   rewrites: v.rewrites.map((r) => ({
     network: r.network.trim(),
@@ -167,8 +195,25 @@ export const upstreamPayload = (v: UpstreamValue): Record<string, unknown> => ({
   })),
 });
 
-/** upstreamPasswordsOf returns the passwords in network order, for the secrets payload. */
-export const upstreamPasswordsOf = (v: UpstreamValue): string[] => v.networks.map((n) => text(n.password));
+/** MAX_NETWORKS is how many upstream networks one hub links to at most. */
+export const MAX_NETWORKS = 5;
+
+/**
+ * upstreamPasswordsOf returns the passwords of the networks that have one,
+ * keyed by network name. The hub matches them by name, so a network added,
+ * renamed or removed does not move the password of another one.
+ */
+export const upstreamPasswordsOf = (v: UpstreamValue): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const n of v.networks) {
+    const name = n.name.trim();
+    const pw = text(n.password);
+    if (name && pw) {
+      out[name] = pw;
+    }
+  }
+  return out;
+};
 
 const WHOLE = /^[1-9]\d*$/;
 const TG = /^(0|[1-9]\d*)$/;
@@ -197,6 +242,9 @@ export const hostOf = (address: string): string => {
 
 /** upstreamsError is the error shown when the upstream settings cannot be saved. */
 export const upstreamsError = (v: UpstreamValue, passwordsSet: boolean[]): string | undefined => {
+  if (v.networks.length > MAX_NETWORKS) {
+    return t('At most {n} upstream networks can be linked.', { n: MAX_NETWORKS });
+  }
   const names = new Set<string>();
   for (const [i, n] of v.networks.entries()) {
     const at = i + 1;
@@ -255,4 +303,45 @@ export const upstreamsError = (v: UpstreamValue, passwordsSet: boolean[]): strin
     }
   }
   return undefined;
+};
+
+/**
+ * linkDownText says why a link is not logged in, in the words of the page.
+ *
+ * The gateway reports the reason of the last drop and the login step it
+ * came at. The step is what tells the two refusals apart: a master that
+ * refuses the RPTL does not know this repeater ID, while one that refuses
+ * the RPTK knows the ID but not the password. Saying only "refused" sends
+ * the admin to check both when only one of them can be wrong.
+ *
+ * A link that has never had an answer has no reason at all: that is a
+ * master that is not answering, which is a third thing again.
+ */
+export const linkDownText = (reason?: string, stage?: string): string => {
+  switch (reason) {
+    case 'Refused':
+      if (stage === 'Login') {
+        return t('The master refused the repeater ID before asking for the password. Check that this ID is registered on that network.');
+      }
+      if (stage === 'Auth') {
+        return t('The master knows this repeater ID but refused the password. Use the eye to read back the saved password and compare it with the one the network gave you.');
+      }
+      if (stage === 'Config' || stage === 'Options') {
+        return t('The master accepted the password but refused the repeater settings that followed. Check the callsign, frequencies, color code and login options.');
+      }
+      if (stage === 'Running') {
+        return t('The master dropped the link after it was logged in. Another repeater may be using the same ID.');
+      }
+      return t('The master refused the login. Check the repeater ID and the password of this network.');
+    case 'Timeout':
+      return t('The master stopped answering. The link is being retried.');
+    case 'Closed':
+      return t('The master closed the link. The link is being retried.');
+    case 'Stopped':
+      return t('The link was stopped.');
+    case 'Login':
+      return t('The master asked for a new login.');
+    default:
+      return t('No answer from the master yet. Check the address and port, and that this repeater ID is registered on that network.');
+  }
 };

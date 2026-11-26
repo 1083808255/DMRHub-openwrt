@@ -170,9 +170,22 @@ func TestBuildRPTCAndNewPeer(t *testing.T) {
 	cc, err := c.ColorCode()
 	require.NoError(t, err)
 	assert.Equal(t, enums.ColorCode(1), cc)
+	// A zero power reads as a transmitter that cannot send, and a master
+	// may refuse a repeater that claims none, so the login names ten watts.
+	power, err := c.Power()
+	require.NoError(t, err)
+	assert.Equal(t, uint8(10), power)
 	slots, err := c.Slots()
 	require.NoError(t, err)
 	assert.Equal(t, uint8(3), slots)
+	// The text fields carry the DMRGateway-style defaults: masters such as
+	// BrandMeister refuse a login whose location, description, URL or
+	// software fields are blank, and the position must parse as a number.
+	assert.Equal(t, []byte("20250828"), c.SoftwareID())
+	lat := c.Latitude()
+	assert.Equal(t, []byte("+29.6800"), lat)
+	lon := c.Longitude()
+	assert.Equal(t, []byte("+106.5900"), lon)
 
 	peer, err := dmrdsession.NewPeer(&dmrdsession.PeerConfig{
 		Dialect:  dmrd.DialectMMDVM,

@@ -64,6 +64,9 @@ const (
 	fieldUpstreamNetworks = "dmr.upstreams.networks"
 )
 
+// MaxUpstreamNetworks is how many upstream networks one hub links to at most.
+const MaxUpstreamNetworks = 5
+
 // isValidURL checks that s is a parseable URL with both a scheme and host.
 func isValidURL(s string) bool {
 	u, err := url.Parse(s)
@@ -205,6 +208,9 @@ var (
 	// ErrInvalidUpstreamName indicates that an upstream network has no name,
 	// or that two networks have the same one.
 	ErrInvalidUpstreamName = errors.New("each upstream network needs a name of its own, which the rewrite table refers to")
+	// ErrTooManyUpstreams indicates that more upstream networks are
+	// configured than one hub links to.
+	ErrTooManyUpstreams = errors.New("a hub links to at most 5 upstream networks")
 	// ErrInvalidUpstreamAddress indicates that the address of an upstream
 	// network is not a host name or IP address.
 	ErrInvalidUpstreamAddress = errors.New("enter a host name or IP address with no scheme or path, such as master.brandmeister.network")
@@ -228,6 +234,9 @@ func (u Upstreams) ValidateWithFields() []ValidationError {
 		return nil
 	}
 	var errs []ValidationError
+	if len(u.Networks) > MaxUpstreamNetworks {
+		errs = append(errs, ValidationError{Field: fieldUpstreamNetworks, Err: ErrTooManyUpstreams})
+	}
 	names := make(map[string]struct{}, len(u.Networks))
 	for _, n := range u.Networks {
 		if n.Name == "" {
