@@ -2271,5 +2271,7 @@
   "The master accepted the password but refused the repeater settings that followed. Check the callsign, frequencies, color code and login options.": "主站接受了密码，但拒绝了随后发送的中继参数。请检查呼号、频率、色码和登录选项。",
   "The master dropped the link after it was logged in. Another repeater may be using the same ID.": "主站在登录成功后踢掉了链路。可能有另一台中继在用同一个 ID。",
   "The network number must be a whole number of 0 or more": "网络序号必须是 0 或更大的整数",
-  "There is no network at that number": "该序号上没有网络"
+  "There is no network at that number": "该序号上没有网络",
+  "Not registered on this server": "未在本服务器注册",
+  "Unregistered": "未注册"
 }

@@ -34,8 +34,19 @@ function isLocaleCode(value: string | null): value is LocaleCode {
   return value === 'en' || value === 'zh-CN';
 }
 
+// The map's terrain worker imports t() through the map helpers. A worker has
+// no localStorage and no document, so the locale must fall back to the
+// navigator language there.
+function storedLocale(): string | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 function detectLocale(): LocaleCode {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = storedLocale();
   if (isLocaleCode(saved)) {
     return saved;
   }
@@ -45,7 +56,9 @@ function detectLocale(): LocaleCode {
 const initialLocale: LocaleCode = detectLocale();
 
 // Set it before the first paint, so the browser picks the right glyphs and fonts.
-document.documentElement.lang = initialLocale;
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = initialLocale;
+}
 
 export const i18n = createI18n({
   legacy: false,
@@ -59,8 +72,16 @@ export const i18n = createI18n({
 
 export function setLocale(locale: LocaleCode): void {
   i18n.global.locale.value = locale;
-  localStorage.setItem(STORAGE_KEY, locale);
-  document.documentElement.lang = locale;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, locale);
+    }
+  } catch {
+    // A worker or a browser that blocks storage still uses the locale.
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = locale;
+  }
 }
 
 /** Translate a key outside of a component setup() (e.g. Options API methods). */

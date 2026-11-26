@@ -2270,5 +2270,8 @@
   "The master accepted the password but refused the repeater settings that followed. Check the callsign, frequencies, color code and login options.": "The master accepted the password but refused the repeater settings that followed. Check the callsign, frequencies, color code and login options.",
   "The master dropped the link after it was logged in. Another repeater may be using the same ID.": "The master dropped the link after it was logged in. Another repeater may be using the same ID.",
   "The network number must be a whole number of 0 or more": "The network number must be a whole number of 0 or more",
-  "There is no network at that number": "There is no network at that number"
+  "There is no network at that number": "There is no network at that number",
+  "Not registered on this server": "Not registered on this server",
+  "Unregistered": "Unregistered",
+  "Radio ID extra URL": "Radio ID extra URL"
 }
