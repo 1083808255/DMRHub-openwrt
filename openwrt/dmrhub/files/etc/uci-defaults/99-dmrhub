@@ -1,8 +1,10 @@
 #!/bin/sh
 # First-boot setup for DMRHub
 [ -f /etc/config/dmrhub ] || exit 0
-mkdir -p /opt/dmrhub/data
-chmod 755 /opt/dmrhub
+# /opt/dmrhub is the mount point of the data partition, which init.d/dmrhub-data
+# creates and mounts before DMRHub starts. Do not create or write anything there
+# here: at this point the rootfs overlay is still in charge, and DMRHub refuses
+# to run on the overlay.
 
 # Add the DMRHub release feed to opkg. The line follows "option ota_mirror",
 # so an install on a network that blocks github.com can still fetch packages;

@@ -224,11 +224,12 @@ jobs:
           PACKAGES="dmrhub luci luci-base luci-theme-bootstrap luci-i18n-base-zh-cn luci-compat ca-certificates sqlite3-cli parted resize2fs partx-utils"
           # DMRHub binary is ~80MB. The boot partition only stages the small
           # configuration archive now that the database lives on its own data
-          # partition, so 64 MB is plenty; the rootfs keeps 192 MB for the
-          # squashfs (32 MB) and the overlay. Everything left on the disk goes
+          # partition, so 64 MB is plenty; the rootfs keeps 320 MB, of which
+          # the squashfs (33 MB) covers the system and DMRHub, leaving around
+          # 280 MB of overlay for packages. Everything left on the disk goes
           # to the DMRHub data partition at first boot.
-          echo "==> make image PACKAGES=$PACKAGES KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=192"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=192
+          echo "==> make image PACKAGES=$PACKAGES KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=320"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=320
           ls -lh bin/targets/x86/64/*.img.gz
 
       - name: Collect firmware artifacts

@@ -1,5 +1,0 @@
-# The database lives on the dedicated data partition (see init.d/dmrhub-data)
-# and must never travel through the sysupgrade archive: it is large and the
-# archive is staged on a small boot partition. Only the small runtime config
-# is kept here, for the case where the data partition cannot be created.
-/opt/dmrhub/config.yaml

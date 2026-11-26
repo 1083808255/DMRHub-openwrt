@@ -380,10 +380,9 @@ check_backup_space() {
 }
 
 # cmd_flash_guard - stop the SQLite writer before sysupgrade touches its files.
-# sysupgrade backs up /opt/dmrhub, including DMRHub.db and its WAL/SHM files.
-# If DMRHub is still running, that backup can capture a truncated WAL snapshot,
-# which is exactly how the database was corrupted. Refuse to continue unless
-# the process is really gone.
+# The database lives on the data partition, which "sysupgrade -p" keeps, but a
+# running writer can still hold a WAL that is not yet on disk. Refuse to
+# continue unless the process is really gone and the snapshot is fresh.
 cmd_flash_guard() {
 	check_backup_space
 	if pidof dmrhub >/dev/null 2>&1; then

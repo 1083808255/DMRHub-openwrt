@@ -11,7 +11,7 @@
 dmrhub_filter_backup_db() {
 	local list="$1"
 	[ -f "$list" ] || return 0
-	grep -Ev '^/?opt/dmrhub/data/DMRHub\.db(-wal|-shm)?$|^/?opt/dmrhub/data/DMRHub\.db\.(bad-.*|good\.tmp.*)$' \
+	grep -Ev '^/?opt/dmrhub/data/DMRHub\.db(-wal|-shm)?$|^/?opt/dmrhub/data/DMRHub\.db\.(bad-.*|good|good\.tmp.*)$' \
 		"$list" > "$list.dmrhub" || true
 	mv -f "$list.dmrhub" "$list"
 }

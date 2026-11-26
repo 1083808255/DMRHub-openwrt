@@ -11,10 +11,29 @@ CONF_DIR=/opt/dmrhub
 BIN=/usr/bin/dmrhub
 DB_PROTECT=/usr/sbin/dmrhub-db-protect
 
+# DMRHub keeps all of its state on the dedicated data partition, never on the
+# rootfs overlay: the database is large, the rootfs is small, and a flash of
+# the firmware erases the overlay. init.d/dmrhub-data creates and mounts that
+# partition (START=15) before this script runs (START=95). Without it there is
+# nowhere safe to write, so the service stays stopped instead of silently
+# filling the overlay.
+data_partition_mounted() {
+    local src
+    src=$(awk '$2 == "/opt/dmrhub" && $3 == "ext4" { print $1; exit }' /proc/mounts)
+    case "$src" in
+        /dev/*) return 0 ;;
+    esac
+    return 1
+}
+
 start_service() {
+    if ! data_partition_mounted; then
+        logger -t dmrhub "数据分区 /opt/dmrhub 未挂载，拒绝启动（不允许使用 overlay）"
+        return 1
+    fi
+
     refreshOpkgFeed
     installLuciFlashView
-    keepDataOverUpgrade
 
     # Ensure persistent data/config directory exists
     mkdir -p "$CONF_DIR/data"
@@ -116,17 +135,9 @@ installLuciFlashView() {
     fi
 }
 
-# keepDataOverUpgrade names the data of DMRHub, so that a flash of the
-# firmware keeps it. sysupgrade reads the files of /lib/upgrade/keep.d and
-# backs up the paths that they name, apart from the files of the packages
-# and the changed files of /etc/config. Without the rule, the flash wipes
-# the database and the setup of the hub.
-keepDataOverUpgrade() {
-    local dir="/lib/upgrade/keep.d"
-    [ -d "$dir" ] || return 0
-    grep -qx "$CONF_DIR/" "$dir/dmrhub" 2>/dev/null && return 0
-    echo "$CONF_DIR/" > "$dir/dmrhub" 2>/dev/null || true
-}
+# keepDataOverUpgrade used to add /opt/dmrhub to /lib/upgrade/keep.d. The data
+# partition is preserved by "sysupgrade -p" instead, and the archive is staged
+# on the small boot partition, so nothing of /opt/dmrhub belongs in it.
 
 status() {
     # Match the process name, not the full command line: pgrep -f also finds
@@ -145,15 +156,7 @@ stop_service() {
     return 0
 }
 
-# service_stopped waits until the writer of the SQLite file is gone, so that
-# the steps after a stop, such as the backup of an OTA, never see a database
-# that is still being written. The wait is longer than term_timeout: if procd
-# has to SIGKILL the process, the loop still ends with no writer left.
-service_stopped() {
-    local n=0
-    while pidof dmrhub >/dev/null 2>&1; do
-        n=$((n+1))
-        [ "$n" -ge 70 ] && break
-        sleep 1
-    done
-}
+# service_stopped (defined above, after procd_close_instance) waits for the
+# writer inside dmrhub-db-protect before it checkpoints the WAL and refreshes
+# the snapshot. A second wait here used to shadow it and matched the rc.common
+# wrapper through pidof, so the snapshot never ran: keep a single definition.
