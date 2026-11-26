@@ -127,7 +127,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to setup tracing: %w", err)
 	}
 	defer func() {
-		if err := cleanup(ctx); err != nil {
+		// An OTLP exporter that cannot reach its collector can block
+		// forever. Bound this too: a supervisor that has to SIGKILL the
+		// process mid SQLite write leaves the database malformed.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := cleanup(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown tracer", "error", err)
 		}
 	}()
@@ -170,9 +175,8 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 	servers.messageStore = messageStore
 	servers.storeForward = storeForward
-	defer servers.shutdown(ctx)
 
-	setupShutdownHandlers(ctx, scheduler, dmrHub, servers, cleanup)
+	setupShutdownHandlers(ctx, scheduler, dmrHub, servers, database)
 
 	return nil
 }
@@ -545,11 +549,24 @@ func (sm *serverManager) closeResources(ctx context.Context) {
 	}
 }
 
-// shutdown gracefully stops all servers
-func (sm *serverManager) shutdown(ctx context.Context) {
-	sm.ready.Store(false)
-	sm.stopDMRServers(ctx)
-	sm.closeResources(ctx)
+// waitShutdown gives a teardown phase a bounded time. A phase that hangs must
+// not keep the process alive until the supervisor SIGKILLs it: a kill during
+// a SQLite write is what leaves the database image malformed after an OTA.
+func waitShutdown(name string, timeout time.Duration, done <-chan struct{}) {
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("Shutdown phase timed out", "phase", name, "timeout", timeout)
+	}
+}
+
+func boundedShutdown(name string, timeout time.Duration, fn func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	waitShutdown(name, timeout, done)
 }
 
 // initializeServers creates and starts all server instances
@@ -652,7 +669,7 @@ func initializeServers(ctx context.Context, live *liveconfig.Live, hub *hub.Hub,
 	return sm, nil
 }
 
-func setupShutdownHandlers(ctx context.Context, scheduler gocron.Scheduler, hub *hub.Hub, servers *serverManager, cleanup func(context.Context) error) {
+func setupShutdownHandlers(ctx context.Context, scheduler gocron.Scheduler, hub *hub.Hub, servers *serverManager, database *gorm.DB) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 
@@ -664,8 +681,10 @@ func setupShutdownHandlers(ctx context.Context, scheduler gocron.Scheduler, hub 
 
 	servers.drain(ctx)
 
-	// Stop the scheduler (independent of DMR shutdown).
+	// Stop the scheduler before the database: its jobs write to it.
+	schedulerDone := make(chan struct{})
 	go func() {
+		defer close(schedulerDone)
 		if err := scheduler.StopJobs(); err != nil {
 			slog.Error("Failed to stop scheduler jobs", "error", err)
 		}
@@ -691,19 +710,19 @@ func setupShutdownHandlers(ctx context.Context, scheduler gocron.Scheduler, hub 
 		slog.Warn("Shutdown timed out waiting for the calls in progress; closing the database anyway")
 	}
 
-	// All calls are done. Now tear everything down.
-	servers.stopDMRServers(ctx)
-	hub.Stop(ctx)
-	servers.closeResources(ctx)
+	waitShutdown("scheduler", 5*time.Second, schedulerDone)
 
-	if cleanup != nil {
-		const timeout = 5 * time.Second
-		shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		if err := cleanup(shutdownCtx); err != nil {
-			slog.Error("Failed to shutdown tracer", "error", err)
-		}
-	}
+	// All calls are done. Now tear everything down, one bounded phase at a
+	// time, so no single component can keep the process alive until procd
+	// sends SIGKILL in the middle of a database write.
+	boundedShutdown("DMR servers", 10*time.Second, func() { servers.stopDMRServers(ctx) })
+	boundedShutdown("hub", 10*time.Second, func() { hub.Stop(ctx) })
+	boundedShutdown("resources", 10*time.Second, func() { servers.closeResources(ctx) })
+
+	// SQLite holds committed transactions in the WAL. Checkpoint and close
+	// the database before exiting so that an OTA backup sees a consistent
+	// main database file even when the archive misses the -wal file.
+	db.Shutdown(ctx, database)
 
 	slog.Info("All servers stopped, shutting down gracefully")
 }

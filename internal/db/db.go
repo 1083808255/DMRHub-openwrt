@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"slices"
@@ -307,6 +308,37 @@ func (c *Connection) Migrate(ctx context.Context) (*gorm.DB, error) {
 func closeDB(db *gorm.DB) {
 	if sqlDB, err := db.DB(); err == nil {
 		_ = sqlDB.Close()
+	}
+}
+
+// Shutdown checkpoints a SQLite database and closes its pool before the
+// process exits. A supervisor that stops DMRHub can then back up a consistent
+// main database file, even when the WAL is omitted from the backup. It never
+// fails: a shutdown that waits too long gets SIGKILLed, which is exactly the
+// condition that leaves a SQLite image malformed.
+func Shutdown(ctx context.Context, database *gorm.DB) {
+	if database == nil {
+		return
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		slog.Warn("Failed to get the database pool on shutdown", "error", err)
+		return
+	}
+	if database.Dialector != nil && strings.Contains(strings.ToLower(database.Dialector.Name()), "sqlite") {
+		checkpointCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		var busy, logged, checkpointed int
+		err := sqlDB.QueryRowContext(checkpointCtx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logged, &checkpointed)
+		switch {
+		case err != nil:
+			slog.Warn("Failed to checkpoint the SQLite database on shutdown", "error", err)
+		case busy != 0:
+			slog.Warn("SQLite WAL checkpoint was busy on shutdown", "busy", busy)
+		}
+	}
+	if err := sqlDB.Close(); err != nil {
+		slog.Warn("Failed to close the database on shutdown", "error", err)
 	}
 }
 
