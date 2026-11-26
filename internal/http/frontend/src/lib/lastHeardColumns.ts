@@ -70,11 +70,25 @@ const transportLabel = (transport: string): string => {
   }
 };
 
-function person(u: { id: number; callsign: string }) {
+function person(u: { id: number; callsign: string; registered?: boolean }) {
   if (!u.callsign) {
     return h('span', { class: 'font-medium' }, String(u.id));
   }
-  return h(User, { user: u });
+  const badges = [];
+  if (u.registered === false) {
+    badges.push(
+      h(
+        'span',
+        {
+          class: 'rounded-full border border-amber-600/50 px-2 text-xs leading-5 text-amber-700 dark:text-amber-400',
+          title: t('Not registered on this server'),
+          'data-test': 'user-unregistered',
+        },
+        t('Unregistered'),
+      ),
+    );
+  }
+  return h('span', { class: 'inline-flex items-center gap-1.5' }, [h(User, { user: u }), ...badges]);
 }
 
 function destination(call: CallRow) {

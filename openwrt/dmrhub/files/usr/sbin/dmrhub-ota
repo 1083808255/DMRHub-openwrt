@@ -47,6 +47,10 @@ DEFAULT_MIRROR="https://gh-proxy.com"
 
 VERSION_DIR="/opt/dmrhub"
 VERSION_FILE="$VERSION_DIR/version"
+# Keep the last update log across the reboot of a firmware OTA. /tmp is
+# cleared on boot, so without this file the reason for a bad database can
+# never be inspected after the fact.
+OTA_LOG="$VERSION_DIR/ota.log"
 MANIFEST="/tmp/dmrhub-version.json"
 APP_FILE="/tmp/dmrhub-app.ipk"
 FW_FILE="/tmp/dmrhub-fw.img.gz"
@@ -80,8 +84,16 @@ LOCAL_LABEL="$LOCAL_VERSION"
 log() {
 	[ -n "${QUIET:-}" ] && return 0
 	echo "[dmrhub-ota] $*"
+	# Best effort: a failure to write the log must never fail an update.
+	mkdir -p "$VERSION_DIR" 2>/dev/null || true
+	echo "$(date) [dmrhub-ota] $*" >> "$OTA_LOG" 2>/dev/null || true
 }
-die() { echo "[dmrhub-ota] 错误：$*" >&2; exit 1; }
+die() {
+	echo "[dmrhub-ota] 错误：$*" >&2
+	mkdir -p "$VERSION_DIR" 2>/dev/null || true
+	echo "$(date) [dmrhub-ota] 错误：$*" >> "$OTA_LOG" 2>/dev/null || true
+	exit 1
+}
 
 # _fetch_once <url> <outfile> - one download with whatever the image provides.
 _fetch_once() {
@@ -306,6 +318,28 @@ cmd_status() {
 		"$REMOTE_APP_URL" "$REMOTE_APP_SHA" "$REMOTE_FW_URL" "$REMOTE_FW_SHA"
 }
 
+# stop_dmrhub - stop the writer of the SQLite file and refuse to continue
+# while it is still running. A backup or a package install that races with
+# SQLite can copy a database whose header already names pages that have not
+# been written yet, which is what leaves the image malformed after an OTA.
+stop_dmrhub() {
+	log "正在停止 DMRHub"
+	/etc/init.d/dmrhub stop 2>/dev/null || true
+	# The wait belongs after the stop, not inside stop_service: rc.common
+	# calls stop_service before procd_kill sends TERM. Fail closed here so
+	# that neither tar nor opkg ever sees a live database writer.
+	local n=0
+	# pidof matches the executable only. pgrep -f also matches the shell that
+	# runs this script, so the wait could never finish even after the process
+	# was gone.
+	while pidof dmrhub >/dev/null 2>&1; do
+		n=$((n+1))
+		[ "$n" -ge 75 ] && die "DMRHub 未能在 75 秒内退出，已取消更新；请检查服务状态后重试"
+		sleep 1
+	done
+	log "DMRHub 已退出，可以继续更新"
+}
+
 cmd_app() {
 	load_release
 	if up_to_date && [ "${1:-}" != "--force" ]; then
@@ -318,10 +352,13 @@ cmd_app() {
 	if [ -n "$REMOTE_APP_SHA" ]; then
 		echo "$REMOTE_APP_SHA  $APP_FILE" | sha256sum -c - >/dev/null || die "SHA256 校验不通过，文件可能已损坏"
 	fi
+	# Do not replace the binary under a running writer, and do not let
+	# restart() start the new process before the old one has left.
+	stop_dmrhub
 	log "正在安装应用程序包"
 	opkg install --force-reinstall "$APP_FILE" || die "opkg 安装失败"
 	save_version "$REMOTE_TAG"
-	/etc/init.d/dmrhub restart
+	/etc/init.d/dmrhub start
 	log "应用程序已更新至 $REMOTE_VERSION"
 }
 

@@ -24,12 +24,16 @@ import (
 	"time"
 
 	"github.com/USA-RedDragon/DMRHub/internal/db/models"
+	"github.com/USA-RedDragon/DMRHub/internal/userdb"
 	"gorm.io/gorm"
 )
 
 type WSCallResponseUser struct {
 	ID       uint   `json:"id"`
 	Callsign string `json:"callsign"`
+	// Registered marks a user who has an account on this server. A user
+	// whose callsign only comes from the radio ID database is not.
+	Registered bool `json:"registered"`
 }
 
 type WSCallResponseRepeater struct {
@@ -167,8 +171,17 @@ func NewWSCallResponseFromCall(call *models.Call) WSCallResponse {
 	}
 	resp.User.ID = call.User.ID
 	resp.User.Callsign = call.User.Callsign
+	resp.User.Registered = call.User.ID != 0
 	if resp.User.ID == 0 {
 		resp.User.ID = call.SourceID
+	}
+	// A call from a radio that is not a registered user has no callsign.
+	// Fall back to the radio ID database so the last heard table shows the
+	// callsign of upstream and unregistered talkers.
+	if resp.User.Callsign == "" && userdb.IsValidUserID(resp.User.ID) {
+		if u, ok := userdb.Get(resp.User.ID); ok {
+			resp.User.Callsign = u.Callsign
+		}
 	}
 	if resp.SourceID == 0 {
 		resp.SourceID = resp.User.ID
@@ -196,6 +209,7 @@ func NewWSCallResponseFromCall(call *models.Call) WSCallResponse {
 	if call.IsToUser {
 		resp.ToUser.ID = call.ToUser.ID
 		resp.ToUser.Callsign = call.ToUser.Callsign
+		resp.ToUser.Registered = call.ToUser.ID != 0
 	}
 	if call.IsToRepeater {
 		resp.ToRepeater.RadioID = call.ToRepeater.ID

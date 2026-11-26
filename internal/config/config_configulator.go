@@ -264,6 +264,7 @@ type dMRShadow struct {
 	DisableRadioIDValidation *bool                `json:"disable-radio-id-validation" toml:"disable-radio-id-validation" yaml:"disable-radio-id-validation"`
 	RadioIDChecks            *radioIDChecksShadow `json:"radio-id-checks"             toml:"radio-id-checks"             yaml:"radio-id-checks"`
 	RadioIDURL               *string              `json:"radio-id-url"                toml:"radio-id-url"                yaml:"radio-id-url"`
+	RadioIDExtraURL          *string              `json:"radio-id-extra-url"          toml:"radio-id-extra-url"          yaml:"radio-id-extra-url"`
 	RepeaterIDURL            *string              `json:"repeater-id-url"             toml:"repeater-id-url"             yaml:"repeater-id-url"`
 	PublicAddress            *string              `json:"public-address"              toml:"public-address"              yaml:"public-address"`
 	Retention                *retentionShadow     `json:"retention"                   toml:"retention"                   yaml:"retention"`
@@ -350,7 +351,7 @@ func configApplyDefaults(cfg *Config, sep string, set configulator.SetOrigin) er
 	cfg.Database.Database = "DMRHub.db"
 	set("database.database", configulator.LayerDefault, "default tag")
 	{
-		lst := impl.SplitList("_pragma=foreign_keys(1),_pragma=journal_mode(WAL),_pragma=synchronous(FULL)", sep)
+		lst := impl.SplitList("_pragma=foreign_keys(1),_pragma=journal_mode(WAL),_pragma=synchronous(NORMAL)", sep)
 		cfg.Database.ExtraParameters = lst
 		set("database.extra-parameters", configulator.LayerDefault, "default tag")
 	}
@@ -448,6 +449,8 @@ func configApplyDefaults(cfg *Config, sep string, set configulator.SetOrigin) er
 	set("dmr.radio-id-checks.hotspot-ids", configulator.LayerDefault, "default tag")
 	cfg.DMR.RadioIDURL = "https://www.radioid.net/static/users.json"
 	set("dmr.radio-id-url", configulator.LayerDefault, "default tag")
+	cfg.DMR.RadioIDExtraURL = "https://radiowo.com/id_library/dmrid.dat"
+	set("dmr.radio-id-extra-url", configulator.LayerDefault, "default tag")
 	cfg.DMR.RepeaterIDURL = "https://www.radioid.net/static/rptrs.json"
 	set("dmr.repeater-id-url", configulator.LayerDefault, "default tag")
 	cfg.DMR.Retention.Messages = 0
@@ -1065,6 +1068,10 @@ func (s *configShadow) applyTo(cfg *Config, _ string, set configulator.SetOrigin
 		if s.DMR.RadioIDURL != nil {
 			cfg.DMR.RadioIDURL = *s.DMR.RadioIDURL
 			set("dmr.radio-id-url", configulator.LayerFile, file)
+		}
+		if s.DMR.RadioIDExtraURL != nil {
+			cfg.DMR.RadioIDExtraURL = *s.DMR.RadioIDExtraURL
+			set("dmr.radio-id-extra-url", configulator.LayerFile, file)
 		}
 		if s.DMR.RepeaterIDURL != nil {
 			cfg.DMR.RepeaterIDURL = *s.DMR.RepeaterIDURL
@@ -2218,6 +2225,10 @@ func configApplyEnv(cfg *Config, ec configulator.EnvContext, set configulator.Se
 		cfg.DMR.RadioIDURL = v
 		set("dmr.radio-id-url", configulator.LayerEnv, n)
 	}
+	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "radio-id-extra-url"); ok {
+		cfg.DMR.RadioIDExtraURL = v
+		set("dmr.radio-id-extra-url", configulator.LayerEnv, n)
+	}
 	if n, v, ok := impl.LookupEnv(ec.Getenv, ec.Opts.Prefix, ec.Opts.Separator, "dmr", "repeater-id-url"); ok {
 		cfg.DMR.RepeaterIDURL = v
 		set("dmr.repeater-id-url", configulator.LayerEnv, n)
@@ -3031,7 +3042,7 @@ func configRegisterPFlags(fs *pflag.FlagSet, o *cpflag.Options) error {
 	fs.String(names[9], "", "Database username (postgres and mysql only)")
 	fs.String(names[10], "", "Database password (postgres and mysql only)")
 	fs.StringSlice(names[11], nil, "Additional parameters for the database connection, e.g., sslmode=disable")
-	fs.Lookup(names[11]).DefValue = "[_pragma=foreign_keys(1),_pragma=journal_mode(WAL),_pragma=synchronous(FULL)]"
+	fs.Lookup(names[11]).DefValue = "[_pragma=foreign_keys(1),_pragma=journal_mode(WAL),_pragma=synchronous(NORMAL)]"
 	fs.String(names[12], "", "Secret key for the application, used for signing and encryption of the user session. Required; use a random value of at least 15 characters")
 	fs.String(names[13], "", "Salt used for hashing user passwords. Required; use a random value of at least 15 characters, different from secret")
 	fs.String(names[14], "[::]", "HTTP server listen address")

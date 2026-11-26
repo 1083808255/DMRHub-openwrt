@@ -183,3 +183,168 @@ describe('UpstreamTab per-network switch', () => {
     wrapper.unmount();
   });
 });
+
+describe('UpstreamTab password field', () => {
+  it('hides a typed password until the eye is pressed, then shows it', async () => {
+    const rows = networks();
+    rows[0]!.password = 'SNT7WXr9J33z';
+    const wrapper = await mountTab({ enabled: true, networks: rows, rewrites: [] });
+    const box = wrapper.find('[data-test="upstream-network-password-0"]');
+    expect(box.attributes('type')).toBe('password');
+    await wrapper.find('[data-test="upstream-network-password-toggle-0"]').trigger('click');
+    expect(wrapper.find('[data-test="upstream-network-password-0"]').attributes('type')).toBe('text');
+    // The value the admin typed is the one shown, not a mask.
+    expect((wrapper.find('[data-test="upstream-network-password-0"]').element as HTMLInputElement).value).toBe('SNT7WXr9J33z');
+    await wrapper.find('[data-test="upstream-network-password-toggle-0"]').trigger('click');
+    expect(wrapper.find('[data-test="upstream-network-password-0"]').attributes('type')).toBe('password');
+    wrapper.unmount();
+  });
+
+  it('reveals one password without revealing another', async () => {
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-password-toggle-1"]').trigger('click');
+    expect(wrapper.find('[data-test="upstream-network-password-0"]').attributes('type')).toBe('password');
+    expect(wrapper.find('[data-test="upstream-network-password-1"]').attributes('type')).toBe('text');
+    wrapper.unmount();
+  });
+
+  it('says whether a password is already saved', async () => {
+    const wrapper = mount(UpstreamTab, {
+      props: { value: { enabled: true, networks: networks(), rewrites: [] }, saves: 0, passwordsSet: [true, false] },
+      global: { mocks: { $toast: { add: vi.fn() } } },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(wrapper.find('[data-test="upstream-network-password-note-0"]').text()).toContain('A password is saved.');
+    expect(wrapper.find('[data-test="upstream-network-password-note-1"]').text()).toContain('No password is saved yet.');
+    wrapper.unmount();
+  });
+
+  it('reads back the saved password when the eye is pressed on an empty field', async () => {
+    mockAPI.get.mockImplementation((path: string) => {
+      if (path === '/config/upstream/password/0') {
+        return Promise.resolve({ data: { name: 'BM', password: 'xy147258' } });
+      }
+      return Promise.resolve({ data: { enabled: true, running: true, links: [] } });
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-password-toggle-0"]').trigger('click');
+    await flushPromises();
+    const box = wrapper.find('[data-test="upstream-network-password-0"]').element as HTMLInputElement;
+    expect(box.value).toBe('xy147258');
+    expect(wrapper.find('[data-test="upstream-network-password-note-0"]').text()).toContain('the hub has saved and will send');
+    // Reading it back must not put it into the rows: nothing was typed, so
+    // nothing is committed and a save keeps the password that is there.
+    expect(wrapper.emitted('set')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('does not ask for a password when none is saved', async () => {
+    const wrapper = mount(UpstreamTab, {
+      props: { value: { enabled: true, networks: networks(), rewrites: [] }, saves: 0, passwordsSet: [false, false] },
+      global: { mocks: { $toast: { add: vi.fn() } } },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await wrapper.find('[data-test="upstream-network-password-toggle-0"]').trigger('click');
+    await flushPromises();
+    expect(mockAPI.get.mock.calls.some((c) => String(c[0]).includes('/password/'))).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('keeps the saved password when the revealed text is cleared', async () => {
+    mockAPI.get.mockImplementation((path: string) => {
+      if (path === '/config/upstream/password/0') {
+        return Promise.resolve({ data: { name: 'BM', password: 'xy147258' } });
+      }
+      return Promise.resolve({ data: { enabled: true, running: true, links: [] } });
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-password-toggle-0"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="upstream-network-password-0"]').setValue('');
+    const events = wrapper.emitted('set') as unknown[][];
+    const last = events[events.length - 1]![1] as { networks: { password: string }[] };
+    expect(last.networks[0]!.password).toBe('');
+    wrapper.unmount();
+  });
+
+  it('moves the revealed password with its row when one is removed', async () => {
+    mockAPI.get.mockImplementation((path: string) => {
+      if (path === '/config/upstream/password/1') {
+        return Promise.resolve({ data: { name: 'DMR+', password: 'second-secret' } });
+      }
+      return Promise.resolve({ data: { enabled: true, running: true, links: [] } });
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-password-toggle-1"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="upstream-network-remove-0"]').trigger('click');
+    await flushPromises();
+    const box = wrapper.find('[data-test="upstream-network-password-0"]').element as HTMLInputElement;
+    expect(box.value).toBe('second-secret');
+    wrapper.unmount();
+  });
+});
+
+describe('UpstreamTab link state', () => {
+  it('reads the link state every three seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(UpstreamTab, {
+        props: { value: { enabled: true, networks: networks(), rewrites: [] }, saves: 0, passwordsSet: [true, true] },
+        global: { mocks: { $toast: { add: vi.fn() } } },
+        attachTo: document.body,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const first = mockAPI.get.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mockAPI.get.mock.calls.length).toBe(first + 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mockAPI.get.mock.calls.length).toBe(first + 2);
+      wrapper.unmount();
+      // A closed tab stops polling.
+      const after = mockAPI.get.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(mockAPI.get.mock.calls.length).toBe(after);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tells a refused login apart from a master that never answered', async () => {
+    mockAPI.get.mockResolvedValue({
+      data: {
+        enabled: true, running: true,
+        links: [
+          { name: 'CDN860', up: false, reason: 'Refused', rxBursts: 0, txBursts: 0, talkgroups: [] },
+          { name: 'BM4501', up: false, rxBursts: 0, txBursts: 0, talkgroups: [] },
+        ],
+      },
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await flushPromises();
+    expect(wrapper.find('[data-test="upstream-link-why-0"]').text()).toContain('refused the login');
+    expect(wrapper.find('[data-test="upstream-link-why-1"]').text()).toContain('No answer from the master yet');
+    wrapper.unmount();
+  });
+
+  it('tells a refused ID apart from a refused password', async () => {
+    mockAPI.get.mockResolvedValue({
+      data: {
+        enabled: true, running: true,
+        links: [
+          { name: 'CQDMR', up: false, reason: 'Refused', stage: 'Login', rxBursts: 0, txBursts: 0, talkgroups: [] },
+          { name: 'BM4602', up: false, reason: 'Refused', stage: 'Auth', rxBursts: 0, txBursts: 0, talkgroups: [] },
+          { name: 'CDN860', up: false, reason: 'Refused', stage: 'Running', rxBursts: 0, txBursts: 0, talkgroups: [] },
+        ],
+      },
+    });
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await flushPromises();
+    expect(wrapper.find('[data-test="upstream-link-why-0"]').text()).toContain('before asking for the password');
+    expect(wrapper.find('[data-test="upstream-link-why-1"]').text()).toContain('refused the password');
+    expect(wrapper.find('[data-test="upstream-link-why-2"]').text()).toContain('same ID');
+    wrapper.unmount();
+  });
+});

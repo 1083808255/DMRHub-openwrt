@@ -21,6 +21,7 @@ package config
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/USA-RedDragon/DMRHub/internal/dmr/servers/upstream"
 	"github.com/gin-gonic/gin"
@@ -58,4 +59,38 @@ func GETUpstream(c *gin.Context) {
 		st.Rewrites = []upstream.RewriteStatus{}
 	}
 	c.JSON(http.StatusOK, st)
+}
+
+// UpstreamPasswordAnswer is the saved password of one upstream network.
+type UpstreamPasswordAnswer struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+// GETUpstreamPassword returns the password this replica has saved for one
+// upstream network, so that an admin can read back what the hub will really
+// send to the master. A master that refuses a login says only that it
+// refused: without this the admin cannot tell a mistyped password from one
+// the master itself no longer accepts.
+//
+// The route sits behind RequireAdmin, as every other config route does, and
+// answers for one network at a time so that reading a password is a
+// deliberate act rather than something a page load hands out in bulk.
+func GETUpstreamPassword(c *gin.Context) {
+	live, ok := liveOf(c)
+	if !ok {
+		return
+	}
+	i, err := strconv.Atoi(c.Param("index"))
+	if err != nil || i < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "The network number must be a whole number of 0 or more"})
+		return
+	}
+	networks := live.Current().Get().DMR.Upstreams.Networks
+	if i >= len(networks) {
+		c.JSON(http.StatusNotFound, gin.H{errorKey: "There is no network at that number"})
+		return
+	}
+	n := networks[i]
+	c.JSON(http.StatusOK, UpstreamPasswordAnswer{Name: n.Name, Password: n.Password})
 }

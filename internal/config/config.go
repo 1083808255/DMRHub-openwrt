@@ -98,7 +98,7 @@ type Database struct {
 	Port            int            `json:"port,omitempty" name:"port" description:"Database port (postgres and mysql only)"`
 	Username        string         `json:"username,omitempty" name:"username" description:"Database username (postgres and mysql only)"`
 	Password        string         `json:"-" yaml:"password" name:"password" description:"Database password (postgres and mysql only)"`
-	ExtraParameters []string       `json:"extra-parameters,omitempty" yaml:"extra-parameters" name:"extra-parameters" description:"Additional parameters for the database connection, e.g., sslmode=disable" default:"_pragma=foreign_keys(1),_pragma=journal_mode(WAL),_pragma=synchronous(FULL)"`
+	ExtraParameters []string       `json:"extra-parameters,omitempty" yaml:"extra-parameters" name:"extra-parameters" description:"Additional parameters for the database connection, e.g., sslmode=disable" default:"_pragma=foreign_keys(1),_pragma=journal_mode(WAL),_pragma=synchronous(NORMAL)"`
 }
 
 // HTTP holds the HTTP server configuration.
@@ -134,6 +134,7 @@ type DMR struct {
 	DisableRadioIDValidation bool          `json:"disable-radio-id-validation,omitempty" name:"disable-radio-id-validation" description:"Turn off all the RadioID checks of radio-id-checks, whatever they are set to" default:"false"`
 	RadioIDChecks            RadioIDChecks `json:"radio-id-checks" yaml:"radio-id-checks" name:"radio-id-checks" description:"Checks of DMR IDs and callsigns against the RadioID data, each of which can be on or off"`
 	RadioIDURL               string        `json:"radio-id-url,omitempty" name:"radio-id-url" description:"URL to fetch radio ID information for validation and display purposes. Expected JSON format is the same as RadioID.net." default:"https://www.radioid.net/static/users.json"`
+	RadioIDExtraURL          string        `json:"radio-id-extra-url,omitempty" name:"radio-id-extra-url" description:"Optional second radio ID list that only fills the IDs the primary list misses, such as the dmrid.dat of radiowo.com for Chinese callsigns. Accepts the RadioID.net JSON or the semicolon separated format. Empty merges nothing" default:"https://radiowo.com/id_library/dmrid.dat"`
 	RepeaterIDURL            string        `json:"repeater-id-url,omitempty" name:"repeater-id-url" description:"URL to fetch repeater information for validation and display purposes. Expected JSON format is the same as RadioID.net." default:"https://www.radioid.net/static/rptrs.json"`
 	PublicAddress            string        `json:"public-address" yaml:"public-address" name:"public-address" description:"Host name or IP address that hotspots and repeaters connect to, as the enroll page shows it, such as dmr.example.org. Empty uses the host name of the canonical host of the HTTP server"`
 	Retention                Retention     `json:"retention" name:"retention" description:"How long DMRHub keeps its records"`

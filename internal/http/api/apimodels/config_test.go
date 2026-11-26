@@ -59,6 +59,23 @@ func TestPOSTConfigReadsTheSecrets(t *testing.T) {
 	assert.Equal(t, "redis", got.Redis.Host)
 }
 
+// TestPOSTConfigReadsTopLevelSecretAfterGET decodes a payload made from the
+// config that GET serves: it carries a secrets status object with no value,
+// and an older client edits the secret at the top level. The edit must not
+// be swallowed by the status object.
+func TestPOSTConfigReadsTopLevelSecretAfterGET(t *testing.T) {
+	t.Parallel()
+	body := `{"secret":"new-secret","secrets":{"secretSet":true,"passwordSaltSet":true,"smtpPasswordSet":false,"upstreamPasswordsSet":[]},"http":{"port":3005}}`
+	var req apimodels.POSTConfig
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+	running := config.Config{Secret: "old-secret"}
+	var got config.Config
+	req.ToConfig(&got, &running)
+	assert.Equal(t, "new-secret", got.Secret)
+	assert.Equal(t, 3005, got.HTTP.Port)
+}
+
 // TestPOSTConfigKeepsTheSecretsItLacks keeps each running secret that a
 // request leaves out, as the Setup page does for a secret that no one
 // typed.

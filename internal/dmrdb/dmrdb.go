@@ -60,6 +60,11 @@ type dbMetadata struct {
 // populates the map with decoded entries, returning the count of entries decoded.
 type StreamDecoder[T any] func(dec *json.Decoder, m *xsync.Map[uint, T]) (int, error)
 
+// RawDecoder populates the map from the raw bytes of a download. It serves
+// formats that are not JSON, such as the semicolon separated dump that
+// radiowo.com serves. A nil RawDecoder means the database only reads JSON.
+type RawDecoder[T any] func(data []byte, m *xsync.Map[uint, T]) (int, error)
+
 // Config holds the initialization parameters for a DB instance.
 type Config[T any] struct {
 	// CompressedData is the xz-compressed JSON database embedded in the binary.
@@ -70,6 +75,8 @@ type Config[T any] struct {
 	Presize int
 	// Decode is the streaming JSON decoder that populates the map.
 	Decode StreamDecoder[T]
+	// DecodeRaw is the decoder for non-JSON downloads. Optional.
+	DecodeRaw RawDecoder[T]
 	// EntityName is a human-readable name for log messages (e.g. "users", "repeaters").
 	EntityName string
 }
@@ -172,25 +179,9 @@ func (db *DB[T]) Get(id uint) (T, bool) {
 	return db.dataMap.Load(id)
 }
 
-// ExtraSource describes an additional database source that is merged into
-// the primary database during UpdateMerged. The decode function receives the
-// map being built for the new database state and returns the number of
-// entries it added.
-type ExtraSource[T any] struct {
-	URL    string
-	Decode func(r io.Reader, m *xsync.Map[uint, T]) (int, error)
-}
-
 // Update fetches a fresh copy of the database from the given URL
 // and replaces the in-memory map.
 func (db *DB[T]) Update(url string) error {
-	return db.UpdateMerged(url, nil)
-}
-
-// UpdateMerged behaves like Update, then merges each extra source into the
-// new database state. Failures of an extra source are logged but do not fail
-// the update, since the primary source was loaded successfully.
-func (db *DB[T]) UpdateMerged(url string, extras []ExtraSource[T]) error {
 	if err := db.ensureLoaded(); err != nil {
 		slog.Error("Error unpacking database", "entity", db.config.EntityName, "error", err)
 		return ErrUpdateFailed
@@ -220,7 +211,23 @@ func (db *DB[T]) UpdateMerged(url string, extras []ExtraSource[T]) error {
 	}
 
 	db.updatingMap = xsync.NewMap[uint, T](xsync.WithPresize(db.Len()), xsync.WithGrowOnly())
-	count, err := db.config.Decode(json.NewDecoder(resp.Body), db.updatingMap)
+	// Sniff the body: a download that starts with '{' or '[' is JSON, anything
+	// else goes to the raw decoder when the database has one, such as the
+	// semicolon separated dumps that mirrors of RadioID.net serve.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("Error reading database", "entity", db.config.EntityName, "error", err)
+		return fmt.Errorf("%w: %w", ErrUpdateFailed, err)
+	}
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	count := 0
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		count, err = db.config.Decode(json.NewDecoder(bytes.NewReader(body)), db.updatingMap)
+	} else if db.config.DecodeRaw != nil {
+		count, err = db.config.DecodeRaw(body, db.updatingMap)
+	} else {
+		err = fmt.Errorf("unsupported format: the body does not look like JSON")
+	}
 	if err != nil {
 		slog.Error("Error decoding database", "entity", db.config.EntityName, "error", err)
 		return fmt.Errorf("%w: %w", ErrUpdateFailed, err)
@@ -229,15 +236,6 @@ func (db *DB[T]) UpdateMerged(url string, extras []ExtraSource[T]) error {
 	if count == 0 {
 		slog.Error("No entries found in database", "entity", db.config.EntityName)
 		return fmt.Errorf("%w: %w", ErrUpdateFailed, ErrNoEntries)
-	}
-
-	for _, extra := range extras {
-		extraCount, extraErr := db.fetchExtra(ctx, extra, db.updatingMap)
-		if extraErr != nil {
-			slog.Warn("Error loading extra database source", "entity", db.config.EntityName, "url", extra.URL, "error", extraErr)
-			continue
-		}
-		count += extraCount
 	}
 
 	db.metadata.Store(dbMetadata{Count: count, Date: time.Now()})
@@ -249,16 +247,28 @@ func (db *DB[T]) UpdateMerged(url string, extras []ExtraSource[T]) error {
 	return nil
 }
 
-// fetchExtra downloads and decodes a single extra source into m.
-func (db *DB[T]) fetchExtra(ctx context.Context, extra ExtraSource[T], m *xsync.Map[uint, T]) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(extra.URL), nil)
+// UpdateMerge fetches the URL and adds its entries into the database,
+// keeping the entries it already holds: an ID the download lists replaces
+// nothing, so a primary dump such as RadioID.net keeps its shape and a
+// supplement such as the regional dump of a mirror only fills gaps.
+// The metadata date moves to now either way.
+func (db *DB[T]) UpdateMerge(url string) error {
+	if err := db.ensureLoaded(); err != nil {
+		slog.Error("Error unpacking database", "entity", db.config.EntityName, "error", err)
+		return ErrUpdateFailed
+	}
+
+	const updateTimeout = 10 * time.Minute
+	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(url), nil)
 	if err != nil {
-		return 0, err
+		return ErrUpdateFailed
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, err
+		return fmt.Errorf("%w: %w", ErrUpdateFailed, err)
 	}
 	defer func() {
 		err := resp.Body.Close()
@@ -268,10 +278,46 @@ func (db *DB[T]) fetchExtra(ctx context.Context, extra ExtraSource[T], m *xsync.
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("unexpected status %s", resp.Status)
+		return fmt.Errorf("%w: unexpected status %s", ErrUpdateFailed, resp.Status)
 	}
 
-	return extra.Decode(resp.Body, m)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("Error reading database", "entity", db.config.EntityName, "error", err)
+		return fmt.Errorf("%w: %w", ErrUpdateFailed, err)
+	}
+
+	extra := xsync.NewMap[uint, T](xsync.WithPresize(db.Len()), xsync.WithGrowOnly())
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	var count int
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		count, err = db.config.Decode(json.NewDecoder(bytes.NewReader(body)), extra)
+	} else if db.config.DecodeRaw != nil {
+		count, err = db.config.DecodeRaw(body, extra)
+	} else {
+		err = fmt.Errorf("unsupported format: the body does not look like JSON")
+	}
+	if err != nil {
+		slog.Error("Error decoding database", "entity", db.config.EntityName, "error", err)
+		return fmt.Errorf("%w: %w", ErrUpdateFailed, err)
+	}
+	if count == 0 {
+		slog.Error("No entries found in database", "entity", db.config.EntityName)
+		return fmt.Errorf("%w: %w", ErrUpdateFailed, ErrNoEntries)
+	}
+
+	added := 0
+	extra.Range(func(id uint, v T) bool {
+		if _, exists := db.dataMap.LoadOrStore(id, v); !exists {
+			added++
+		}
+		return true
+	})
+
+	total := db.dataMap.Size()
+	db.metadata.Store(dbMetadata{Count: total, Date: time.Now()})
+	slog.Info("Merge complete", "entity", db.config.EntityName, "entries", count, "added", added, "total", total)
+	return nil
 }
 
 // GetDate returns the date of the currently loaded database.

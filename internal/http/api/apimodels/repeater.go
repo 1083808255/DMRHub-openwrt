@@ -26,12 +26,15 @@ import (
 )
 
 // RepeaterPost enrolls a repeater. Owner is the user ID of the owner; 0 is
-// the requester. Only an admin can set another user.
+// the requester. Only an admin can set another user. Password is the secret
+// the repeater logs in with: blank asks the server to generate one, as it
+// always did. For an IPSC repeater it is the auth key.
 type RepeaterPost struct {
 	RadioID         uint   `json:"id" binding:"required"`
 	Type            string `json:"type"`
 	SimplexRepeater bool   `json:"simplex_repeater"`
 	Owner           uint   `json:"owner,omitempty"`
+	Password        string `json:"password,omitempty"`
 }
 
 // RepeaterOwnerPost is the owner that an admin assigns to a repeater with

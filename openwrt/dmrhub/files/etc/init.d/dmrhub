@@ -77,6 +77,12 @@ EOF
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+    # A graceful stop needs time: DMRHub waits for the calls in progress
+    # before it closes the database. Five seconds of the procd default
+    # SIGKILLed it mid write and corrupted the database at an OTA. A full
+    # minute also covers a busy hub whose upstream servers take longer to
+    # unwind than a single voice burst.
+    procd_set_param term_timeout 60
     procd_close_instance
 }
 
@@ -123,9 +129,31 @@ keepDataOverUpgrade() {
 }
 
 status() {
-    if pgrep -f "$BIN" >/dev/null 2>&1; then
+    # Match the process name, not the full command line: pgrep -f also finds
+    # the shell that runs this check, which makes the wait below never end.
+    if pidof dmrhub >/dev/null 2>&1; then
         echo "DMRHub is running"
     else
         echo "DMRHub is not running"
     fi
+}
+
+# rc.common calls stop_service before procd_kill, so waiting here would only
+# burn the grace period while DMRHub is still writing. The real wait belongs
+# in service_stopped, which rc.common calls after procd_kill has sent TERM.
+stop_service() {
+    return 0
+}
+
+# service_stopped waits until the writer of the SQLite file is gone, so that
+# the steps after a stop, such as the backup of an OTA, never see a database
+# that is still being written. The wait is longer than term_timeout: if procd
+# has to SIGKILL the process, the loop still ends with no writer left.
+service_stopped() {
+    local n=0
+    while pidof dmrhub >/dev/null 2>&1; do
+        n=$((n+1))
+        [ "$n" -ge 70 ] && break
+        sleep 1
+    done
 }

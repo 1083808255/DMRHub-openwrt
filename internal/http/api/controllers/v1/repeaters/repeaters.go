@@ -39,6 +39,7 @@ import (
 	"github.com/USA-RedDragon/DMRHub/internal/http/websocket"
 	"github.com/USA-RedDragon/DMRHub/internal/pubsub"
 	"github.com/USA-RedDragon/DMRHub/internal/repeaterdb"
+	ipscauth "github.com/USA-RedDragon/dmrgo/v2/transport/ipsc/ipscauth"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -440,11 +441,27 @@ func POSTRepeater(c *gin.Context) {
 		repeater.Owner = owner
 		repeater.OwnerID = owner.ID
 
-		repeater.Password, err = newSecret(json.Type)
-		if err != nil {
-			slog.Error("Failed to generate a repeater password", "type", json.Type, "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: "Failed to generate a repeater password"})
-			return
+		// A password the requester picked wins; a blank one asks for a
+		// generated secret, as before.
+		if trimmed := strings.TrimSpace(json.Password); trimmed != "" {
+			switch json.Type {
+			case models.RepeaterTypeIPSC:
+				if _, err := ipscauth.ParseKey(trimmed); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{errorKey: "The auth key must be up to 40 hex digits"})
+					return
+				}
+			default:
+				// MMDVM and other networked types accept any non-blank
+				// secret the software of the repeater can hold.
+			}
+			repeater.Password = trimmed
+		} else {
+			repeater.Password, err = newSecret(json.Type)
+			if err != nil {
+				slog.Error("Failed to generate a repeater password", "type", json.Type, "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{errorKey: "Failed to generate a repeater password"})
+				return
+			}
 		}
 
 		switch {

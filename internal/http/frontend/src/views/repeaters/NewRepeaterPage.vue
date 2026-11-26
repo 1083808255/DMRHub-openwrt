@@ -79,6 +79,18 @@
           </div>
           <br v-if="isAdmin" />
           <div class="field">
+            <label class="field-label" for="repeaterPassword">{{ $t("Password") }}</label>
+            <ShadInput
+              id="repeaterPassword"
+              type="text"
+              v-model="repeaterPassword"
+              :placeholder="$t('Leave blank to generate one')"
+              data-test="repeater-password"
+            />
+            <small class="field-help">{{ $t("The secret that the repeater logs in with. Leave it blank and the server makes one up.") }}</small>
+          </div>
+          <br />
+          <div class="field">
             <label class="checkbox-label">
               <input
                 type="checkbox"
@@ -145,6 +157,7 @@ export default {
     return {
       radioID: '',
       repeaterType: 'mmdvm',
+      repeaterPassword: '',
       simplexRepeater: false,
       submitted: false,
       owner: null as number | null,
@@ -221,6 +234,9 @@ export default {
         type: this.repeaterType,
         simplex_repeater: this.simplexRepeater,
       };
+      if (this.repeaterPassword.trim()) {
+        body.password = this.repeaterPassword.trim();
+      }
       if (this.isAdmin && this.ownerID) {
         body.owner = this.ownerID;
       }

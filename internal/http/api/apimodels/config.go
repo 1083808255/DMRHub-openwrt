@@ -66,8 +66,11 @@ func (p *POSTConfig) UnmarshalJSON(b []byte) error {
 	}
 	var s postSecrets
 	// The page sends the secrets nested under "secrets", and an older client
-	// sends them at the top level. Read the nested form, and fall back to
-	// the top level when it is absent, so neither loses a secret.
+	// sends them at the top level. A GET of the config also carries a
+	// "secrets" object, but that one only tells whether a secret is set; it
+	// holds no value. Read both forms and let the top level fill whatever
+	// the nested object leaves out. Otherwise a client that edits a
+	// top-level secret after a GET silently loses the change.
 	var wrapped struct {
 		Secrets *postSecrets `json:"secrets"`
 	}
@@ -76,8 +79,31 @@ func (p *POSTConfig) UnmarshalJSON(b []byte) error {
 	}
 	if wrapped.Secrets != nil {
 		s = *wrapped.Secrets
-	} else if err := json.Unmarshal(b, &s); err != nil {
+	}
+	var top postSecrets
+	if err := json.Unmarshal(b, &top); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
+	}
+	if s.Secret == nil {
+		s.Secret = top.Secret
+	}
+	if s.PasswordSalt == nil {
+		s.PasswordSalt = top.PasswordSalt
+	}
+	if s.HIBPAPIKey == nil {
+		s.HIBPAPIKey = top.HIBPAPIKey
+	}
+	if s.SMTP.Password == nil {
+		s.SMTP.Password = top.SMTP.Password
+	}
+	if s.Database.Password == nil {
+		s.Database.Password = top.Database.Password
+	}
+	if s.Redis.Password == nil {
+		s.Redis.Password = top.Redis.Password
+	}
+	if s.Upstreams.Passwords == nil {
+		s.Upstreams.Passwords = top.Upstreams.Passwords
 	}
 	p.Secret, p.PasswordSalt, p.HIBPAPIKey = s.Secret, s.PasswordSalt, s.HIBPAPIKey
 	p.SMTPPassword, p.DatabasePassword, p.RedisPassword = s.SMTP.Password, s.Database.Password, s.Redis.Password

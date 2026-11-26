@@ -22,10 +22,8 @@ package userdb
 import (
 	// Embed the users.json.xz file into the binary.
 	_ "embed"
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +50,7 @@ func newDB(compressed []byte, dateStr string) *dmrdb.DB[DMRUser] {
 		Presize:        250000,
 		EntityName:     "users",
 		Decode:         streamDecodeUsers,
+		DecodeRaw:      decodeUsersDat,
 	})
 }
 
@@ -243,58 +242,64 @@ func Get(dmrID uint) (DMRUser, bool) {
 }
 
 func Update(url string) error {
-	if err := userDB.UpdateMerged(url, []dmrdb.ExtraSource[DMRUser]{
-		{URL: secondaryURL, Decode: decodeDATUsers},
-	}); err != nil {
+	if err := userDB.Update(url); err != nil {
 		return fmt.Errorf("userdb: %w", err)
 	}
 	return nil
 }
 
-// DefaultSecondaryURL is the radiowo.com dmrid.dat supplement that is merged
-// into the user database on every update.
-const DefaultSecondaryURL = "https://radiowo.com/id_library/dmrid.dat"
+// UpdateMerge fetches the supplement list and adds the IDs that the primary
+// list does not have. Existing entries stay as they are.
+func UpdateMerge(url string) error {
+	if strings.TrimSpace(url) == "" {
+		return nil
+	}
+	if err := userDB.UpdateMerge(url); err != nil {
+		return fmt.Errorf("userdb: %w", err)
+	}
+	return nil
+}
 
-// secondaryURL is the URL of the supplementary user database merged on update.
-var secondaryURL = DefaultSecondaryURL //nolint:gochecknoglobals
-
-// decodeDATUsers parses the semicolon-separated radiowo.com dmrid.dat format
-// (ID;CALLSIGN;NAME;CITY;STATE;COUNTRY;REMARKS, with a variable number of
-// fields) and fills IDs that are missing from the primary database. Entries
-// already present in the primary source always win.
-func decodeDATUsers(r io.Reader, m *xsync.Map[uint, DMRUser]) (int, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
+// decodeUsersDat parses the semicolon separated dump that mirrors such as
+// radiowo.com serve, one user per line:
+//
+//	id;callsign;name;city;state;country;comment;
+//
+// The trailing fields may be empty. The name column holds the whole name,
+// so Surname stays empty and FName carries it, as the JSON dump splits
+// names differently and the callers of Get only read Callsign and City.
+func decodeUsersDat(data []byte, m *xsync.Map[uint, DMRUser]) (int, error) {
 	count := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		fields := strings.Split(line, ";")
-		if len(fields) < 2 {
-			continue
+		if len(fields) < 6 {
+			return count, fmt.Errorf("%w: line %q does not have 6 fields", ErrDecodingDB, line)
 		}
 		id, err := strconv.ParseUint(strings.TrimSpace(fields[0]), 10, 32)
-		if err != nil || id == 0 || fields[1] == "" {
+		if err != nil {
+			return count, fmt.Errorf("%w: line %q has an id that is not a number: %w", ErrDecodingDB, line, err)
+		}
+		user := DMRUser{
+			ID:       uint(id),
+			RadioID:  uint(id),
+			Callsign: strings.TrimSpace(fields[1]),
+			Name:     strings.TrimSpace(fields[2]),
+			FName:    strings.TrimSpace(fields[2]),
+			City:     strings.TrimSpace(fields[3]),
+			State:    strings.TrimSpace(fields[4]),
+			Country:  strings.TrimSpace(fields[5]),
+		}
+		if user.ID == 0 || user.Callsign == "" {
 			continue
-		}
-		if _, ok := m.Load(uint(id)); ok {
-			continue
-		}
-
-		user := DMRUser{ID: uint(id), Callsign: fields[1]}
-		if len(fields) > 2 {
-			user.Name = fields[2]
-		}
-		if len(fields) > 5 {
-			user.City, user.State, user.Country = fields[3], fields[4], fields[5]
 		}
 		m.Store(user.ID, user)
 		count++
 	}
-	return count, scanner.Err()
+	return count, nil
 }
 
 func GetDate() (time.Time, error) {
