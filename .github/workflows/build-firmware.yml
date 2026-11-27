@@ -229,15 +229,32 @@ jobs:
           # 280 MB of overlay for packages. Everything left on the disk goes
           # to the DMRHub data partition at first boot.
           #
-          # ImageBuilder maps ROOTFS_PARTSIZE on its own but takes the boot
-          # partition size from CONFIG_TARGET_KERNEL_PARTSIZE: passing
-          # KERNEL_PARTSIZE alone is silently ignored and leaves the 16 MB
-          # default, which is what the first 320 build shipped.
-          echo "==> make image PACKAGES=$PACKAGES ROOTFS_PARTSIZE=320 CONFIG_TARGET_KERNEL_PARTSIZE=64"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" ROOTFS_PARTSIZE=320 CONFIG_TARGET_KERNEL_PARTSIZE=64
-          IMG=$(ls bin/targets/x86/64/*combined.img | head -1)
+          # The image generator reads both sizes from .config, and that file
+          # carries the 16 MB x86 default. Neither KERNEL_PARTSIZE nor
+          # CONFIG_TARGET_KERNEL_PARTSIZE on the make command line reaches it,
+          # so the earlier builds silently shipped a 16 MB boot partition.
+          # Rewrite .config before the build and keep ROOTFS_PARTSIZE as well.
+          sed -i -e 's/^CONFIG_TARGET_KERNEL_PARTSIZE=.*/CONFIG_TARGET_KERNEL_PARTSIZE=64/' \
+                 -e 's/^CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=320/' .config
+          grep -q '^CONFIG_TARGET_KERNEL_PARTSIZE=' .config || echo 'CONFIG_TARGET_KERNEL_PARTSIZE=64' >> .config
+          grep -q '^CONFIG_TARGET_ROOTFS_PARTSIZE=' .config || echo 'CONFIG_TARGET_ROOTFS_PARTSIZE=320' >> .config
+          echo "==> partition sizes in .config:"
+          grep -E '^CONFIG_TARGET_(KERNEL|ROOTFS)_PARTSIZE=' .config
+          echo "==> make image PACKAGES=$PACKAGES"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" ROOTFS_PARTSIZE=320
+          IMG=$(ls bin/targets/x86/64/*combined.img.gz | head -1)
           echo "==> partition table of $(basename "$IMG"):"
-          fdisk -l "$IMG" | grep -E '^/|^Disk|Sector size' || true
+          # Read only the MBR; unpacking the whole image is not needed.
+          (gzip -dc "$IMG" | head -c 512) > /tmp/mbr.bin || true
+          for i in 0 1 2 3; do
+            off=$((446 + i * 16))
+            type=$(od -An -tu1 -j $((off + 4)) -N1 /tmp/mbr.bin | tr -d ' ')
+            [ "$type" = "0" ] && continue
+            count=$(od -An -tu4 -j $((off + 12)) -N4 /tmp/mbr.bin | tr -d ' ')
+            echo "p$((i + 1)) type=$type sectors=$count size=$((count * 512 / 1024 / 1024))MB"
+          done
+          BOOT_SECTORS=$(od -An -tu4 -j 458 -N4 /tmp/mbr.bin | tr -d ' ')
+          [ "$BOOT_SECTORS" -eq 131072 ] || { echo "boot partition is not 64 MiB: $BOOT_SECTORS sectors"; exit 1; }
           ls -lh bin/targets/x86/64/*.img.gz
 
       - name: Collect firmware artifacts
