@@ -130,18 +130,18 @@ function destination(call: CallRow) {
  * until its content runs into the next one.
  */
 export const LAST_HEARD_COLUMN_WIDTHS: Record<string, string> = {
-  time: 'w-[11%]',
-  time_slot: 'w-[4.5%]',
-  kind: 'w-[8.5%]',
-  user: 'w-[18%]',
-  destination: 'w-[9%]',
-  repeater: 'w-[11%]',
-  duration: 'w-[7%]',
-  codec: 'w-[8%]',
-  ber: 'w-[5%]',
-  loss: 'w-[5%]',
-  jitter: 'w-[7.5%]',
-  rssi: 'w-[5.5%]',
+  time: 'w-[9%]',
+  time_slot: 'w-[5%]',
+  kind: 'w-[8%]',
+  user: 'w-[17.5%]',
+  destination: 'w-[9.5%]',
+  repeater: 'w-[8%]',
+  duration: 'w-[7.5%]',
+  codec: 'w-[8.5%]',
+  ber: 'w-[5.5%]',
+  loss: 'w-[6%]',
+  jitter: 'w-[8%]',
+  rssi: 'w-[7.5%]',
 };
 
 export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableColumn<CallRow, unknown>[] {
