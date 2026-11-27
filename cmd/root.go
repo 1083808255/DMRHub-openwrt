@@ -411,11 +411,21 @@ func setupDMRDatabaseJobs(current config.Source, scheduler gocron.Scheduler) {
 	// first, and the much larger primary download then drops everything it
 	// added (the Chinese 86xxxxx IDs come only from the supplement).
 	scheduleDailyUpdate(scheduler, "user", func() string { return current.Get().DMR.RadioIDURL }, func(string) error {
+		// The supplement is small (a few hundred kilobytes) and holds the IDs
+		// the primary list never has, such as the Chinese 86xxxxx series. Merge
+		// it before the primary download starts, so those callsigns resolve
+		// seconds after a restart instead of only once the multi-megabyte
+		// download has finished.
+		if err := userdb.UpdateMerge(current.Get().DMR.RadioIDExtraURL); err != nil {
+			slog.Error("Failed to merge the users supplement database", "error", err)
+		}
 		if err := userdb.Update(current.Get().DMR.RadioIDURL); err != nil {
 			// A failed primary download keeps the built-in dump, and the
 			// supplement still fills it, so this is not fatal for the merge.
 			slog.Error("Failed to update the users database, using built in one", "error", err)
 		}
+		// Update replaces the whole map, so merge again to restore the
+		// supplement entries that the replacement dropped.
 		if err := userdb.UpdateMerge(current.Get().DMR.RadioIDExtraURL); err != nil {
 			slog.Error("Failed to merge the users supplement database", "error", err)
 		}
