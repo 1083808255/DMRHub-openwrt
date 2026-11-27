@@ -96,31 +96,31 @@
           <div class="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Name') }}</span>
-              <ShadInput :model-value="n.name" :disabled="locked" :placeholder="$t('Network name')" :aria-label="$t('Name of network {n}', { n: i + 1 })" :data-test="`upstream-network-name-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'name', String(v))" />
+              <ShadInput class="w-1/2" :model-value="n.name" :disabled="locked" :placeholder="$t('Network name')" :aria-label="$t('Name of network {n}', { n: i + 1 })" :data-test="`upstream-network-name-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'name', String(v))" />
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Protocol') }}</span>
-              <select :class="boxClass" :value="n.dialect" :disabled="locked" :aria-label="$t('Protocol of network {n}', { n: i + 1 })" :data-test="`upstream-network-dialect-${i}`" @change="(e: Event) => setNetwork(i, 'dialect', (e.target as HTMLSelectElement).value)">
+              <select :class="boxHalf" :value="n.dialect" :disabled="locked" :aria-label="$t('Protocol of network {n}', { n: i + 1 })" :data-test="`upstream-network-dialect-${i}`" @change="(e: Event) => setNetwork(i, 'dialect', (e.target as HTMLSelectElement).value)">
                 <option value="mmdvm">{{ $t('MMDVM') }}</option>
                 <option value="hbrp">{{ $t('HBRP') }}</option>
               </select>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Repeater ID') }}</span>
-              <ShadInput :model-value="String(n.id)" :disabled="locked" inputmode="numeric" :aria-label="$t('Repeater ID of network {n}', { n: i + 1 })" :data-test="`upstream-network-id-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'id', v)" />
+              <ShadInput class="w-1/2" :model-value="String(n.id)" :disabled="locked" inputmode="numeric" :aria-label="$t('Repeater ID of network {n}', { n: i + 1 })" :data-test="`upstream-network-id-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'id', v)" />
             </label>
             <label class="block text-sm md:col-span-2">
               <span class="mb-1 block font-medium">{{ $t('Master address') }}</span>
-              <ShadInput :model-value="n.address" :disabled="locked" placeholder="master.brandmeister.network" :aria-label="$t('Address of network {n}', { n: i + 1 })" :data-test="`upstream-network-address-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'address', String(v))" />
+              <ShadInput class="w-1/2" :model-value="n.address" :disabled="locked" placeholder="master.brandmeister.network" :aria-label="$t('Address of network {n}', { n: i + 1 })" :data-test="`upstream-network-address-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'address', String(v))" />
               <span class="mt-1 block text-xs text-muted-foreground">{{ $t('The host name or IP address only, with no https:// and no path. The port goes in the field below.') }}</span>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Port') }}</span>
-              <ShadInput :model-value="String(n.port)" :disabled="locked" inputmode="numeric" :aria-label="$t('Port of network {n}', { n: i + 1 })" :data-test="`upstream-network-port-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'port', v)" />
+              <ShadInput class="w-1/2" :model-value="String(n.port)" :disabled="locked" inputmode="numeric" :aria-label="$t('Port of network {n}', { n: i + 1 })" :data-test="`upstream-network-port-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'port', v)" />
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Password') }}</span>
-              <div class="relative">
+              <div class="relative w-1/2">
                 <ShadInput
                   :type="shown.has(i) ? 'text' : 'password'"
                   class="pr-10"
@@ -149,15 +149,17 @@
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Callsign') }}</span>
-              <ShadInput :model-value="n.callsign" :disabled="locked" :aria-label="$t('Callsign of network {n}', { n: i + 1 })" :data-test="`upstream-network-callsign-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'callsign', String(v))" />
+              <ShadInput class="w-1/2" :model-value="n.callsign" :disabled="locked" :aria-label="$t('Callsign of network {n}', { n: i + 1 })" :data-test="`upstream-network-callsign-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'callsign', String(v))" />
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Color code') }}</span>
-              <ShadInput :model-value="String(n.colorCode)" :disabled="locked" inputmode="numeric" :aria-label="$t('Color code of network {n}', { n: i + 1 })" :data-test="`upstream-network-color-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'colorCode', v)" />
+              <select :class="boxHalf" :value="String(n.colorCode)" :disabled="locked" :aria-label="$t('Color code of network {n}', { n: i + 1 })" :data-test="`upstream-network-color-${i}`" @change="(e: Event) => setNetwork(i, 'colorCode', (e.target as HTMLSelectElement).value)">
+                <option v-for="cc in 16" :key="cc" :value="String(cc - 1)">{{ cc - 1 }}</option>
+              </select>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Slots') }}</span>
-              <select :class="boxClass" :value="String(n.slots)" :disabled="locked" :aria-label="$t('Slots of network {n}', { n: i + 1 })" :data-test="`upstream-network-slots-${i}`" @change="(e: Event) => setNetwork(i, 'slots', (e.target as HTMLSelectElement).value)">
+              <select :class="boxHalf" :value="String(n.slots)" :disabled="locked" :aria-label="$t('Slots of network {n}', { n: i + 1 })" :data-test="`upstream-network-slots-${i}`" @change="(e: Event) => setNetwork(i, 'slots', (e.target as HTMLSelectElement).value)">
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="3">3 ({{ $t('both') }})</option>
@@ -166,20 +168,20 @@
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Receive frequency (Hz)') }}</span>
-              <ShadInput :model-value="String(n.rxFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Receive frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-rx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'rxFrequency', v)" />
+              <ShadInput class="w-1/2" :model-value="String(n.rxFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Receive frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-rx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'rxFrequency', v)" />
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Transmit frequency (Hz)') }}</span>
-              <ShadInput :model-value="String(n.txFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Transmit frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-tx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'txFrequency', v)" />
+              <ShadInput class="w-1/2" :model-value="String(n.txFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Transmit frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-tx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'txFrequency', v)" />
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Latitude') }}</span>
-              <ShadInput :model-value="n.latitude" :disabled="locked" placeholder="+29.6800" :aria-label="$t('Latitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-latitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'latitude', String(v))" />
+              <ShadInput class="w-1/2" :model-value="n.latitude" :disabled="locked" placeholder="+29.6800" :aria-label="$t('Latitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-latitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'latitude', String(v))" />
               <span class="mt-1 block text-xs text-muted-foreground">{{ $t('Sent in the login. A master reads it as a number, so it must not be empty.') }}</span>
             </label>
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Longitude') }}</span>
-              <ShadInput :model-value="n.longitude" :disabled="locked" placeholder="+106.5900" :aria-label="$t('Longitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-longitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'longitude', String(v))" />
+              <ShadInput class="w-1/2" :model-value="n.longitude" :disabled="locked" placeholder="+106.5900" :aria-label="$t('Longitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-longitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'longitude', String(v))" />
               <span class="mt-1 block text-xs text-muted-foreground">{{ $t('Sent in the login. A master reads it as a number, so it must not be empty.') }}</span>
             </label>
             <label class="block text-sm">
@@ -189,19 +191,6 @@
             <label class="block text-sm">
               <span class="mb-1 block font-medium">{{ $t('Description') }}</span>
               <ShadInput :model-value="n.description" :disabled="locked" :placeholder="$t('MMDVM Hotspot')" :aria-label="$t('Description of network {n}', { n: i + 1 })" :data-test="`upstream-network-description-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'description', String(v))" />
-            </label>
-            <label class="block text-sm">
-              <span class="mb-1 block font-medium">{{ $t('Info URL') }}</span>
-              <ShadInput :model-value="n.url" :disabled="locked" :placeholder="$t('The info page of this network')" :aria-label="$t('URL of network {n}', { n: i + 1 })" :data-test="`upstream-network-url-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'url', String(v))" />
-            </label>
-            <label class="block text-sm">
-              <span class="mb-1 block font-medium">{{ $t('Software ID') }}</span>
-              <ShadInput :model-value="n.softwareId" :disabled="locked" placeholder="20250828" :aria-label="$t('Software ID of network {n}', { n: i + 1 })" :data-test="`upstream-network-software-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'softwareId', String(v))" />
-            </label>
-            <label class="block text-sm">
-              <span class="mb-1 block font-medium">{{ $t('Package ID') }}</span>
-              <ShadInput :model-value="n.packageId" :disabled="locked" placeholder="MMDVM_MMDVM_HS_Dual_Hat" :aria-label="$t('Package ID of network {n}', { n: i + 1 })" :data-test="`upstream-network-package-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'packageId', String(v))" />
-              <span class="mt-1 block text-xs text-muted-foreground">{{ $t('These identity fields go out in the login to this master. Masters such as BrandMeister refuse a login whose text fields are blank, so blank ones send the defaults shown here.') }}</span>
             </label>
             <label class="block text-sm md:col-span-2 lg:col-span-3">
               <ShadInput :model-value="n.options" :disabled="locked" placeholder="TS2=91" :aria-label="$t('Options of network {n}', { n: i + 1 })" :data-test="`upstream-network-options-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'options', String(v))" />
@@ -337,6 +326,9 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'set', path: string, value: unknown): void }>();
 
 const boxClass = 'w-full rounded-md border border-input bg-background px-3 py-1.5 h-9 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100';
+// The network fields use a half-width control, so a short value such as a
+// port does not stretch across the whole column.
+const boxHalf = `w-1/2 ${boxClass.replace('w-full ', '')}`;
 const locked = computed(() => fieldLocked(props.setting));
 const passwordsSet = computed(() => props.passwordsSet ?? []);
 
