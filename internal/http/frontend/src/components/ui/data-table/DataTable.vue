@@ -28,7 +28,7 @@ const props = withDefaults(
     summary?: string
     rowClickable?: boolean
     rowSelected?: (row: TData) => boolean
-    columnWidths?: Record<string, string>
+    columnWidthClasses?: Record<string, string>
   }>(),
   {
     loading: false,
@@ -41,7 +41,7 @@ const props = withDefaults(
     summary: "",
     rowClickable: false,
     rowSelected: undefined,
-    columnWidths: undefined,
+    columnWidthClasses: undefined,
   },
 )
 
@@ -127,22 +127,28 @@ const visibleRows = computed(() => {
 
 // Column widths only apply when the caller names them: a fixed layout keeps
 // every column where the caller put it, instead of letting the content of one
-// cell widen its column and push the columns after it to the right.
-const hasFixedWidths = computed(() => Object.keys(props.columnWidths ?? {}).length > 0)
+// cell widen its column and push the columns after it to the right. The values
+// are Tailwind width classes, so a caller can widen a column on a small screen
+// without a second prop.
+const hasFixedWidths = computed(() => Object.keys(props.columnWidthClasses ?? {}).length > 0)
 
-function columnWidth(id: string): string | undefined {
-  return props.columnWidths?.[id]
+function columnWidthClass(id: string): string | undefined {
+  return props.columnWidthClasses?.[id]
 }
 </script>
 
 <template>
   <div class="space-y-4">
-    <Table :class="hasFixedWidths ? 'table-fixed' : undefined">
+    <!-- min-w-max keeps the fixed columns at their declared widths on a
+         narrow screen; without it the browser squeezes them and the content
+         of one cell spills over the column after it. The table container
+         scrolls horizontally instead. -->
+    <Table :class="hasFixedWidths ? 'table-fixed min-w-max' : undefined">
       <colgroup v-if="hasFixedWidths">
         <col
           v-for="header in table.getHeaderGroups()[0]?.headers ?? []"
           :key="header.id"
-          :style="columnWidth(header.column.id) ? { width: columnWidth(header.column.id) } : undefined"
+          :class="columnWidthClass(header.column.id)"
         >
       </colgroup>
       <TableHeader>

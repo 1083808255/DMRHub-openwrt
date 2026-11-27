@@ -119,26 +119,28 @@ function destination(call: CallRow) {
 }
 
 /**
- * The width of every last heard column, keyed by its accessor.
+ * Tailwind width classes of every last heard column, keyed by its accessor.
  *
  * The table uses a fixed layout with these widths, so a long value in one row
  * cannot widen its column and push the columns after it to the right: the
  * destination column then starts right after the user column on every row.
- * The widths add up to about 68rem, which fits the content area of the page.
+ * On a screen narrower than lg the user column is three and a half rem wider,
+ * which moves the destination column to the right instead of letting its
+ * content run into the user column.
  */
-export const LAST_HEARD_COLUMN_WIDTHS: Record<string, string> = {
-  time: '6.5rem',
-  time_slot: '2.75rem',
-  kind: '6rem',
-  user: '8.5rem',
-  destination: '9rem',
-  repeater: '11rem',
-  duration: '4.75rem',
-  codec: '4.5rem',
-  ber: '3.5rem',
-  loss: '3.5rem',
-  jitter: '3.5rem',
-  rssi: '4rem',
+export const LAST_HEARD_COLUMN_WIDTH_CLASSES: Record<string, string> = {
+  time: 'w-[6.5rem]',
+  time_slot: 'w-[2.75rem]',
+  kind: 'w-[6rem]',
+  user: 'w-[12rem] lg:w-[8.5rem]',
+  destination: 'w-[9rem]',
+  repeater: 'w-[11rem]',
+  duration: 'w-[4.75rem]',
+  codec: 'w-[4.5rem]',
+  ber: 'w-[3.5rem]',
+  loss: 'w-[3.5rem]',
+  jitter: 'w-[3.5rem]',
+  rssi: 'w-[4rem]',
 };
 
 export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableColumn<CallRow, unknown>[] {

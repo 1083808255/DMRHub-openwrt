@@ -24,7 +24,7 @@
     <TypeFilter v-model="filter" />
     <DataTable
       :columns="columns"
-      :column-widths="columnWidths"
+      :column-width-classes="columnWidthClasses"
       :data="lastheard"
       :loading="loading"
       :loading-text="$t('Loading...')"
@@ -47,7 +47,7 @@ import { useUserStore } from '@/store';
 import { getWebsocketURI } from '@/services/util';
 import API from '@/services/API';
 import ws from '@/services/ws';
-import { LAST_HEARD_COLUMN_WIDTHS, lastHeardColumns } from '@/lib/lastHeardColumns';
+import { LAST_HEARD_COLUMN_WIDTH_CLASSES, lastHeardColumns } from '@/lib/lastHeardColumns';
 import {
   cleanCalls,
   defaultFilter,
@@ -105,8 +105,8 @@ export default {
       void this.now;
       return lastHeardColumns({ repeater: this.loggedIn });
     },
-    columnWidths(): Record<string, string> {
-      return LAST_HEARD_COLUMN_WIDTHS;
+    columnWidthClasses(): Record<string, string> {
+      return LAST_HEARD_COLUMN_WIDTH_CLASSES;
     },
     loggedIn(): boolean {
       const userStore = useUserStore();
