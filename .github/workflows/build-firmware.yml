@@ -228,8 +228,16 @@ jobs:
           # the squashfs (33 MB) covers the system and DMRHub, leaving around
           # 280 MB of overlay for packages. Everything left on the disk goes
           # to the DMRHub data partition at first boot.
-          echo "==> make image PACKAGES=$PACKAGES KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=320"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" KERNEL_PARTSIZE=64 ROOTFS_PARTSIZE=320
+          #
+          # ImageBuilder maps ROOTFS_PARTSIZE on its own but takes the boot
+          # partition size from CONFIG_TARGET_KERNEL_PARTSIZE: passing
+          # KERNEL_PARTSIZE alone is silently ignored and leaves the 16 MB
+          # default, which is what the first 320 build shipped.
+          echo "==> make image PACKAGES=$PACKAGES ROOTFS_PARTSIZE=320 CONFIG_TARGET_KERNEL_PARTSIZE=64"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" ROOTFS_PARTSIZE=320 CONFIG_TARGET_KERNEL_PARTSIZE=64
+          IMG=$(ls bin/targets/x86/64/*combined.img | head -1)
+          echo "==> partition table of $(basename "$IMG"):"
+          fdisk -l "$IMG" | grep -E '^/|^Disk|Sector size' || true
           ls -lh bin/targets/x86/64/*.img.gz
 
       - name: Collect firmware artifacts

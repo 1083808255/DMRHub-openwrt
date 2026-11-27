@@ -12,6 +12,12 @@ START=15
 # Stop after DMRHub (START=95) so the database is closed before we unmount.
 STOP=99
 
+# rc.common may start this script with a PATH that has no /sbin, where parted
+# lives on some images, so a plain "command -v parted" would wrongly report it
+# missing and leave the whole hub on the overlay.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 MOUNT_POINT=/opt/dmrhub
 LABEL=dmrhub
 # Leave at least 32 MiB of free space, otherwise the rootfs stays in charge.
@@ -20,6 +26,14 @@ MIN_FREE_SECTORS=65536
 log() {
 	logger -t dmrhub-data "$*"
 	echo "dmrhub-data: $*" >&2
+}
+
+have_tools() {
+	local t
+	for t in parted partx mke2fs resize2fs; do
+		command -v "$t" >/dev/null 2>&1 || { log "$t 未安装，跳过分区管理"; return 1; }
+	done
+	return 0
 }
 
 # The boot partition always lives on the same disk as the rootfs.
@@ -76,7 +90,7 @@ grow_partition() { # grow_partition <disk> <partition> <disk end sector>
 
 start() {
 	local disk part disk_end p2_end end fresh=0
-	[ -x /usr/sbin/parted ] || { log "parted 未安装，跳过分区管理"; return 0; }
+	have_tools || return 0
 	disk=$(data_disk) || return 0
 	[ -b "$disk" ] || return 0
 	part="${disk}3"
