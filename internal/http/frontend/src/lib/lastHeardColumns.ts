@@ -151,10 +151,14 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
     });
   }
   if (showDestination) {
+    // The Destination column sits 100px too far to the right in the rendered
+    // table, so its header and cells both carry the same negative margin. The
+    // header must move with the cells, otherwise the two no longer line up.
+    const shift = '-ml-[100px]';
     columns.push({
       accessorKey: 'destination',
-      header: t('Destination'),
-      cell: ({ row }: Cell) => destination(row.original),
+      header: () => h('div', { class: shift }, t('Destination')),
+      cell: ({ row }: Cell) => h('div', { class: shift }, [destination(row.original)]),
     });
   }
   if (repeater) {
