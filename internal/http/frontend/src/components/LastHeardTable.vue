@@ -102,7 +102,7 @@ export default {
   computed: {
     columns() {
       void this.now;
-      return lastHeardColumns({ repeater: this.loggedIn, source: true });
+      return lastHeardColumns({ repeater: this.loggedIn });
     },
     loggedIn(): boolean {
       const userStore = useUserStore();

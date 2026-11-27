@@ -41,7 +41,6 @@ export type LastHeardColumnOptions = {
   user?: boolean;
   destination?: boolean;
   repeater?: boolean;
-  source?: boolean;
 };
 
 /** upstreamOf returns the network of a transport that is an upstream link. */
@@ -54,24 +53,35 @@ const upstreamOf = (transport?: string): string | undefined => {
   return name || undefined;
 };
 
-/** transportLabel names a transport of a call that is not an upstream. */
-const transportLabel = (transport: string): string => {
-  switch (transport) {
-    case 'mmdvm':
-      return t('MMDVM repeater');
-    case 'openbridge':
-      return t('OpenBridge peer');
-    case 'webtransport':
-      return t('Browser radio');
-    case 'ipsc':
-      return t('IPSC');
-    default:
-      return transport;
-  }
-};
+/** networkBadge marks a call that came in over an upstream link. */
+function networkBadge(network: string, title?: string) {
+  return h(
+    'span',
+    {
+      class: 'inline-flex items-center gap-1.5',
+      title: title ?? t('Forwarded from the upstream network {name}', { name: network }),
+      'data-test': 'call-source-upstream',
+    },
+    [
+      h(
+        'span',
+        { class: 'rounded-full border border-green-600/50 px-2 text-xs leading-5 text-green-700 dark:text-green-400' },
+        network,
+      ),
+    ],
+  );
+}
 
-function person(u: { id: number; callsign: string; registered?: boolean }) {
+// person falls back to the upstream network when the user database cannot
+// resolve the ID: the Chinese 86xxxxxxx IDs of a partner network have no
+// callsign anywhere, and a bare number says nothing to the operator. The ID
+// stays in the tooltip.
+function person(u: { id: number; callsign: string; registered?: boolean }, call?: CallRow) {
+  const network = upstreamOf(call?.transport);
   if (!u.callsign) {
+    if (network) {
+      return networkBadge(network, String(u.id));
+    }
     return h('span', { class: 'font-medium' }, String(u.id));
   }
   const badges = [];
@@ -114,7 +124,7 @@ function destination(call: CallRow) {
 }
 
 export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableColumn<CallRow, unknown>[] {
-  const { user = true, destination: showDestination = true, repeater = false, source: showSource = false } = opts;
+  const { user = true, destination: showDestination = true, repeater = false } = opts;
   const columns: DataTableColumn<CallRow, unknown>[] = [
     {
       accessorKey: 'time',
@@ -142,7 +152,7 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
     columns.push({
       accessorKey: 'user',
       header: t('User'),
-      cell: ({ row }: Cell) => person(row.original.user),
+      cell: ({ row }: Cell) => person(row.original.user, row.original),
     });
   }
   if (showDestination) {
@@ -157,38 +167,22 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
       accessorKey: 'repeater',
       header: t('Repeater'),
       cell: ({ row }: Cell) => {
+        // A call that came in over an upstream link has no local repeater to
+        // name, and its 9 digit ID resolves to nothing. The network badge
+        // that used to sit in a separate "From" column belongs here instead:
+        // it answers the same question, where the audio entered the hub.
+        const network = upstreamOf(row.original.transport);
         const r = row.original.repeater;
         if (!r || !r.id) {
-          return '-';
+          return network ? networkBadge(network) : '-';
+        }
+        if (network) {
+          return h('span', { class: 'inline-flex flex-wrap items-center gap-x-2 gap-y-1' }, [
+            h(Repeater, { repeater: r }),
+            networkBadge(network),
+          ]);
         }
         return h(Repeater, { repeater: r });
-      },
-    });
-  }
-  if (showSource) {
-    columns.push({
-      accessorKey: 'source',
-      header: t('From'),
-      cell: ({ row }: Cell) => {
-        const network = upstreamOf(row.original.transport);
-        if (network) {
-          return h(
-            'span',
-            {
-              class: 'inline-flex items-center gap-1.5',
-              title: t('Forwarded from the upstream network {name}', { name: network }),
-              'data-test': 'call-source-upstream',
-            },
-            [
-              h('span', { class: 'rounded-full border border-green-600/50 px-2 text-xs leading-5 text-green-700 dark:text-green-400' }, network),
-            ],
-          );
-        }
-        const transport = row.original.transport;
-        if (!transport) {
-          return '-';
-        }
-        return h('span', { class: 'text-xs text-muted-foreground' }, transportLabel(transport));
       },
     });
   }
