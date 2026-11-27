@@ -137,7 +137,11 @@ describe('Last Heard', () => {
     cy.contains('Radio Check').should('be.visible');
     cy.contains('Motorola FID 0x10').should('be.visible');
     cy.contains('[data-testid="type-badge"]', 'SMS').should('be.visible');
-    cy.contains('ETSI IP · SAP IP (4)').should('be.visible');
+    // An SMS shows its type badge only: the format, confirmation and size
+    // details are intentionally left out of the column.
+    cy.get('[data-testid="type-badge"]').eq(2).parent().should('have.text', 'SMS');
+    cy.contains('ETSI IP · SAP IP (4)').should('not.exist');
+    cy.contains('Confirmed, ACK').should('not.exist');
     cy.contains('[data-testid="type-badge"]', 'Data').should('be.visible');
 
     cy.get('[data-kind="unknown"]').should('have.attr', 'aria-pressed', 'false').click();
@@ -152,9 +156,9 @@ describe('Last Heard', () => {
       sentence: `Stored sentence for ${id}.`, target: 'ipsc', repeater_id: id, callsign, reason,
     });
     cy.fixture('lastheard-kinds.json').then((data) => {
-      data.calls[1].undeliverable = [entry(300344200, 'no_ipsc_form')];
-      data.calls[1].undeliverable_scope = 'all';
-      data.calls[2].undeliverable = [
+      data.calls[0].undeliverable = [entry(300344200, 'no_ipsc_form')];
+      data.calls[0].undeliverable_scope = 'all';
+      data.calls[1].undeliverable = [
         entry(990626, 'slot_busy', 'W1XPR'),
         entry(300344200, 'slot_busy', 'K3CALL'),
         entry(300344201, 'slot_busy', 'K8CALL'),
@@ -162,6 +166,9 @@ describe('Last Heard', () => {
         entry(300345510, 'no_ipsc_form'),
         entry(300346001, 'fec_uncorrectable', 'K7CALL'),
       ];
+      data.calls[1].undeliverable_scope = 'all';
+      // An SMS shows its type badge only, so the reasons stay hidden.
+      data.calls[2].undeliverable = [entry(300999999, 'slot_busy', 'K9SMS')];
       data.calls[2].undeliverable_scope = 'all';
       cy.intercept('GET', '/api/v1/lastheard*', { statusCode: 200, body: data }).as('getLastHeard');
     });
@@ -173,6 +180,7 @@ describe('Last Heard', () => {
     cy.contains('[data-testid="undeliverable"]', 'Not sent to IPSC repeater 300344200: could not carry this burst').should('be.visible');
     cy.contains('[data-testid="undeliverable"]', 'Not sent to 6 repeaters').should('be.visible');
     cy.contains('[data-testid="undeliverable"]', '4 busy on that slot · 1 could not carry this burst · 1 too damaged to repair').should('be.visible');
+    cy.contains('300999999').should('not.exist');
     cy.contains('[data-testid="undeliverable-detail"]', 'Busy on that slot: W1XPR (990626), K3CALL (300344200), K8CALL (300344201), and 1 more').should('not.be.visible');
     cy.contains('[data-testid="undeliverable-details"] summary', 'Show the 6 repeaters').click();
     cy.contains('[data-testid="undeliverable-detail"]', 'Busy on that slot: W1XPR (990626), K3CALL (300344200), K8CALL (300344201), and 1 more').should('be.visible');
