@@ -167,15 +167,12 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
         // that used to sit in a separate "From" column belongs here instead:
         // it answers the same question, where the audio entered the hub.
         const network = upstreamOf(row.original.transport);
+        if (network) {
+          return networkBadge(network);
+        }
         const r = row.original.repeater;
         if (!r || !r.id) {
-          return network ? networkBadge(network) : '-';
-        }
-        if (network) {
-          return h('span', { class: 'inline-flex flex-wrap items-center gap-x-2 gap-y-1' }, [
-            h(Repeater, { repeater: r }),
-            networkBadge(network),
-          ]);
+          return '-';
         }
         return h(Repeater, { repeater: r });
       },

@@ -64,10 +64,16 @@ describe('lastHeard upstream network badges', () => {
     expect(await cell('repeater', { transport: 'upstream:CDN860' })).toContain('CDN860');
   });
 
-  it('shows the network alone when the call has no local repeater', async () => {
-    const html = await cell('repeater', { transport: 'upstream:CDN860', repeater: undefined });
+  it('replaces the local repeater with the network name on an upstream call', async () => {
+    const html = await cell('repeater', { transport: 'upstream:CDN860' });
     expect(html).toContain('CDN860');
-    expect(html).not.toContain('>-<');
+    expect(html).not.toContain('RPT');
+  });
+
+  it('keeps the local repeater on a local call', async () => {
+    const html = await cell('repeater', {});
+    expect(html).toContain('RPT');
+    expect(html).not.toContain('call-source-upstream');
   });
 
   it('keeps the ID in the user column even on an upstream call', async () => {
