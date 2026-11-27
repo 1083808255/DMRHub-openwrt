@@ -118,6 +118,32 @@ function destination(call: CallRow) {
   return h('span', { class: 'font-medium' }, call.group_call ? `TG ${call.destination_id}` : String(call.destination_id));
 }
 
+/**
+ * Share of the table that every last heard column takes, keyed by accessor.
+ *
+ * The columns fill the table, so they keep the same proportions on every
+ * screen instead of growing with the widest value in the column: without it
+ * the user column (flag, callsign and the unregistered badge) took a fifth of
+ * the table and left a large gap under its short header, while the gaps
+ * between the other columns varied by a factor of two. The table keeps a
+ * minimum width, so a narrow screen scrolls instead of squeezing a column
+ * until its content runs into the next one.
+ */
+export const LAST_HEARD_COLUMN_WIDTHS: Record<string, string> = {
+  time: 'w-[11%]',
+  time_slot: 'w-[4.5%]',
+  kind: 'w-[8.5%]',
+  user: 'w-[18%]',
+  destination: 'w-[9%]',
+  repeater: 'w-[11%]',
+  duration: 'w-[7%]',
+  codec: 'w-[8%]',
+  ber: 'w-[5%]',
+  loss: 'w-[5%]',
+  jitter: 'w-[7.5%]',
+  rssi: 'w-[5.5%]',
+};
+
 export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableColumn<CallRow, unknown>[] {
   const { user = true, destination: showDestination = true, repeater = false } = opts;
   const columns: DataTableColumn<CallRow, unknown>[] = [

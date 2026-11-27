@@ -28,6 +28,7 @@ const props = withDefaults(
     summary?: string
     rowClickable?: boolean
     rowSelected?: (row: TData) => boolean
+    columnWidths?: Record<string, string>
   }>(),
   {
     loading: false,
@@ -40,6 +41,7 @@ const props = withDefaults(
     summary: "",
     rowClickable: false,
     rowSelected: undefined,
+    columnWidths: undefined,
   },
 )
 
@@ -122,6 +124,13 @@ function onRowKeydown(event: KeyboardEvent, row: TData) {
 const visibleRows = computed(() => {
   return table.getRowModel().rows
 })
+
+// A caller that names the width of every column gets a fixed layout: the
+// columns then keep their share of the table instead of growing with the
+// content of a single cell, which left the header of one column with a large
+// gap and the gaps between columns uneven. Percentages fill the table, so the
+// columns scale together on a wide screen.
+const hasColumnWidths = computed(() => Object.keys(props.columnWidths ?? {}).length > 0)
 </script>
 
 <template>
@@ -130,7 +139,14 @@ const visibleRows = computed(() => {
          does not leave the next column far to the right. On a narrow screen
          the table keeps that width and the container scrolls horizontally
          instead of squeezing the columns. -->
-    <Table class="min-w-max">
+    <Table :class="hasColumnWidths ? 'table-fixed min-w-[56rem]' : 'min-w-max'">
+      <colgroup v-if="hasColumnWidths">
+        <col
+          v-for="header in table.getHeaderGroups()[0]?.headers ?? []"
+          :key="header.id"
+          :class="props.columnWidths?.[header.column.id]"
+        >
+      </colgroup>
       <TableHeader>
         <TableRow v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
           <TableHead v-for="header in headerGroup.headers" :key="header.id">
