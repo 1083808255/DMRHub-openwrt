@@ -72,10 +72,15 @@ export default {
     label(): string {
       return typeLabel(this.type);
     },
+    // An SMS gets its type badge only: the format, confirmation and size
+    // details crowded the column without being useful at a glance.
     lines(): string[] {
-      return typeLines(this.call);
+      return this.type === 'sms' ? [] : typeLines(this.call);
     },
     undelivered(): UndeliverableView {
+      if (this.type === 'sms') {
+        return { lines: [], summary: '', details: [] };
+      }
       return undeliverableView(this.call);
     },
     colors() {

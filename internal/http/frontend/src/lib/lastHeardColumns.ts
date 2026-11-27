@@ -53,6 +53,28 @@ const upstreamOf = (transport?: string): string | undefined => {
   return name || undefined;
 };
 
+// Each upstream network gets a stable colour, so calls that arrive from
+// different networks can be told apart without reading the names.
+const NETWORK_BADGE_COLORS = [
+  'border-sky-600/50 text-sky-700 dark:text-sky-400',
+  'border-violet-600/50 text-violet-700 dark:text-violet-400',
+  'border-rose-600/50 text-rose-700 dark:text-rose-400',
+  'border-amber-600/50 text-amber-700 dark:text-amber-400',
+  'border-emerald-600/50 text-emerald-700 dark:text-emerald-400',
+  'border-cyan-600/50 text-cyan-700 dark:text-cyan-400',
+  'border-fuchsia-600/50 text-fuchsia-700 dark:text-fuchsia-400',
+  'border-lime-600/50 text-lime-700 dark:text-lime-400',
+];
+
+/** networkBadgeColor picks the same colour for the same network every time. */
+function networkBadgeColor(network: string): string {
+  let hash = 0;
+  for (let i = 0; i < network.length; i++) {
+    hash = (hash * 31 + network.charCodeAt(i)) >>> 0;
+  }
+  return NETWORK_BADGE_COLORS[hash % NETWORK_BADGE_COLORS.length] ?? NETWORK_BADGE_COLORS[0];
+}
+
 /** networkBadge marks a call that came in over an upstream link. */
 function networkBadge(network: string) {
   return h(
@@ -65,7 +87,7 @@ function networkBadge(network: string) {
     [
       h(
         'span',
-        { class: 'rounded-full border border-green-600/50 px-2 text-xs leading-5 text-green-700 dark:text-green-400' },
+        { class: `whitespace-nowrap rounded-full border px-2.5 text-sm leading-6 ${networkBadgeColor(network)}` },
         network,
       ),
     ],
@@ -85,7 +107,7 @@ function person(u: { id: number; callsign: string; registered?: boolean }) {
       h(
         'span',
         {
-          class: 'rounded-full border border-amber-600/50 px-2 text-xs leading-5 text-amber-700 dark:text-amber-400',
+          class: 'rounded-full border border-amber-600/50 px-1.5 text-[10px] leading-4 text-amber-700 dark:text-amber-400',
           title: t('Not registered on this server'),
           'data-test': 'user-unregistered',
         },
