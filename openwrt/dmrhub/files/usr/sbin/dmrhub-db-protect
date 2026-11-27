@@ -11,7 +11,7 @@
 #   check    - only report whether the live database passes integrity_check
 #
 # The snapshot lives next to the database on the data partition, which
-# sysupgrade -p leaves untouched and which never travels through the
+# sysupgrade leaves untouched and which never travels through the
 # configuration archive.
 
 DATA_DIR="${DMRHUB_DATA_DIR:-/opt/dmrhub/data}"

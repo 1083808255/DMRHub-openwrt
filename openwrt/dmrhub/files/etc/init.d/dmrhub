@@ -136,8 +136,8 @@ installLuciFlashView() {
 }
 
 # keepDataOverUpgrade used to add /opt/dmrhub to /lib/upgrade/keep.d. The data
-# partition is preserved by "sysupgrade -p" instead, and the archive is staged
-# on the small boot partition, so nothing of /opt/dmrhub belongs in it.
+# partition is preserved by sysupgrade's partition-table comparison instead, so
+# nothing of /opt/dmrhub belongs in the configuration archive.
 
 status() {
     # Match the process name, not the full command line: pgrep -f also finds

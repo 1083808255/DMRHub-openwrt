@@ -364,23 +364,23 @@ cmd_app() {
 
 # check_backup_space - refuse to flash when the configuration archive does not
 # fit on the boot partition. The x86 platform code stages that archive on the
-# 16 MB boot partition with cp(1) and ignores write errors, so an oversized
-# archive is silently truncated and the database comes back corrupted after
-# the reboot. Measure the real archive (it contains the database snapshot, not
-# the live files) and compare it with the free space before anything stops.
+# boot partition with cp(1) and ignores write errors, so an oversized archive
+# is silently truncated and the configuration comes back corrupted after the
+# reboot. Measure the real archive and compare it with the free space before
+# anything stops.
 check_backup_space() {
 	archive_size=$(sysupgrade -b - 2>/dev/null | wc -c)
-	[ "${archive_size:-0}" -gt 0 ] || die "无法生成配置备份，已取消刷机以保护数据库"
+	[ "${archive_size:-0}" -gt 0 ] || die "无法生成配置备份，已取消刷机以保护配置"
 	avail=$(df -Pk /boot 2>/dev/null | awk 'NR == 2 { print $4 * 1024 }')
-	[ -n "$avail" ] || die "无法读取启动分区可用空间，已取消刷机以保护数据库"
+	[ -n "$avail" ] || die "无法读取启动分区可用空间，已取消刷机以保护配置"
 	if [ "$archive_size" -gt $((avail - 1048576)) ]; then
-		die "配置备份 $((archive_size / 1024)) KiB 超过启动分区可用空间 $((avail / 1024)) KiB，刷机会截断数据库；请先清理 /opt/dmrhub/data 下的 DMRHub.db.bad-*"
+		die "配置备份 $((archive_size / 1024)) KiB 超过启动分区可用空间 $((avail / 1024)) KiB，刷机无法安全暂存配置"
 	fi
 	log "配置备份 $((archive_size / 1024)) KiB，启动分区可用 $((avail / 1024)) KiB，空间充足"
 }
 
 # cmd_flash_guard - stop the SQLite writer before sysupgrade touches its files.
-# The database lives on the data partition, which "sysupgrade -p" keeps, but a
+# The database lives on the data partition, which sysupgrade keeps, but a
 # running writer can still hold a WAL that is not yet on disk. Refuse to
 # continue unless the process is really gone and the snapshot is fresh.
 cmd_flash_guard() {
@@ -422,12 +422,13 @@ cmd_firmware() {
 	fi
 	log "正在刷写固件，设备即将重启"
 	cmd_flash_guard
-	# -k writes the list of the installed packages into the backup, -u skips
-	# the files that are the same as in /rom, and -p keeps the partition table
-	# so the data partition of dmrhub-data survives the flash. It only helps
-	# while the image layout matches the disk; a changed KERNEL_PARTSIZE or
-	# ROOTFS_PARTSIZE rewrites the table and takes the data partition with it.
-	sysupgrade -k -u -p "$FW_FILE"
+	# -k writes the list of the installed packages into the backup and -u
+	# skips the files that are the same as in /rom. Do NOT pass -p: it turns
+	# off the partition-table comparison, and the x86 platform then writes the
+	# whole image over the disk, which erases the data partition of
+	# dmrhub-data. With the default, the identical p1/p2 are written in place
+	# and p3 is untouched.
+	sysupgrade -k -u "$FW_FILE"
 }
 
 # json_escape - make a string safe to embed in a JSON double-quoted value.

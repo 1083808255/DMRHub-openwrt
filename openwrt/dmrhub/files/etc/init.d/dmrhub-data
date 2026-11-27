@@ -6,7 +6,8 @@
 # Keeping the database there either truncates it or ties it to the flash. This
 # script creates an ext4 partition on the free space of the disk at first boot,
 # grows it whenever the disk itself grows, and mounts it over /opt/dmrhub.
-# sysupgrade runs with -p, so the partition survives a firmware upgrade.
+# sysupgrade compares the partition table with the image and leaves p3 in
+# place, so the partition survives a firmware upgrade.
 
 START=15
 # Stop after DMRHub (START=95) so the database is closed before we unmount.
