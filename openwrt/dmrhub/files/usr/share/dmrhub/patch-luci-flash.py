@@ -5,7 +5,8 @@ The LuCI system/flash view is shipped as a minified JavaScript module. We do
 not keep a copy of it in this repository: the build extracts the current file
 from the luci-mod-system package and patches it here. That way an upstream
 LuCI update cannot silently drop the section, because the patch fails loudly
-when the anchor it needs is gone.
+when the anchor it needs is gone. The patch also guards the native flash
+handlers and erases the DMRHub data before the native factory reset.
 
 Usage: patch-luci-flash.py <flash.js> <ota.js> <output.js>
 """
@@ -36,6 +37,21 @@ RESTORE_GUARDED = (
     "return fs.exec('/sbin/sysupgrade',['--restore-backup','/tmp/backup.tar.gz']);}).then("
 )
 
+# The "Perform reset" button wipes the overlay only. The database and settings
+# live on the data partition, which firstboot keeps, so erase them first and
+# skip firstboot when that fails: resetting anyway would leave the data behind.
+FIRSTBOOT_ANCHOR = "fs.exec('/sbin/firstboot',['-r','-y']);ui.awaitReconnect('192.168.1.1','openwrt.lan');"
+FIRSTBOOT_GUARDED = (
+    "return dmrhubFactoryReset().then(function(ok){"
+    "if(!ok){ui.hideModal();return;}"
+    "return fs.exec('/sbin/firstboot',['-r','-y']).then(function(){"
+    "ui.awaitReconnect('192.168.1.1','openwrt.lan');});});"
+)
+# Tell the user that a factory reset now erases DMRHub data as well. Optional:
+# the wording is a translation, and losing it does not break the behaviour.
+RESET_CONFIRM_ANCHOR = "if(!confirm(_('Do you really want to erase all settings?')))"
+RESET_CONFIRM = "if(!confirm('重置固件会同时清空 DMRHub 的全部数据（数据库、账号和设置），是否继续？'))"
+
 
 def fail(message: str) -> None:
     print(f"patch-luci-flash: {message}", file=sys.stderr)
@@ -65,6 +81,7 @@ def main() -> None:
         ("native flash call", FLASH_CALL_ANCHOR),
         ("native flash end", FLASH_END_ANCHOR),
         ("backup restore", RESTORE_ANCHOR),
+        ("factory reset", FIRSTBOOT_ANCHOR),
     ):
         if anchor not in flash:
             fail(f"{name} anchor not found in {flash_path}; the LuCI view changed")
@@ -80,7 +97,12 @@ def main() -> None:
     flash = flash.replace(FLASH_END_ANCHOR, FLASH_END_GUARDED, 1)
     flash = flash.replace(RESTORE_ANCHOR, RESTORE_GUARDED, 1)
 
-    # 3. The block, after the page has rendered. It cannot be a form section:
+    # 3. Erase the DMRHub state before the native reset runs firstboot.
+    flash = flash.replace(FIRSTBOOT_ANCHOR, FIRSTBOOT_GUARDED, 1)
+    if RESET_CONFIRM_ANCHOR in flash:
+        flash = flash.replace(RESET_CONFIRM_ANCHOR, RESET_CONFIRM, 1)
+
+    # 4. The block, after the page has rendered. It cannot be a form section:
     #    this LuCI release builds the view on JSONMap, where a section added
     #    from outside renders its title but never its options.
     call = ("return Promise.resolve(m.render()).then(function(nodes){"

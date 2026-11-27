@@ -52,6 +52,22 @@ function dmrhubFlashGuard() {
 	});
 }
 
+/* dmrhubFactoryReset - erase the DMRHub state on the data partition before the
+ * native LuCI reset button runs firstboot. firstboot only wipes the overlay,
+ * so without this call the previous owner's database, account and settings
+ * would survive a factory reset. Returns false when nothing was erased, and
+ * the caller then skips firstboot. */
+function dmrhubFactoryReset() {
+	return dmrhubOtaCall(['factory-reset']).then(function (res) {
+		if (!res.ok) {
+			ui.addNotification(null, E('p', { 'class': 'alert-message danger' },
+				'无法清空 DMRHub 数据，已取消重置：' + res.text));
+			return false;
+		}
+		return true;
+	});
+}
+
 /* dmrhubOtaPoll - follow a background job until it finishes, updating a
  * notification with the last log line. Firmware flashes reboot the box, so a
  * lost connection during polling is treated as success. */

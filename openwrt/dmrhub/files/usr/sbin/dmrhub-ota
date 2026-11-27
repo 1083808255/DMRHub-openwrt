@@ -14,6 +14,8 @@
 #   dmrhub-ota job start app|firmware [args...]
 #                                 # run an update in the background, return now
 #   dmrhub-ota job status         # JSON progress of the background job
+#   dmrhub-ota factory-reset      # erase the database and settings on the
+#                                 # data partition before firstboot
 #
 # The LuCI page calls job start/job status: every layer between the browser
 # and this script (LuCI RPC, cgi-io ubus) caps a synchronous call at ~20-30s,
@@ -406,6 +408,52 @@ cmd_flash_guard() {
 	log "DMRHub 已停止，数据库快照已更新，可以安全备份"
 }
 
+# data_partition_mounted - true when /opt/dmrhub really is the ext4 data
+# partition, not the empty directory that is left on the overlay when the
+# partition is not mounted. Deleting the overlay directory would leave the
+# old database on /dev/sda3 untouched.
+data_partition_mounted() {
+	awk '$2 == "/opt/dmrhub" && $3 == "ext4" && $1 ~ /^\/dev\// { found = 1 } END { exit !found }' /proc/mounts
+}
+
+# cmd_factory_reset - erase the DMRHub state before the LuCI reset button runs
+# firstboot. firstboot only wipes the overlay; the database, account and
+# settings live on the data partition, which it never touches, so without this
+# step a "factory reset" would keep the previous owner's data. Refuse to
+# continue when the partition cannot be mounted, because resetting anyway
+# would leave the data behind.
+cmd_factory_reset() {
+	if pidof dmrhub >/dev/null 2>&1; then
+		log "正在停止 DMRHub，以便清空数据…"
+		/etc/init.d/dmrhub stop >/dev/null 2>&1 || die "无法停止 DMRHub，已取消重置"
+		i=0
+		while [ $i -lt 60 ]; do
+			i=$((i + 1))
+			pidof dmrhub >/dev/null 2>&1 || break
+			sleep 1
+		done
+		if pidof dmrhub >/dev/null 2>&1; then
+			die "DMRHub 仍在运行（$(pidof dmrhub)），已取消重置"
+		fi
+	fi
+
+	# The mount is normally held by dmrhub-data from boot. It can be gone when
+	# the service was stopped by hand, so mount it again before deleting.
+	if ! data_partition_mounted; then
+		/etc/init.d/dmrhub-data start >/dev/null 2>&1 || true
+	fi
+	if ! data_partition_mounted; then
+		die "数据分区未挂载，已取消重置以免旧数据残留"
+	fi
+
+	# lost+found belongs to the filesystem, not to DMRHub: keep it so e2fsck
+	# still finds the directory it expects.
+	find /opt/dmrhub -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf {} \; ||
+		die "清空 DMRHub 数据失败，已取消重置"
+	sync
+	log "DMRHub 数据已清空，可以重置固件"
+}
+
 cmd_firmware() {
 	load_release
 	[ -n "$REMOTE_FW_URL" ] || die "版本清单中没有固件镜像信息"
@@ -548,8 +596,11 @@ feed)
 flash-guard)
 	cmd_flash_guard
 	;;
+factory-reset)
+	cmd_factory_reset
+	;;
 *)
-	echo "用法：$0 {check|status|app|firmware|feed|flash-guard}"
+	echo "用法：$0 {check|status|app|firmware|feed|flash-guard|factory-reset}"
 	exit 1
 	;;
 esac
