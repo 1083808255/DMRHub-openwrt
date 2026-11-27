@@ -1,0 +1,64 @@
+#!/bin/sh
+# DMRHub firmware network defaults.
+#
+# A box with one wired port uses it as the WAN port, so the upstream router
+# hands it an address. With more than one port the first one is the WAN and
+# the others form the LAN bridge, so the box can serve the local network.
+# The first port is the one the kernel names first (eth0 or enp1s0, ...).
+
+WAN_IF=""
+LAN_PORTS=""
+
+for _path in /sys/class/net/*; do
+	# A physical device has a "device" link; lo, bridges and tunnels do not.
+	[ -e "$_path/device" ] || continue
+	_if="${_path##*/}"
+	case "$_if" in
+	wlan*|phy*|sit*|gre*|tun*|tap*|docker*|veth*|br-*|bond*|dummy*) continue ;;
+	esac
+	if [ -z "$WAN_IF" ]; then
+		WAN_IF="$_if"
+	else
+		LAN_PORTS="$LAN_PORTS $_if"
+	fi
+done
+
+# Keep the image usable when there is no wired port at all (for example a
+# build booted in a VM without networking).
+[ -n "$WAN_IF" ] || exit 0
+
+uci -q delete network.wan
+uci -q set network.wan=interface
+uci -q set network.wan.proto='dhcp'
+uci -q set network.wan.device="$WAN_IF"
+uci -q delete network.wan6
+uci -q set network.wan6=interface
+uci -q set network.wan6.proto='dhcpv6'
+uci -q set network.wan6.device="$WAN_IF"
+
+if [ -n "$LAN_PORTS" ]; then
+	uci -q delete network.br_lan
+	uci -q set network.br_lan=device
+	uci -q set network.br_lan.name='br-lan'
+	uci -q set network.br_lan.type='bridge'
+	for _port in $LAN_PORTS; do
+		uci -q add_list network.br_lan.ports="$_port"
+	done
+	uci -q delete network.lan
+	uci -q set network.lan=interface
+	uci -q set network.lan.proto='static'
+	uci -q set network.lan.device='br-lan'
+	uci -q set network.lan.ipaddr='192.168.1.1'
+	uci -q set network.lan.netmask='255.255.255.0'
+	uci -q set network.lan.ip6assign='60'
+	uci -q delete dhcp.lan.ignore
+else
+	# A single port cannot be both sides of a router: it is the WAN, and no
+	# DHCP server runs on it.
+	uci -q delete network.lan
+	uci -q delete network.br_lan
+	uci -q set dhcp.lan.ignore='1'
+fi
+
+uci -q commit network
+uci -q commit dhcp

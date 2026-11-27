@@ -196,7 +196,12 @@ func POSTFirstAdmin(c *gin.Context) {
 	if !ok {
 		return
 	}
-	user, _, ok := registration(c, db, config.DMR.Checks(), false, config.HIBPAPIKey, config.PasswordSalt)
+	// The RadioID checks guard public registration against a shared list. The
+	// first admin is set up by whoever owns the box, before that list is
+	// necessarily fetched, and it does not carry every national prefix (86 and
+	// 46 among them), so applying the checks here would lock the owner out of
+	// their own hub.
+	user, _, ok := registration(c, db, configPkg.RadioIDChecks{}, false, config.HIBPAPIKey, config.PasswordSalt)
 	if !ok {
 		return
 	}

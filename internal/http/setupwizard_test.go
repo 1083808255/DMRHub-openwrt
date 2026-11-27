@@ -469,6 +469,47 @@ func TestSetupWizardMakesTheFirstAdminQuietly(t *testing.T) { //nolint:parallelt
 	assert.Empty(t, logs.String())
 }
 
+// TestSetupWizardAcceptsAChinesePrefixForTheFirstAdmin keeps the RadioID
+// checks out of the first admin creation: the shared list does not carry every
+// national prefix (86 and 46 among them), so applying it would lock the owner
+// out of their own hub during setup.
+func TestSetupWizardAcceptsAChinesePrefixForTheFirstAdmin(t *testing.T) {
+	t.Parallel()
+
+	base, err := configulator.New(config.ConfigSchema()).Default()
+	require.NoError(t, err)
+	memdb.Use(t, &base)
+	base.Secret = "a-secret-that-is-long-enough-for-the-check"
+	base.PasswordSalt = "a-salt-that-is-long-enough-for-the-check"
+	database, err := db.MakeDB(&base)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if sqlDB, err := database.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	live := liveconfig.New(liveconfig.Options{Base: &base, DB: database})
+	require.NoError(t, live.Boot(context.Background()))
+	state := setupwizard.NewState()
+	state.SetLive(live, database)
+	r := internalhttp.CreateSetupWizardRouter(&base, state, make(chan any, 1), "test", "test")
+
+	var body bytes.Buffer
+	require.NoError(t, json.NewEncoder(&body).Encode(map[string]any{
+		"id": 8600001, "callsign": "N0DEMO", "username": "admin", "password": "a-long-enough-password",
+	}))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/users", &body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var user models.User
+	require.NoError(t, database.First(&user, 8600001).Error)
+	assert.True(t, user.Admin, "the first user becomes the admin")
+	assert.True(t, user.SuperAdmin, "the first user becomes the super admin")
+}
+
 func wizardClosed(t *testing.T, r *gin.Engine) string {
 	t.Helper()
 	w := wizardCall(t, r, http.MethodGet, "/api/v1/setupwizard", nil, "")

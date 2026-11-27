@@ -240,8 +240,14 @@ jobs:
           grep -q '^CONFIG_TARGET_ROOTFS_PARTSIZE=' .config || echo 'CONFIG_TARGET_ROOTFS_PARTSIZE=320' >> .config
           echo "==> partition sizes in .config:"
           grep -E '^CONFIG_TARGET_(KERNEL|ROOTFS)_PARTSIZE=' .config
-          echo "==> make image PACKAGES=$PACKAGES"
-          make image PROFILE="generic" PACKAGES="$PACKAGES" ROOTFS_PARTSIZE=320
+          # Firmware defaults live on the image, not in the dmrhub package:
+          # the firewall accepts everything, and 99-dmrhub-ports picks the WAN
+          # port (one port: the only one; several: the first) and bridges the
+          # rest into the LAN.
+          FILES="$GITHUB_WORKSPACE/openwrt/firmware-files"
+          chmod +x "$FILES/etc/uci-defaults/"*
+          echo "==> make image PACKAGES=$PACKAGES FILES=$FILES"
+          make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="$FILES" ROOTFS_PARTSIZE=320
           IMG=$(ls bin/targets/x86/64/*combined.img.gz | head -1)
           echo "==> partition table of $(basename "$IMG"):"
           # Read only the MBR; unpacking the whole image is not needed.
