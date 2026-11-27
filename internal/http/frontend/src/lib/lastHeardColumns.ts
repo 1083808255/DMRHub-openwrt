@@ -118,6 +118,29 @@ function destination(call: CallRow) {
   return h('span', { class: 'font-medium' }, call.group_call ? `TG ${call.destination_id}` : String(call.destination_id));
 }
 
+/**
+ * The width of every last heard column, keyed by its accessor.
+ *
+ * The table uses a fixed layout with these widths, so a long value in one row
+ * cannot widen its column and push the columns after it to the right: the
+ * destination column then starts right after the user column on every row.
+ * The widths add up to about 68rem, which fits the content area of the page.
+ */
+export const LAST_HEARD_COLUMN_WIDTHS: Record<string, string> = {
+  time: '6.5rem',
+  time_slot: '2.75rem',
+  kind: '6rem',
+  user: '8.5rem',
+  destination: '9rem',
+  repeater: '11rem',
+  duration: '4.75rem',
+  codec: '4.5rem',
+  ber: '3.5rem',
+  loss: '3.5rem',
+  jitter: '3.5rem',
+  rssi: '4rem',
+};
+
 export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableColumn<CallRow, unknown>[] {
   const { user = true, destination: showDestination = true, repeater = false } = opts;
   const columns: DataTableColumn<CallRow, unknown>[] = [
@@ -151,14 +174,10 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
     });
   }
   if (showDestination) {
-    // The Destination column sits 100px too far to the right in the rendered
-    // table, so its header and cells both carry the same negative margin. The
-    // header must move with the cells, otherwise the two no longer line up.
-    const shift = '-ml-[100px]';
     columns.push({
       accessorKey: 'destination',
-      header: () => h('div', { class: shift }, t('Destination')),
-      cell: ({ row }: Cell) => h('div', { class: shift }, [destination(row.original)]),
+      header: t('Destination'),
+      cell: ({ row }: Cell) => destination(row.original),
     });
   }
   if (repeater) {

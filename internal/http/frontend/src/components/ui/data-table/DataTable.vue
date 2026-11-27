@@ -28,6 +28,7 @@ const props = withDefaults(
     summary?: string
     rowClickable?: boolean
     rowSelected?: (row: TData) => boolean
+    columnWidths?: Record<string, string>
   }>(),
   {
     loading: false,
@@ -40,6 +41,7 @@ const props = withDefaults(
     summary: "",
     rowClickable: false,
     rowSelected: undefined,
+    columnWidths: undefined,
   },
 )
 
@@ -122,11 +124,27 @@ function onRowKeydown(event: KeyboardEvent, row: TData) {
 const visibleRows = computed(() => {
   return table.getRowModel().rows
 })
+
+// Column widths only apply when the caller names them: a fixed layout keeps
+// every column where the caller put it, instead of letting the content of one
+// cell widen its column and push the columns after it to the right.
+const hasFixedWidths = computed(() => Object.keys(props.columnWidths ?? {}).length > 0)
+
+function columnWidth(id: string): string | undefined {
+  return props.columnWidths?.[id]
+}
 </script>
 
 <template>
   <div class="space-y-4">
-    <Table>
+    <Table :class="hasFixedWidths ? 'table-fixed' : undefined">
+      <colgroup v-if="hasFixedWidths">
+        <col
+          v-for="header in table.getHeaderGroups()[0]?.headers ?? []"
+          :key="header.id"
+          :style="columnWidth(header.column.id) ? { width: columnWidth(header.column.id) } : undefined"
+        >
+      </colgroup>
       <TableHeader>
         <TableRow v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
           <TableHead v-for="header in headerGroup.headers" :key="header.id">
