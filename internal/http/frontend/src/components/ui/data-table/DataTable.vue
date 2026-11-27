@@ -28,7 +28,6 @@ const props = withDefaults(
     summary?: string
     rowClickable?: boolean
     rowSelected?: (row: TData) => boolean
-    columnWidthClasses?: Record<string, string>
   }>(),
   {
     loading: false,
@@ -41,7 +40,6 @@ const props = withDefaults(
     summary: "",
     rowClickable: false,
     rowSelected: undefined,
-    columnWidthClasses: undefined,
   },
 )
 
@@ -124,33 +122,15 @@ function onRowKeydown(event: KeyboardEvent, row: TData) {
 const visibleRows = computed(() => {
   return table.getRowModel().rows
 })
-
-// Column widths only apply when the caller names them: a fixed layout keeps
-// every column where the caller put it, instead of letting the content of one
-// cell widen its column and push the columns after it to the right. The values
-// are Tailwind width classes, so a caller can widen a column on a small screen
-// without a second prop.
-const hasFixedWidths = computed(() => Object.keys(props.columnWidthClasses ?? {}).length > 0)
-
-function columnWidthClass(id: string): string | undefined {
-  return props.columnWidthClasses?.[id]
-}
 </script>
 
 <template>
   <div class="space-y-4">
-    <!-- min-w-max keeps the fixed columns at their declared widths on a
-         narrow screen; without it the browser squeezes them and the content
-         of one cell spills over the column after it. The table container
-         scrolls horizontally instead. -->
-    <Table :class="hasFixedWidths ? 'table-fixed min-w-max' : undefined">
-      <colgroup v-if="hasFixedWidths">
-        <col
-          v-for="header in table.getHeaderGroups()[0]?.headers ?? []"
-          :key="header.id"
-          :class="columnWidthClass(header.column.id)"
-        >
-      </colgroup>
+    <!-- min-w-max lets every column shrink to its content, so a short value
+         does not leave the next column far to the right. On a narrow screen
+         the table keeps that width and the container scrolls horizontally
+         instead of squeezing the columns. -->
+    <Table class="min-w-max">
       <TableHeader>
         <TableRow v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
           <TableHead v-for="header in headerGroup.headers" :key="header.id">
