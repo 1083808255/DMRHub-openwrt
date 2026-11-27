@@ -405,11 +405,22 @@ func scheduleDailyUpdate(scheduler gocron.Scheduler, name string, url func() str
 // setupDMRDatabaseJobs configures scheduled jobs for database updates
 func setupDMRDatabaseJobs(current config.Source, scheduler gocron.Scheduler) {
 	scheduleDailyUpdate(scheduler, "repeater", func() string { return current.Get().DMR.RepeaterIDURL }, repeaterdb.Update)
-	scheduleDailyUpdate(scheduler, "user", func() string { return current.Get().DMR.RadioIDURL }, userdb.Update)
-	// The supplement list only fills the IDs the primary list misses, so it
-	// always runs after the primary one, which the scheduler orders by start
-	// time and the merge tolerates either order anyway.
-	scheduleDailyUpdate(scheduler, "user-extra", func() string { return current.Get().DMR.RadioIDExtraURL }, userdb.UpdateMerge)
+	// The supplement only fills the IDs the primary list misses, and a primary
+	// update replaces the whole map. Both therefore run in one job, in order:
+	// as separate jobs they start together, the small supplement finishes
+	// first, and the much larger primary download then drops everything it
+	// added (the Chinese 86xxxxx IDs come only from the supplement).
+	scheduleDailyUpdate(scheduler, "user", func() string { return current.Get().DMR.RadioIDURL }, func(string) error {
+		if err := userdb.Update(current.Get().DMR.RadioIDURL); err != nil {
+			// A failed primary download keeps the built-in dump, and the
+			// supplement still fills it, so this is not fatal for the merge.
+			slog.Error("Failed to update the users database, using built in one", "error", err)
+		}
+		if err := userdb.UpdateMerge(current.Get().DMR.RadioIDExtraURL); err != nil {
+			slog.Error("Failed to merge the users supplement database", "error", err)
+		}
+		return nil
+	})
 }
 
 // serverManager holds all the server instances and their dependencies
