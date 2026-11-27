@@ -80,14 +80,14 @@ function networkBadge(network: string) {
   return h(
     'span',
     {
-      class: 'inline-flex items-center gap-1.5',
+      class: 'inline-flex items-center gap-1.5 -ml-1',
       title: t('Forwarded from the upstream network {name}', { name: network }),
       'data-test': 'call-source-upstream',
     },
     [
       h(
         'span',
-        { class: `whitespace-nowrap rounded-full border px-2.5 text-sm leading-6 ${networkBadgeColor(network)}` },
+        { class: `whitespace-nowrap rounded-full border px-1.5 text-sm leading-4 ${networkBadgeColor(network)}` },
         network,
       ),
     ],
