@@ -70,19 +70,13 @@ describe('lastHeard upstream network badges', () => {
     expect(html).not.toContain('>-<');
   });
 
-  it('replaces an unresolvable user ID with the network name', async () => {
+  it('keeps the ID in the user column even on an upstream call', async () => {
     const html = await cell('user', {
       transport: 'upstream:CDN860',
       user: { id: 860999900, callsign: '' },
     });
-    expect(html).toContain('CDN860');
-    expect(html).toContain('title="860999900"');
-  });
-
-  it('keeps the ID of an unresolvable user on a local call', async () => {
-    const html = await cell('user', { user: { id: 860999900, callsign: '' } });
     expect(html).toContain('860999900');
-    expect(html).not.toContain('call-source-upstream');
+    expect(html).not.toContain('CDN860');
   });
 
   it('no longer renders a separate source column', () => {

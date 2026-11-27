@@ -54,12 +54,12 @@ const upstreamOf = (transport?: string): string | undefined => {
 };
 
 /** networkBadge marks a call that came in over an upstream link. */
-function networkBadge(network: string, title?: string) {
+function networkBadge(network: string) {
   return h(
     'span',
     {
       class: 'inline-flex items-center gap-1.5',
-      title: title ?? t('Forwarded from the upstream network {name}', { name: network }),
+      title: t('Forwarded from the upstream network {name}', { name: network }),
       'data-test': 'call-source-upstream',
     },
     [
@@ -72,16 +72,11 @@ function networkBadge(network: string, title?: string) {
   );
 }
 
-// person falls back to the upstream network when the user database cannot
-// resolve the ID: the Chinese 86xxxxxxx IDs of a partner network have no
-// callsign anywhere, and a bare number says nothing to the operator. The ID
-// stays in the tooltip.
-function person(u: { id: number; callsign: string; registered?: boolean }, call?: CallRow) {
-  const network = upstreamOf(call?.transport);
+// person shows the ID when the user database cannot resolve a callsign: the
+// Chinese 86xxxxxxx IDs of a partner network have no callsign anywhere. The
+// upstream network is named in the repeater column instead.
+function person(u: { id: number; callsign: string; registered?: boolean }) {
   if (!u.callsign) {
-    if (network) {
-      return networkBadge(network, String(u.id));
-    }
     return h('span', { class: 'font-medium' }, String(u.id));
   }
   const badges = [];
@@ -152,7 +147,7 @@ export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableCo
     columns.push({
       accessorKey: 'user',
       header: t('User'),
-      cell: ({ row }: Cell) => person(row.original.user, row.original),
+      cell: ({ row }: Cell) => person(row.original.user),
     });
   }
   if (showDestination) {
