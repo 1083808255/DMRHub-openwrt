@@ -47,10 +47,17 @@ FIRSTBOOT_GUARDED = (
     "return fs.exec('/sbin/firstboot',['-r','-y']).then(function(){"
     "ui.awaitReconnect('192.168.1.1','openwrt.lan');});});"
 )
-# Tell the user that a factory reset now erases DMRHub data as well. Optional:
-# the wording is a translation, and losing it does not break the behaviour.
+# Tell the user what a factory reset erases now. The reset empties the whole
+# data partition, so the database backups kept next to it go as well; saying so
+# up front is the only warning they get, because firstboot leaves no undo.
+# Optional: the wording is a translation, and losing it does not break the
+# behaviour.
 RESET_CONFIRM_ANCHOR = "if(!confirm(_('Do you really want to erase all settings?')))"
-RESET_CONFIRM = "if(!confirm('重置固件会同时清空 DMRHub 的全部数据（数据库、账号和设置），是否继续？'))"
+RESET_CONFIRM = (
+    "if(!confirm('重置固件会清空 DMRHub 的全部数据：数据库、账号、设置，"
+    "以及数据分区上的备份文件，且无法恢复。如需保留，请先把 "
+    "/opt/dmrhub/data/DMRHub.db 复制到别处。是否继续？'))"
+)
 
 
 def fail(message: str) -> None:

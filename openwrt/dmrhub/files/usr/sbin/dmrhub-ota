@@ -446,6 +446,12 @@ cmd_factory_reset() {
 		die "数据分区未挂载，已取消重置以免旧数据残留"
 	fi
 
+	# The whole mount point goes, backups included: a reset hands the device to
+	# someone else, so a leftover copy would leak the previous owner's data.
+	# Record how much is erased, so the log shows what the reset destroyed.
+	used_kb=$(du -sk /opt/dmrhub 2>/dev/null | awk '{ print $1 }')
+	log "正在清空数据分区，数据库与备份文件一并删除（约 ${used_kb:-0} KiB）…"
+
 	# lost+found belongs to the filesystem, not to DMRHub: keep it so e2fsck
 	# still finds the directory it expects.
 	find /opt/dmrhub -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf {} \; ||
