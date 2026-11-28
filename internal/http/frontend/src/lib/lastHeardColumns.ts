@@ -150,20 +150,24 @@ function destination(call: CallRow) {
  * between the other columns varied by a factor of two. The table keeps a
  * minimum width, so a narrow screen scrolls instead of squeezing a column
  * until its content runs into the next one.
+ *
+ * The columns before the destination carry short values, so they are kept
+ * narrow: the freed width goes to the trailing measurement columns, and the
+ * destination starts about 5% further left without wrapping.
  */
 export const LAST_HEARD_COLUMN_WIDTHS: Record<string, string> = {
-  time: 'w-[9%]',
-  time_slot: 'w-[5%]',
-  kind: 'w-[8%]',
-  user: 'w-[17.5%]',
+  time: 'w-[8.5%]',
+  time_slot: 'w-[4.5%]',
+  kind: 'w-[7.5%]',
+  user: 'w-[14.5%]',
   destination: 'w-[9.5%]',
   repeater: 'w-[8%]',
-  duration: 'w-[7.5%]',
-  codec: 'w-[8.5%]',
-  ber: 'w-[5.5%]',
-  loss: 'w-[6%]',
-  jitter: 'w-[8%]',
-  rssi: 'w-[7.5%]',
+  duration: 'w-[8%]',
+  codec: 'w-[9%]',
+  ber: 'w-[6%]',
+  loss: 'w-[6.5%]',
+  jitter: 'w-[8.5%]',
+  rssi: 'w-[9.5%]',
 };
 
 export function lastHeardColumns(opts: LastHeardColumnOptions = {}): DataTableColumn<CallRow, unknown>[] {
