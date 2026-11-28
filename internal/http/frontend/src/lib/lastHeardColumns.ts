@@ -107,7 +107,7 @@ function person(u: { id: number; callsign: string; registered?: boolean }) {
       h(
         'span',
         {
-          class: 'rounded-full border border-amber-600/50 px-1.5 text-[10px] leading-4 text-amber-700 dark:text-amber-400',
+          class: 'rounded-full border border-amber-600/50 px-1 text-[10px] leading-[11px] text-amber-700 dark:text-amber-400',
           title: t('Not registered on this server'),
           'data-test': 'user-unregistered',
         },
