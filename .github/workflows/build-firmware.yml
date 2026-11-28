@@ -140,6 +140,34 @@ jobs:
             || python3 -c "print('node is unavailable; skipping the syntax check')"
           ls -lh openwrt/dmrhub/files/usr/share/dmrhub/flash.js
 
+      # ---- Add traffic counters to the LuCI overview network box ----
+      - name: Add traffic counters to the LuCI overview
+        run: |
+          set -eu
+          cd "$GITHUB_WORKSPACE"
+          # Same feed and same rule as above: read the package list, take the
+          # view from the luci-mod-status package, patch it. The patch fails
+          # loudly when the view changed, so an upstream update cannot drop
+          # the counters without failing the build.
+          LUCI_FEED="https://downloads.openwrt.org/releases/${OP_VERSION}/packages/${OP_TARGET//\//_}/luci"
+          curl -fsSL --retry 3 "$LUCI_FEED/Packages.gz" -o /tmp/luci-Packages.gz
+          gunzip -f /tmp/luci-Packages.gz
+          STATUSPKG=$(awk '/^Package: luci-mod-status$/ {found=1} found && /^Filename:/ {print $2; exit}' /tmp/luci-Packages)
+          [ -n "$STATUSPKG" ] || { echo "luci-mod-status not found in the feed"; exit 1; }
+          echo "==> $LUCI_FEED/$STATUSPKG"
+          curl -fsSL --retry 3 "$LUCI_FEED/$STATUSPKG" -o /tmp/luci-mod-status.ipk
+          rm -rf /tmp/luci-status-ipk && mkdir -p /tmp/luci-status-ipk
+          tar -xzf /tmp/luci-mod-status.ipk -C /tmp/luci-status-ipk
+          mkdir -p /tmp/luci-status-data && tar -xzf /tmp/luci-status-ipk/data.tar.gz -C /tmp/luci-status-data
+          NETWORK=/tmp/luci-status-data/www/luci-static/resources/view/status/include/30_network.js
+          [ -f "$NETWORK" ] || { echo "30_network.js not found in luci-mod-status"; exit 1; }
+          python3 openwrt/dmrhub/files/usr/share/dmrhub/patch-luci-overview.py \
+            "$NETWORK" \
+            openwrt/dmrhub/files/usr/share/dmrhub/overview-network.js
+          node --check openwrt/dmrhub/files/usr/share/dmrhub/overview-network.js 2>/dev/null \
+            || python3 -c "print('node is unavailable; skipping the syntax check')"
+          ls -lh openwrt/dmrhub/files/usr/share/dmrhub/overview-network.js
+
       # ---- Build ipk package ----
       - name: Build ipk package
         run: |

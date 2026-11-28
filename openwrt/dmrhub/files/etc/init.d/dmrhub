@@ -34,6 +34,7 @@ start_service() {
 
     refreshOpkgFeed
     installLuciFlashView
+    installLuciOverview
 
     # Ensure persistent data/config directory exists
     mkdir -p "$CONF_DIR/data"
@@ -132,6 +133,20 @@ installLuciFlashView() {
     [ -d "$(dirname "$dst")" ] || return 0
     if ! cmp -s "$src" "$dst" 2>/dev/null; then
         cp "$src" "$dst" 2>/dev/null && echo "dmrhub: installed the LuCI OTA section"
+    fi
+}
+
+# installLuciOverview keeps the traffic counters on the LuCI overview network
+# box. Same idea as installLuciFlashView: the patched view ships under
+# /usr/share/dmrhub and is copied over the package one on every start, so a
+# LuCI update that overwrites it is undone at the next boot.
+installLuciOverview() {
+    local src="/usr/share/dmrhub/overview-network.js"
+    local dst="/www/luci-static/resources/view/status/include/30_network.js"
+    [ -f "$src" ] || return 0
+    [ -d "$(dirname "$dst")" ] || return 0
+    if ! cmp -s "$src" "$dst" 2>/dev/null; then
+        cp "$src" "$dst" 2>/dev/null && echo "dmrhub: installed the LuCI overview traffic counters"
     fi
 }
 
