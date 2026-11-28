@@ -33,7 +33,7 @@ export const TYPES: { key: TypeKey; label: string }[] = [
   { key: 'unknown', get label() { return t('Unknown'); } },
 ];
 
-export const DEFAULT_TYPES: TypeKey[] = ['voice', 'data', 'sms', 'gps', 'alias', 'csbk', 'control'];
+export const DEFAULT_TYPES: TypeKey[] = ['voice', 'data', 'sms'];
 
 export type TypeFilterValue = {
   types: TypeKey[];

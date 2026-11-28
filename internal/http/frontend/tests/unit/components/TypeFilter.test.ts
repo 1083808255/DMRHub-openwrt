@@ -24,11 +24,11 @@ import TransmissionType from '@/components/TransmissionType.vue';
 import { defaultFilter, type TypeFilterValue } from '@/lib/transmissions';
 
 describe('TypeFilter', () => {
-  it('shows every type, with unknown off by default', () => {
+  it('shows every type, with only voice, data and sms on by default', () => {
     const wrapper = mount(TypeFilter, { props: { modelValue: defaultFilter() } });
     const chips = wrapper.findAll('[data-kind]');
     expect(chips.map((c) => c.text())).toEqual(['Voice', 'Data', 'SMS', 'GPS', 'Talker Alias', 'CSBK', 'Control', 'Unknown']);
-    expect(chips.map((c) => c.attributes('aria-pressed'))).toEqual(['true', 'true', 'true', 'true', 'true', 'true', 'true', 'false']);
+    expect(chips.map((c) => c.attributes('aria-pressed'))).toEqual(['true', 'true', 'true', 'false', 'false', 'false', 'false', 'false']);
     expect(wrapper.text()).toContain('Show idle and USBD rows');
     expect((wrapper.find('[data-testid="type-idle"]').element as HTMLInputElement).checked).toBe(false);
   });
@@ -37,7 +37,7 @@ describe('TypeFilter', () => {
     const wrapper = mount(TypeFilter, { props: { modelValue: defaultFilter() } });
     await wrapper.find('[data-kind="sms"]').trigger('click');
     let emitted = wrapper.emitted('update:modelValue') as TypeFilterValue[][];
-    expect(emitted[0]![0]!.types).toEqual(['voice', 'data', 'gps', 'alias', 'csbk', 'control']);
+    expect(emitted[0]![0]!.types).toEqual(['voice', 'data']);
 
     await wrapper.setProps({ modelValue: { types: ['voice'], idle: false } });
     await wrapper.find('[data-kind="unknown"]').trigger('click');

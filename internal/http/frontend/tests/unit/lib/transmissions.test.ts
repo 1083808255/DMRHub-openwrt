@@ -244,15 +244,19 @@ describe('undeliverableView', () => {
 });
 
 describe('filters', () => {
-  it('hides unknown, idle and USBD by default', () => {
+  it('shows only voice, data and sms by default', () => {
     const f = defaultFilter();
     expect(matchesFilter(row({ kind: 'voice' }), f)).toBe(true);
     expect(matchesFilter(row({ kind: 'unknown' }), f)).toBe(false);
     expect(matchesFilter(row({ kind: 'idle' }), f)).toBe(false);
     expect(matchesFilter(row({ kind: 'usbd' }), f)).toBe(false);
-    expect(matchesFilter(row({ kind: 'mbc' }), f)).toBe(true);
-    expect(matchesFilter(row({ kind: 'idle' }), { ...f, idle: true })).toBe(true);
-    expect(filterQuery(f)).toBe('types=voice,data,sms,gps,alias,csbk,control');
+    expect(matchesFilter(row({ kind: 'gps' }), f)).toBe(false);
+    expect(matchesFilter(row({ kind: 'alias' }), f)).toBe(false);
+    expect(matchesFilter(row({ kind: 'csbk' }), f)).toBe(false);
+    expect(matchesFilter(row({ kind: 'mbc' }), f)).toBe(false);
+    expect(matchesFilter(row({ kind: 'idle' }), { ...f, idle: true })).toBe(false);
+    expect(matchesFilter(row({ kind: 'idle' }), { types: ['control'], idle: true })).toBe(true);
+    expect(filterQuery(f)).toBe('types=voice,data,sms');
     expect(filterQuery({ types: ['unknown'], idle: true })).toBe('types=unknown&idle=true');
   });
 });

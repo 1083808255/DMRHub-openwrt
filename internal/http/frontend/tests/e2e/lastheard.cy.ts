@@ -129,23 +129,28 @@ describe('Last Heard', () => {
     }).as('getLastHeard');
 
     cy.visit('/lastheard');
-    cy.wait('@getLastHeard').its('request.url').should('include', 'types=voice,data,sms,gps,alias,csbk,control');
+    cy.wait('@getLastHeard').its('request.url').should('include', 'types=voice,data,sms');
 
-    cy.get('[data-testid="type-badge"]').should('have.length', 4);
+    cy.get('[data-testid="type-badge"]').should('have.length', 3);
     cy.contains('[data-testid="type-badge"]', 'Voice').should('be.visible');
-    cy.contains('[data-testid="type-badge"]', 'CSBK').should('be.visible');
-    cy.contains('Radio Check').should('be.visible');
-    cy.contains('Motorola FID 0x10').should('be.visible');
     cy.contains('[data-testid="type-badge"]', 'SMS').should('be.visible');
     // An SMS shows its type badge only: the format, confirmation and size
     // details are intentionally left out of the column.
-    cy.get('[data-testid="type-badge"]').eq(2).parent().should('have.text', 'SMS');
+    cy.get('[data-testid="type-badge"]').eq(1).parent().should('have.text', 'SMS');
     cy.contains('ETSI IP · SAP IP (4)').should('not.exist');
     cy.contains('Confirmed, ACK').should('not.exist');
     cy.contains('[data-testid="type-badge"]', 'Data').should('be.visible');
 
+    // CSBK is off by default; turning it on reveals the row.
+    cy.contains('[data-testid="type-badge"]', 'CSBK').should('not.exist');
+    cy.get('[data-kind="csbk"]').should('have.attr', 'aria-pressed', 'false').click();
+    cy.wait('@getLastHeard').its('request.url').should('include', 'types=voice,data,sms,csbk');
+    cy.contains('[data-testid="type-badge"]', 'CSBK').should('be.visible');
+    cy.contains('Radio Check').should('be.visible');
+    cy.contains('Motorola FID 0x10').should('be.visible');
+
     cy.get('[data-kind="unknown"]').should('have.attr', 'aria-pressed', 'false').click();
-    cy.wait('@getLastHeard').its('request.url').should('include', 'types=voice,data,sms,gps,alias,csbk,control,unknown');
+    cy.wait('@getLastHeard').its('request.url').should('include', 'types=voice,data,sms,csbk,unknown');
 
     cy.get('[data-testid="type-idle"]').check();
     cy.wait('@getLastHeard').its('request.url').should('include', 'idle=true');
