@@ -476,6 +476,12 @@ cmd_firmware() {
 	fi
 	log "正在刷写固件，设备即将重启"
 	cmd_flash_guard
+	# Tell the next boot that it follows a flash, so dmrhub-db-protect removes
+	# the database copies of the previous build once the new one is healthy.
+	# Written after the snapshot above, so a failed snapshot still cancels the
+	# flash without leaving a marker that would delete anything.
+	: > "$VERSION_DIR/data/.ota-pending" 2>/dev/null || true
+	sync
 	# -k writes the list of the installed packages into the backup and -u
 	# skips the files that are the same as in /rom. Do NOT pass -p: it turns
 	# off the partition-table comparison, and the x86 platform then writes the

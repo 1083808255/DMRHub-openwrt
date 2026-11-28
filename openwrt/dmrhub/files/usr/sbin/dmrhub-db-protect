@@ -112,6 +112,37 @@ snapshot() {
 	return 0
 }
 
+# cleanup_after_ota - drop the database copies an earlier build left behind.
+# Called only on the first boot after a firmware OTA: the marker is written by
+# dmrhub-ota just before sysupgrade and survives the flash on the data
+# partition. Cleaning on every start would delete a copy the owner made by
+# hand, so the marker gates it.
+cleanup_after_ota() {
+	marker="$DATA_DIR/.ota-pending"
+	[ -f "$marker" ] || return 0
+	freed=0
+	remove() {
+		[ -e "$1" ] || return 0
+		_kb=$(du -sk "$1" 2>/dev/null | awk '{ print $1 }')
+		rm -f "$1" 2>/dev/null || return 0
+		freed=$((freed + ${_kb:-0}))
+	}
+	# Pre-update dumps and half-written snapshots: nothing reads them once the
+	# new build is up, and they are what fills the partition until the next OTA
+	# cannot snapshot at all. The quarantined damaged databases (DMRHub.db.bad-*)
+	# are left alone: they are evidence of a restore, not a stale copy.
+	for f in "$DATA_DIR"/DMRHub-pre-*.db "$DATA_DIR"/DMRHub-pre-*.db-wal \
+		"$DATA_DIR"/DMRHub-pre-*.db-shm "$GOOD".tmp.* "$GOOD".tmp.*-wal "$GOOD".tmp.*-shm; do
+		remove "$f"
+	done
+	rm -f "$marker"
+	sync
+	if [ "$freed" -gt 0 ]; then
+		log "已删除升级前的旧备份，释放 ${freed} KiB"
+	fi
+	return 0
+}
+
 restore_from_good() {
 	stamp="$(date +%Y%m%d%H%M%S)-$$"
 	if [ ! -f "$GOOD" ]; then
@@ -157,6 +188,7 @@ startup() {
 	fi
 	if db_ok "$DB"; then
 		snapshot || return 1
+		cleanup_after_ota
 		return 0
 	fi
 
@@ -164,11 +196,13 @@ startup() {
 	preserve_sidecars
 	if db_ok "$DB"; then
 		snapshot || return 1
+		cleanup_after_ota
 		return 0
 	fi
 
 	restore_from_good || return 1
 	snapshot || return 1
+	cleanup_after_ota
 	return 0
 }
 
