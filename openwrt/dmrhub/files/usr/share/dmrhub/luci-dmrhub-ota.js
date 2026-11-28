@@ -29,6 +29,49 @@ function dmrhubOtaNotify(text, kind) {
 	ui.addNotification(null, E('p', { 'class': kind === 'error' ? 'alert-message danger' : '' }, text));
 }
 
+/* dmrhubOtaDialog - a LuCI modal that stays up until the user closes it. The
+ * native confirm()/alert() render as a browser dialog that is easy to dismiss
+ * by reflex and cannot be scrolled, so the confirmation and the failure report
+ * both use this instead. */
+function dmrhubOtaDialog(title, children, kind) {
+	var close = E('button', {
+		'type': 'button',
+		'class': 'btn cbi-button cbi-button-action',
+		'click': function () { ui.hideModal(); }
+	}, ['关闭']);
+	ui.showModal(title, [
+		E('div', { 'class': kind === 'error' ? 'alert-message danger' : '' }, children),
+		E('div', { 'class': 'button-row' }, [close])
+	]);
+}
+
+/* dmrhubOtaReason - the failure cause out of the job log. dmrhub-ota writes
+ * its errors as "... 错误：<reason>", so the last such line is the reason; when
+ * the job died without one, the last line is the closest thing to it. */
+function dmrhubOtaReason(log) {
+	var lines = String(log || '').split('\n').map(function (l) { return l.trim(); })
+		.filter(function (l) { return l; });
+	for (var i = lines.length - 1; i >= 0; i--) {
+		var at = lines[i].indexOf('错误：');
+		if (at >= 0) return lines[i].slice(at + 3).trim();
+	}
+	return lines.length ? lines[lines.length - 1] : '未知原因（任务没有留下日志）';
+}
+
+/* dmrhubOtaFail - report a failed update with its reason, and keep the whole
+ * log below it so the cause is not lost when the reason line is terse. */
+function dmrhubOtaFail(kind, log) {
+	var label = kind === 'firmware' ? '固件' : '应用';
+	dmrhubOtaDialog(label + '更新失败', [
+		E('p', {}, [label + '更新未完成：' + dmrhubOtaReason(log)]),
+		E('pre', {
+			'style': 'max-height:16em;overflow:auto;white-space:pre-wrap;font-size:.85em'
+		}, [String(log || '（无日志）')]),
+		E('p', { 'class': 'cbi-section-descr' },
+			['设备未被改动。修复上述原因后可以重新点击更新按钮。'])
+	], 'error');
+}
+
 /* dmrhubOtaCall - short synchronous call (status check / job control). */
 function dmrhubOtaCall(args) {
 	return fs.exec(DMRHUB_OTA_SCRIPT, args).then(function (res) {
@@ -68,11 +111,55 @@ function dmrhubFactoryReset() {
 	});
 }
 
+/* dmrhubOtaConfirm - a LuCI modal that resolves true on confirm and false on
+ * cancel. The native confirm() cannot show the download size, the reboot
+ * warning or the "keep the database" note, and it looks nothing like the rest
+ * of the page, so the two update buttons ask through this instead. */
+function dmrhubOtaConfirm(title, children) {
+	return new Promise(function (resolve) {
+		function finish(answer) {
+			document.removeEventListener('keydown', onKey, true);
+			ui.hideModal();
+			resolve(answer);
+		}
+		/* LuCI's own Escape handler clicks the first button it finds in the
+		 * dialog, which here is "继续": pressing Escape would start the update.
+		 * Intercept it in the capture phase and treat it as a cancel. */
+		function onKey(ev) {
+			if (ev.key !== 'Escape') return;
+			ev.preventDefault();
+			ev.stopPropagation();
+			finish(false);
+		}
+		document.addEventListener('keydown', onKey, true);
+		ui.showModal(title, [
+			E('div', {}, children),
+			E('div', { 'class': 'button-row' }, [
+				E('button', {
+					'type': 'button',
+					'class': 'btn cbi-button cbi-button-action important',
+					'click': function () { finish(true); }
+				}, ['继续']),
+				' ',
+				E('button', {
+					'type': 'button',
+					'class': 'btn cbi-button',
+					'click': function () { finish(false); }
+				}, ['取消'])
+			])
+		]);
+	});
+}
+
 /* dmrhubOtaPoll - follow a background job until it finishes, updating a
  * notification with the last log line. Firmware flashes reboot the box, so a
  * lost connection during polling is treated as success. */
 function dmrhubOtaPoll(kind) {
-	var notice = ui.addNotification(null, E('p', {}, '正在启动更新…'));
+	/* addNotification wraps the node it is given in its own container, so keep a
+	 * reference to this paragraph: writing to the container's .data would be a
+	 * silent no-op and the progress line would never change. */
+	var line = E('p', {}, '正在启动更新…');
+	ui.addNotification(null, line);
 	var ticks = 0;
 
 	function step() {
@@ -92,11 +179,10 @@ function dmrhubOtaPoll(kind) {
 			var lines = (info.log || '').split('\n').filter(function (l) { return l.trim(); });
 			var last = lines.length ? lines[lines.length - 1] : '';
 			var label = (kind === 'firmware' ? '固件' : '应用') + '更新：' + last;
-			if (notice.firstChild) notice.firstChild.data = label;
+			line.data = label;
 
 			if (state === 'done') {
-				if (notice.firstChild) notice.firstChild.data =
-					(kind === 'firmware' ? '固件' : '应用') + '更新完成，设备即将重启或服务已重启。';
+				line.data = (kind === 'firmware' ? '固件' : '应用') + '更新完成，设备即将重启或服务已重启。';
 				if (kind === 'firmware') {
 					ui.showModal('正在刷写…', [
 						E('p', { 'class': 'spinning' },
@@ -107,8 +193,8 @@ function dmrhubOtaPoll(kind) {
 				return;
 			}
 			if (state === 'failed') {
-				if (notice.firstChild) notice.firstChild.data = '更新失败：\n' + (info.log || '');
-				notice.className = 'alert-message danger';
+				line.data = '更新失败，原因见弹窗。';
+				dmrhubOtaFail(kind, info.log || '');
 				return;
 			}
 			if (!res.ok && state === 'unknown') {
@@ -124,7 +210,7 @@ function dmrhubOtaPoll(kind) {
 			}
 			ticks++;
 			if (ticks > 180) { // ~6 minutes at 2s, give up polling
-				if (notice.firstChild) notice.firstChild.data = '更新仍在进行中，请稍后手动刷新页面查看结果。';
+				line.data = '更新仍在进行中，请稍后手动刷新页面查看结果。';
 				return;
 			}
 			return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(step);
@@ -151,36 +237,55 @@ function handleDmrhubOtaCheck(ev) {
 		} catch (e) {
 			/* Keep the raw output when it is not JSON. */
 		}
-		dmrhubOtaNotify(text, res.ok ? 'info' : 'error');
+		if (!res.ok) {
+			dmrhubOtaDialog('检查更新失败', [
+				E('p', {}, ['无法获取版本信息：' + dmrhubOtaReason(res.text)]),
+				E('pre', {
+					'style': 'max-height:16em;overflow:auto;white-space:pre-wrap;font-size:.85em'
+				}, [res.text || '（无输出）'])
+			], 'error');
+			return;
+		}
+		dmrhubOtaNotify(text, 'info');
 	});
 }
 
 /* handleDmrhubOtaApp starts the application update in the background. */
 function handleDmrhubOtaApp(ev) {
-	return dmrhubOtaCall(['job', 'start', 'app']).then(function (res) {
-		if (!res.ok) {
-			dmrhubOtaNotify('无法启动应用更新：\n' + res.text, 'error');
-			return;
-		}
-		dmrhubOtaNotify('应用更新已在后台启动。', 'info');
-		return dmrhubOtaPoll('app');
+	return dmrhubOtaConfirm('更新 DMRHub 应用', [
+		E('p', {}, ['将下载并安装最新的 DMRHub 应用程序包。']),
+		E('p', {}, ['数据库与设置保存在数据分区上，更新不会改动它们；更新完成后服务会自动重启。'])
+	]).then(function (ok) {
+		if (!ok) return;
+		return dmrhubOtaCall(['job', 'start', 'app']).then(function (res) {
+			if (!res.ok) {
+				dmrhubOtaFail('app', res.text);
+				return;
+			}
+			dmrhubOtaNotify('应用更新已在后台启动。', 'info');
+			return dmrhubOtaPoll('app');
+		});
 	});
 }
 
 /* handleDmrhubOtaFirmware flashes the whole firmware image in the background. */
 function handleDmrhubOtaFirmware(ev) {
-	if (!confirm('刷写固件会重启设备，是否继续？')) {
-		return Promise.resolve();
-	}
-	/* --yes is required: the detached runner has no stdin to answer cmd_firmware's
-	 * interactive "type yes" prompt. The confirm() above is the user's consent. */
-	return dmrhubOtaCall(['job', 'start', 'firmware', '--yes']).then(function (res) {
-		if (!res.ok) {
-			dmrhubOtaNotify('无法启动固件更新：\n' + res.text, 'error');
-			return;
-		}
-		dmrhubOtaNotify('固件下载与刷写已在后台启动。', 'info');
-		return dmrhubOtaPoll('firmware');
+	return dmrhubOtaConfirm('刷写 DMRHub 固件', [
+		E('p', {}, ['将下载最新的固件镜像并刷写整机，完成后设备会重启。']),
+		E('p', {}, ['刷写过程中请勿断电。数据库保存在数据分区上，正常刷写不会清除它。'])
+	]).then(function (ok) {
+		if (!ok) return;
+		/* --yes is required: the detached runner has no stdin to answer
+		 * cmd_firmware's interactive "type yes" prompt. The dialog above is the
+		 * user's consent. */
+		return dmrhubOtaCall(['job', 'start', 'firmware', '--yes']).then(function (res) {
+			if (!res.ok) {
+				dmrhubOtaFail('firmware', res.text);
+				return;
+			}
+			dmrhubOtaNotify('固件下载与刷写已在后台启动。', 'info');
+			return dmrhubOtaPoll('firmware');
+		});
 	});
 }
 
