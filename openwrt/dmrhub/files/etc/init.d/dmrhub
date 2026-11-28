@@ -140,11 +140,19 @@ installLuciFlashView() {
 # box. Same idea as installLuciFlashView: the patched view ships under
 # /usr/share/dmrhub and is copied over the package one on every start, so a
 # LuCI update that overwrites it is undone at the next boot.
+#
+# It goes under a different file name and the upstream 30_network.js is
+# removed. The overview picks up every include in that directory, and the
+# resource URL of 30_network.js keeps the same ?v= stamp across firmware
+# builds (same LuCI package), so a browser that has seen the old module keeps
+# using its cached copy and never shows the counters. A new name is a new URL.
 installLuciOverview() {
     local src="/usr/share/dmrhub/overview-network.js"
-    local dst="/www/luci-static/resources/view/status/include/30_network.js"
+    local dir="/www/luci-static/resources/view/status/include"
+    local dst="$dir/31_dmrhub_network.js"
     [ -f "$src" ] || return 0
-    [ -d "$(dirname "$dst")" ] || return 0
+    [ -d "$dir" ] || return 0
+    rm -f "$dir/30_network.js"
     if ! cmp -s "$src" "$dst" 2>/dev/null; then
         cp "$src" "$dst" 2>/dev/null && echo "dmrhub: installed the LuCI overview traffic counters"
     fi
