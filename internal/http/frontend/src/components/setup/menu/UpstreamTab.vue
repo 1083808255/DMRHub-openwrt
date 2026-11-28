@@ -81,7 +81,18 @@
               class="text-sm font-semibold"
               :class="locked ? 'cursor-not-allowed' : 'cursor-pointer'"
             >{{ n.enabled ? $t('On') : $t('Off') }}</label>
-            <b class="text-sm">{{ n.name || $t('Unnamed network') }}</b>
+            <button
+              type="button"
+              class="flex items-center gap-1 text-sm"
+              :aria-expanded="isOpen(i)"
+              :aria-controls="`upstream-network-body-${i}`"
+              :data-test="`upstream-network-toggle-${i}`"
+              @click="toggleOpen(i)"
+            >
+              <ChevronDown v-if="isOpen(i)" class="size-4" />
+              <ChevronRight v-else class="size-4" />
+              <b class="text-sm">{{ n.name || $t('Unnamed network') }}</b>
+            </button>
             <span
               class="rounded-full border px-2 text-xs leading-5"
               :class="n.enabled ? 'border-green-600/50 text-green-700 dark:text-green-400' : 'text-muted-foreground'"
@@ -93,7 +104,12 @@
           <p v-if="!n.enabled" class="mb-3 text-sm text-muted-foreground">
             {{ $t('This network is off. Nothing is sent to it or received from it until this is on.') }}
           </p>
-          <div class="space-y-2">
+          <div
+            v-show="isOpen(i)"
+            :id="`upstream-network-body-${i}`"
+            class="space-y-2"
+            :data-test="`upstream-network-body-${i}`"
+          >
             <!-- Row 1: the network name alone, so it reads as the title. -->
             <div class="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
               <label class="block text-sm">
@@ -306,7 +322,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { Eye, EyeOff } from 'lucide-vue-next';
+import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-vue-next';
 import SettingNote from '@/components/setup/SettingNote.vue';
 import SourceChips from '@/components/setup/menu/SourceChips.vue';
 import { Button as ShadButton } from '@/components/ui/button';
@@ -425,10 +441,26 @@ const toggleShown = (i: number, typed: string) => {
   }
   shown.value = next;
 };
+// open holds the indexes of the networks whose fields are showing. A network
+// card is one long form, so the list starts folded: the headers show which
+// networks exist and whether they are up, and a card opens when it is edited.
+const open = ref(new Set<number>());
+const isOpen = (i: number): boolean => open.value.has(i);
+const toggleOpen = (i: number) => {
+  const next = new Set(open.value);
+  if (next.has(i)) next.delete(i);
+  else next.add(i);
+  open.value = next;
+};
+
 const addNetwork = () => {
   if (value.value.networks.length >= MAX_NETWORKS) {
     return;
   }
+  // A network just added has nothing in it yet, so it opens straight away:
+  // a collapsed empty card would look like the button did nothing.
+  const at = value.value.networks.length;
+  open.value = new Set(open.value).add(at);
   commit({ ...value.value, networks: [...value.value.networks, emptyUpstreamNetwork()] });
 };
 const removeNetwork = (i: number) => {
@@ -455,6 +487,7 @@ const removeNetwork = (i: number) => {
   };
   shown.value = shift(shown.value);
   reading.value = shift(reading.value);
+  open.value = shift(open.value);
   commit({ ...value.value, networks: value.value.networks.filter((_, j) => j !== i) });
 };
 const setRewrite = (i: number, key: keyof UpstreamRewriteRow, v: unknown) =>

@@ -182,6 +182,37 @@ describe('UpstreamTab per-network switch', () => {
     expect(inputsAt).toBeLessThan(stateAt);
     wrapper.unmount();
   });
+
+  it('starts folded and opens one network at a time from its header', async () => {
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    const body = (i: number) => wrapper.find(`[data-test="upstream-network-body-${i}"]`);
+    const toggle = (i: number) => wrapper.find(`[data-test="upstream-network-toggle-${i}"]`);
+
+    expect(body(0).isVisible()).toBe(false);
+    expect(toggle(0).attributes('aria-expanded')).toBe('false');
+
+    await toggle(0).trigger('click');
+    expect(body(0).isVisible()).toBe(true);
+    expect(toggle(0).attributes('aria-expanded')).toBe('true');
+    expect(body(1).isVisible()).toBe(false);
+
+    await toggle(1).trigger('click');
+    expect(body(1).isVisible()).toBe(true);
+    expect(body(0).isVisible()).toBe(true);
+
+    await toggle(0).trigger('click');
+    expect(body(0).isVisible()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('opens a network it just added, so the new card is not empty', async () => {
+    const wrapper = await mountTab({ enabled: true, networks: networks(), rewrites: [] });
+    await wrapper.find('[data-test="upstream-network-add"]').trigger('click');
+    const value = lastSet(wrapper);
+    await wrapper.setProps({ value: { enabled: true, networks: value.networks, rewrites: [] } });
+    expect(wrapper.find('[data-test="upstream-network-body-2"]').isVisible()).toBe(true);
+    wrapper.unmount();
+  });
 });
 
 describe('UpstreamTab password field', () => {
