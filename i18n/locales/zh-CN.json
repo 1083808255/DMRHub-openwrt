@@ -1007,6 +1007,7 @@
   "OpenBridge version 1": "OpenBridge 版本 1",
   "Optional:": "可选：",
   "Optional second list that only fills the IDs the primary list misses, such as the dmrid.dat of radiowo.com when the primary list is RadioID.net.": "可选的第二个列表，只补充主列表没有的 ID。主列表用 RadioID.net 时，这里可以填 radiowo.com 的 dmrid.dat。",
+  "Options": "选项",
   "Options text": "Options 文本",
   "Or enter this key:": "或输入此密钥：",
   "Origins of the pages that may connect, one for each line, such as https://radio.example.org. Empty allows every page.": "允许连接的页面来源，每行一个，例如 https://radio.example.org。留空表示允许所有页面。",

@@ -1007,6 +1007,7 @@
   "OpenBridge version 1": "OpenBridge version 1",
   "Optional:": "Optional:",
   "Optional second list that only fills the IDs the primary list misses, such as the dmrid.dat of radiowo.com when the primary list is RadioID.net.": "Optional second list that only fills the IDs the primary list misses, such as the dmrid.dat of radiowo.com when the primary list is RadioID.net.",
+  "Options": "Options",
   "Options text": "Options text",
   "Or enter this key:": "Or enter this key:",
   "Origins of the pages that may connect, one for each line, such as https://radio.example.org. Empty allows every page.": "Origins of the pages that may connect, one for each line, such as https://radio.example.org. Empty allows every page.",

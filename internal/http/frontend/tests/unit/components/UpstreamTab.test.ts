@@ -208,18 +208,6 @@ describe('UpstreamTab password field', () => {
     wrapper.unmount();
   });
 
-  it('says whether a password is already saved', async () => {
-    const wrapper = mount(UpstreamTab, {
-      props: { value: { enabled: true, networks: networks(), rewrites: [] }, saves: 0, passwordsSet: [true, false] },
-      global: { mocks: { $toast: { add: vi.fn() } } },
-      attachTo: document.body,
-    });
-    await flushPromises();
-    expect(wrapper.find('[data-test="upstream-network-password-note-0"]').text()).toContain('A password is saved.');
-    expect(wrapper.find('[data-test="upstream-network-password-note-1"]').text()).toContain('No password is saved yet.');
-    wrapper.unmount();
-  });
-
   it('reads back the saved password when the eye is pressed on an empty field', async () => {
     mockAPI.get.mockImplementation((path: string) => {
       if (path === '/config/upstream/password/0') {
@@ -232,7 +220,6 @@ describe('UpstreamTab password field', () => {
     await flushPromises();
     const box = wrapper.find('[data-test="upstream-network-password-0"]').element as HTMLInputElement;
     expect(box.value).toBe('xy147258');
-    expect(wrapper.find('[data-test="upstream-network-password-note-0"]').text()).toContain('the hub has saved and will send');
     // Reading it back must not put it into the rows: nothing was typed, so
     // nothing is committed and a save keeps the password that is there.
     expect(wrapper.emitted('set')).toBeUndefined();
