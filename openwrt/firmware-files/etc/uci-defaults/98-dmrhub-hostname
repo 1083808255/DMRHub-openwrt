@@ -1,0 +1,6 @@
+#!/bin/sh
+# The image ships OpenWrt's default hostname. A DMRHub box should introduce
+# itself as DMRHub on the network, so set it once here.
+
+uci -q set system.@system[0].hostname='DMRHub'
+uci -q commit system
