@@ -102,7 +102,7 @@
               </label>
             </div>
             <!-- Row 2: who logs in. The boxes keep their own width and sit next
-                 to each other; the password is half again as wide. -->
+                 to each other, packed to the left. -->
             <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Callsign') }}</span>
@@ -114,7 +114,7 @@
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Password') }}</span>
-                <div class="relative w-64">
+                <div class="relative w-44">
                   <ShadInput
                     :type="shown.has(i) ? 'text' : 'password'"
                     class="pr-10"
@@ -160,12 +160,12 @@
                 </div>
               </label>
             </div>
-            <!-- Row 4: radio settings. The slots list is half again as wide as
+            <!-- Row 4: radio settings. The slots list is a little wider than
                  the color code, and the frequencies follow it. -->
             <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Color code') }}</span>
-                <div class="w-44">
+                <div class="w-24">
                   <select :class="boxClass" :value="String(n.colorCode)" :disabled="locked" :aria-label="$t('Color code of network {n}', { n: i + 1 })" :data-test="`upstream-network-color-${i}`" @change="(e: Event) => setNetwork(i, 'colorCode', (e.target as HTMLSelectElement).value)">
                     <option v-for="cc in 16" :key="cc" :value="String(cc - 1)">{{ cc - 1 }}</option>
                   </select>
@@ -173,7 +173,7 @@
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Slots') }}</span>
-                <div class="w-64">
+                <div class="w-32">
                   <select :class="boxClass" :value="String(n.slots)" :disabled="locked" :aria-label="$t('Slots of network {n}', { n: i + 1 })" :data-test="`upstream-network-slots-${i}`" @change="(e: Event) => setNetwork(i, 'slots', (e.target as HTMLSelectElement).value)">
                     <option value="1">1</option>
                     <option value="2">2</option>
@@ -184,11 +184,11 @@
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Receive frequency (Hz)') }}</span>
-                <ShadInput class="w-44" :model-value="String(n.rxFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Receive frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-rx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'rxFrequency', v)" />
+                <ShadInput class="w-28" :model-value="String(n.rxFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Receive frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-rx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'rxFrequency', v)" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Transmit frequency (Hz)') }}</span>
-                <ShadInput class="w-44" :model-value="String(n.txFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Transmit frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-tx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'txFrequency', v)" />
+                <ShadInput class="w-28" :model-value="String(n.txFrequency)" :disabled="locked" inputmode="numeric" :aria-label="$t('Transmit frequency of network {n}', { n: i + 1 })" :data-test="`upstream-network-tx-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'txFrequency', v)" />
               </label>
             </div>
             <!-- Row 5: where the repeater is. Longitude and latitude sit
@@ -196,11 +196,11 @@
             <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Longitude') }}</span>
-                <ShadInput class="w-44" :model-value="n.longitude" :disabled="locked" placeholder="+106.5900" :aria-label="$t('Longitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-longitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'longitude', String(v))" />
+                <ShadInput class="w-28" :model-value="n.longitude" :disabled="locked" placeholder="+106.5900" :aria-label="$t('Longitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-longitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'longitude', String(v))" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Latitude') }}</span>
-                <ShadInput class="w-44" :model-value="n.latitude" :disabled="locked" placeholder="+29.6800" :aria-label="$t('Latitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-latitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'latitude', String(v))" />
+                <ShadInput class="w-28" :model-value="n.latitude" :disabled="locked" placeholder="+29.6800" :aria-label="$t('Latitude of network {n}', { n: i + 1 })" :data-test="`upstream-network-latitude-${i}`" @update:model-value="(v: string | number) => setNetwork(i, 'latitude', String(v))" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium">{{ $t('Location') }}</span>
